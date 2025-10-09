@@ -1,0 +1,25 @@
+# Bloquear execução de arquivos PHP
+<Files "*.php">
+    Order Deny,Allow
+    Deny from all
+</Files>
+
+# Bloquear arquivos executáveis perigosos
+<FilesMatch "\.(php|php3|php4|php5|phtml|pl|py|jsp|asp|sh|cgi)$">
+    Order Deny,Allow
+    Deny from all
+</FilesMatch>
+
+# Permitir apenas imagens
+<FilesMatch "\.(jpg|jpeg|png|gif)$">
+    Order Allow,Deny
+    Allow from all
+</FilesMatch>
+
+# Desabilitar listagem de diretórios
+Options -Indexes
+
+# Proteção adicional contra uploads maliciosos
+RewriteEngine On
+RewriteCond %{REQUEST_FILENAME} \.(php|php3|php4|php5|phtml|pl|py|jsp|asp|sh|cgi)$ [NC]
+RewriteRule .* - [F,L]

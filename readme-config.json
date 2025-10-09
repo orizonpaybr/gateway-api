@@ -1,0 +1,213 @@
+{
+  "name": "PlayGame Gateway API",
+  "version": "1.0.0",
+  "description": "Gateway de Pagamentos PIX - Solução completa para integração de pagamentos instantâneos",
+  "baseUrl": "https://playgameoficial.com.br/api",
+  "authentication": {
+    "type": "bearer",
+    "in": "header"
+  },
+  "headers": {
+    "Content-Type": "application/json",
+    "Accept": "application/json"
+  },
+  "endpoints": [
+    {
+      "name": "PIX IN - Criar Depósito",
+      "method": "POST",
+      "path": "/wallet/deposit/payment",
+      "description": "Cria uma transação de depósito PIX e retorna o QR Code para pagamento",
+      "parameters": [
+        {
+          "name": "token",
+          "type": "string",
+          "required": true,
+          "description": "Token de autenticação"
+        },
+        {
+          "name": "secret",
+          "type": "string",
+          "required": true,
+          "description": "Chave secreta"
+        },
+        {
+          "name": "amount",
+          "type": "decimal",
+          "required": true,
+          "description": "Valor do depósito (mín: R$ 1,00)"
+        },
+        {
+          "name": "client_name",
+          "type": "string",
+          "required": true,
+          "description": "Nome do cliente"
+        },
+        {
+          "name": "client_email",
+          "type": "string",
+          "required": true,
+          "description": "Email do cliente"
+        },
+        {
+          "name": "client_document",
+          "type": "string",
+          "required": true,
+          "description": "CPF/CNPJ do cliente"
+        },
+        {
+          "name": "client_telefone",
+          "type": "string",
+          "required": false,
+          "description": "Telefone do cliente"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "required": false,
+          "description": "Descrição da transação"
+        },
+        {
+          "name": "split_email",
+          "type": "string",
+          "required": false,
+          "description": "Email do destinatário do split"
+        },
+        {
+          "name": "split_percentage",
+          "type": "decimal",
+          "required": false,
+          "description": "Percentual do split (0-100)"
+        }
+      ]
+    },
+    {
+      "name": "PIX OUT - Criar Saque",
+      "method": "POST",
+      "path": "/pixout",
+      "description": "Processa um saque PIX para a conta do cliente",
+      "parameters": [
+        {
+          "name": "token",
+          "type": "string",
+          "required": true,
+          "description": "Token de autenticação"
+        },
+        {
+          "name": "secret",
+          "type": "string",
+          "required": true,
+          "description": "Chave secreta"
+        },
+        {
+          "name": "amount",
+          "type": "decimal",
+          "required": true,
+          "description": "Valor do saque"
+        },
+        {
+          "name": "pixKey",
+          "type": "string",
+          "required": true,
+          "description": "Chave PIX de destino"
+        },
+        {
+          "name": "pixKeyType",
+          "type": "string",
+          "required": true,
+          "description": "Tipo da chave: cpf, cnpj, email, phone, random"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "required": false,
+          "description": "Descrição da transação"
+        }
+      ]
+    },
+    {
+      "name": "Status da Transação",
+      "method": "POST",
+      "path": "/status",
+      "description": "Consulta o status de uma transação específica",
+      "parameters": [
+        {
+          "name": "idTransaction",
+          "type": "string",
+          "required": true,
+          "description": "ID da transação"
+        }
+      ]
+    }
+  ],
+  "webhooks": [
+    {
+      "name": "PIX IN - Depósito Pago",
+      "description": "Enviado quando um depósito PIX é confirmado",
+      "payload": {
+        "idTransaction": "string",
+        "status": "string",
+        "typeTransaction": "string",
+        "amount": "decimal",
+        "debtor_name": "string",
+        "email": "string",
+        "debtor_document_number": "string",
+        "phone": "string",
+        "created_at": "datetime",
+        "paid_at": "datetime",
+        "split_processed": "boolean",
+        "split_amount": "decimal",
+        "split_recipient": "string"
+      }
+    },
+    {
+      "name": "PIX OUT - Saque Processado",
+      "description": "Enviado quando um saque PIX é processado",
+      "payload": {
+        "idTransaction": "string",
+        "status": "string",
+        "typeTransaction": "string",
+        "amount": "decimal",
+        "pixKey": "string",
+        "externalId": "string",
+        "created_at": "datetime",
+        "completed_at": "datetime"
+      }
+    }
+  ],
+  "errorCodes": [
+    {
+      "code": 400,
+      "description": "Dados inválidos"
+    },
+    {
+      "code": 401,
+      "description": "Não autorizado"
+    },
+    {
+      "code": 403,
+      "description": "IP não autorizado"
+    },
+    {
+      "code": 404,
+      "description": "Transação não encontrada"
+    },
+    {
+      "code": 500,
+      "description": "Erro interno do servidor"
+    }
+  ],
+  "examples": {
+    "javascript": {
+      "name": "JavaScript (Node.js)",
+      "code": "const axios = require('axios');\n\nasync function criarDeposito(dados) {\n  try {\n    const response = await axios.post('https://playgameoficial.com.br/api/wallet/deposit/payment', {\n      token: 'seu_token',\n      secret: 'sua_chave',\n      amount: dados.valor,\n      client_name: dados.nome,\n      client_email: dados.email,\n      client_document: dados.cpf\n    });\n    \n    return response.data;\n  } catch (error) {\n    console.error('Erro ao criar depósito:', error.response.data);\n  }\n}"
+    },
+    "php": {
+      "name": "PHP",
+      "code": "<?php\nfunction criarDeposito($dados) {\n    $url = 'https://playgameoficial.com.br/api/wallet/deposit/payment';\n    \n    $payload = [\n        'token' => 'seu_token',\n        'secret' => 'sua_chave',\n        'amount' => $dados['valor'],\n        'client_name' => $dados['nome'],\n        'client_email' => $dados['email'],\n        'client_document' => $dados['cpf']\n    ];\n    \n    $ch = curl_init();\n    curl_setopt($ch, CURLOPT_URL, $url);\n    curl_setopt($ch, CURLOPT_POST, true);\n    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));\n    curl_setopt($ch, CURLOPT_HTTPHEADER, [\n        'Content-Type: application/json'\n    ]);\n    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);\n    \n    $response = curl_exec($ch);\n    curl_close($ch);\n    \n    return json_decode($response, true);\n}\n?>"
+    },
+    "python": {
+      "name": "Python",
+      "code": "import requests\nimport json\n\ndef criar_deposito(dados):\n    url = 'https://playgameoficial.com.br/api/wallet/deposit/payment'\n    \n    payload = {\n        'token': 'seu_token',\n        'secret': 'sua_chave',\n        'amount': dados['valor'],\n        'client_name': dados['nome'],\n        'client_email': dados['email'],\n        'client_document': dados['cpf']\n    }\n    \n    response = requests.post(url, json=payload)\n    return response.json()"
+    }
+  }
+}

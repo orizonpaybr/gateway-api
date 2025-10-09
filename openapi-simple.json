@@ -1,0 +1,485 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "PlayGame Gateway API",
+    "description": "Gateway de Pagamentos PIX - Solução completa para integração de pagamentos instantâneos",
+    "version": "1.0.0",
+    "contact": {
+      "name": "PlayGame Gateway",
+      "email": "suporte@playgameoficial.com.br"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://playgameoficial.com.br/api",
+      "description": "Servidor de Produção"
+    }
+  ],
+  "paths": {
+    "/wallet/deposit/payment": {
+      "post": {
+        "summary": "Gerar QR Code PIX",
+        "description": "Cria uma transação de depósito PIX e retorna o QR Code para pagamento",
+        "tags": ["PIX"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["token", "secret", "amount", "client_name", "client_email", "client_document"],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "description": "Token de autenticação",
+                    "example": "seu_token_aqui"
+                  },
+                  "secret": {
+                    "type": "string",
+                    "description": "Chave secreta",
+                    "example": "sua_chave_secreta"
+                  },
+                  "amount": {
+                    "type": "number",
+                    "format": "decimal",
+                    "minimum": 1.00,
+                    "maximum": 50000.00,
+                    "description": "Valor do depósito em reais",
+                    "example": 100.00
+                  },
+                  "client_name": {
+                    "type": "string",
+                    "description": "Nome do cliente",
+                    "example": "João Silva"
+                  },
+                  "client_email": {
+                    "type": "string",
+                    "format": "email",
+                    "description": "Email do cliente",
+                    "example": "joao@email.com"
+                  },
+                  "client_document": {
+                    "type": "string",
+                    "description": "CPF/CNPJ do cliente",
+                    "example": "12345678901"
+                  },
+                  "client_telefone": {
+                    "type": "string",
+                    "description": "Telefone do cliente",
+                    "example": "11999999999"
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "Descrição da transação",
+                    "example": "Depósito via PIX"
+                  },
+                  "split_email": {
+                    "type": "string",
+                    "format": "email",
+                    "description": "Email do destinatário do split",
+                    "example": "parceiro@email.com"
+                  },
+                  "split_percentage": {
+                    "type": "number",
+                    "format": "decimal",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "Percentual do split",
+                    "example": 10.0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "idTransaction": {
+                          "type": "string",
+                          "description": "ID único da transação",
+                          "example": "dep_1234567890"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["pending", "paid", "failed", "cancelled"],
+                          "example": "pending"
+                        },
+                        "amount": {
+                          "type": "number",
+                          "format": "decimal",
+                          "example": 100.00
+                        },
+                        "qr_code": {
+                          "type": "string",
+                          "description": "QR Code em base64",
+                          "example": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA..."
+                        },
+                        "qr_code_text": {
+                          "type": "string",
+                          "description": "Código PIX para copiar e colar",
+                          "example": "00020126580014br.gov.bcb.pix..."
+                        },
+                        "expires_at": {
+                          "type": "string",
+                          "format": "date-time",
+                          "example": "2025-01-15T15:30:00Z"
+                        },
+                        "created_at": {
+                          "type": "string",
+                          "format": "date-time",
+                          "example": "2025-01-15T15:00:00Z"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Dados inválidos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Dados inválidos"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Não autorizado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Não autorizado"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Erro interno do servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Erro interno do servidor"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/pixout": {
+      "post": {
+        "summary": "Fazer um Pagamento PIX",
+        "description": "Processa um saque PIX para a conta do cliente",
+        "tags": ["PIX"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["token", "secret", "amount", "pixKey", "pixKeyType"],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "description": "Token de autenticação",
+                    "example": "seu_token_aqui"
+                  },
+                  "secret": {
+                    "type": "string",
+                    "description": "Chave secreta",
+                    "example": "sua_chave_secreta"
+                  },
+                  "amount": {
+                    "type": "number",
+                    "format": "decimal",
+                    "minimum": 10.00,
+                    "maximum": 20000.00,
+                    "description": "Valor do saque em reais",
+                    "example": 50.00
+                  },
+                  "pixKey": {
+                    "type": "string",
+                    "description": "Chave PIX de destino",
+                    "example": "11999999999"
+                  },
+                  "pixKeyType": {
+                    "type": "string",
+                    "enum": ["cpf", "cnpj", "email", "phone", "random"],
+                    "description": "Tipo da chave PIX",
+                    "example": "phone"
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "Descrição da transação",
+                    "example": "Saque via PIX"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "idTransaction": {
+                          "type": "string",
+                          "description": "ID único da transação",
+                          "example": "out_1234567890"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["processing", "completed", "failed", "cancelled"],
+                          "example": "processing"
+                        },
+                        "amount": {
+                          "type": "number",
+                          "format": "decimal",
+                          "example": 50.00
+                        },
+                        "pixKey": {
+                          "type": "string",
+                          "example": "11999999999"
+                        },
+                        "created_at": {
+                          "type": "string",
+                          "format": "date-time",
+                          "example": "2025-01-15T15:00:00Z"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Dados inválidos"
+          },
+          "401": {
+            "description": "Não autorizado"
+          },
+          "403": {
+            "description": "IP não autorizado"
+          },
+          "500": {
+            "description": "Erro interno do servidor"
+          }
+        }
+      }
+    },
+    "/status": {
+      "post": {
+        "summary": "Consultar Transação",
+        "description": "Consulta o status de uma transação específica",
+        "tags": ["PIX"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["idTransaction"],
+                "properties": {
+                  "idTransaction": {
+                    "type": "string",
+                    "description": "ID da transação",
+                    "example": "dep_1234567890"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "idTransaction": {
+                          "type": "string",
+                          "example": "dep_1234567890"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["pending", "paid", "processing", "completed", "failed", "cancelled"],
+                          "example": "paid"
+                        },
+                        "amount": {
+                          "type": "number",
+                          "format": "decimal",
+                          "example": 100.00
+                        },
+                        "paid_at": {
+                          "type": "string",
+                          "format": "date-time",
+                          "example": "2025-01-15T15:05:00Z"
+                        },
+                        "created_at": {
+                          "type": "string",
+                          "format": "date-time",
+                          "example": "2025-01-15T15:00:00Z"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Transação não encontrada"
+          }
+        }
+      }
+    },
+    "/balance": {
+      "post": {
+        "summary": "Consultar Saldo",
+        "description": "Consulta o saldo disponível da conta",
+        "tags": ["Account"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["token", "secret"],
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "description": "Token de autenticação",
+                    "example": "seu_token_aqui"
+                  },
+                  "secret": {
+                    "type": "string",
+                    "description": "Chave secreta",
+                    "example": "sua_chave_secreta"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sucesso",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "balance": {
+                          "type": "number",
+                          "format": "decimal",
+                          "description": "Saldo total",
+                          "example": 1500.00
+                        },
+                        "available_balance": {
+                          "type": "number",
+                          "format": "decimal",
+                          "description": "Saldo disponível",
+                          "example": 1200.00
+                        },
+                        "pending_balance": {
+                          "type": "number",
+                          "format": "decimal",
+                          "description": "Saldo pendente",
+                          "example": 300.00
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "PIX",
+      "description": "Operações PIX (Depósitos e Saques)"
+    },
+    {
+      "name": "Account",
+      "description": "Operações de Conta"
+    }
+  ]
+}

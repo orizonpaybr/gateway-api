@@ -1,0 +1,25 @@
+# Permitir apenas tipos de arquivo específicos
+<FilesMatch "\.(jpg|jpeg|png|gif|webp|pdf)$">
+    Order Allow,Deny
+    Allow from all
+</FilesMatch>
+
+# Bloquear acesso a outros tipos de arquivo
+<FilesMatch "\.(php|php3|php4|php5|phtml|pl|py|jsp|asp|sh|cgi)$">
+    Order Deny,Allow
+    Deny from all
+</FilesMatch>
+
+# Bloquear execução de scripts
+Options -ExecCGI
+AddHandler cgi-script .php .pl .py .jsp .asp .sh .cgi
+
+# Prevenir listagem de diretório
+Options -Indexes
+
+# Headers de segurança
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options nosniff
+    Header set X-Frame-Options DENY
+    Header set X-XSS-Protection "1; mode=block"
+</IfModule>
