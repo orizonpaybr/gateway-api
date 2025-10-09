@@ -13,7 +13,7 @@ class LivewireServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        Livewire::component('foto-upload', FotoUpload::class);
+        // Livewire::component('foto-upload', FotoUpload::class);
     }
 
     /**
