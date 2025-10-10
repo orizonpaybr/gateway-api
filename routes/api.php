@@ -23,6 +23,12 @@ Route::options('auth/login', function () {
         ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
         ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 });
+Route::options('auth/register', function () {
+    return response('', 200)
+        ->header('Access-Control-Allow-Origin', '*')
+        ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
+        ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+});
 Route::options('auth/verify-2fa', function () {
     return response('', 200)
         ->header('Access-Control-Allow-Origin', '*')
@@ -30,6 +36,7 @@ Route::options('auth/verify-2fa', function () {
         ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 });
 Route::post('auth/login', [AuthController::class, 'login']);
+Route::post('auth/register', [AuthController::class, 'register']);
 Route::post('auth/verify-2fa', [AuthController::class, 'verify2FA']);
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('auth/verify', [AuthController::class, 'verifyToken']);
@@ -95,7 +102,7 @@ Route::middleware(['check.token.secret'])->group(function () {
 
 Route::get('/link-storage', function (Request $request) {
     // Verificar se está em ambiente local e se o usuário está autenticado
-    if (!app()->environment('local') || !auth()->check()) {
+    if (!app()->environment('local') || !$request->user()) {
         abort(403, 'Acesso não autorizado.');
     }
     

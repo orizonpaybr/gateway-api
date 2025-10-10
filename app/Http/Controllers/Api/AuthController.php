@@ -340,4 +340,252 @@ class AuthController extends Controller
             'message' => 'Logout realizado com sucesso'
         ]);
     }
+
+    /**
+     * Registro de novo usuário via API
+     */
+    public function register(Request $request)
+    {
+        try {
+            // Validar dados de entrada
+            $validator = Validator::make($request->all(), [
+                'username' => 'required|string|regex:/^[\pL\pN\s\'\-]+$/u|unique:users,username',
+                'name' => 'required|string|max:255|regex:/^[\pL\s\'\-]+$/u',
+                'email' => 'required|string|lowercase|email|max:255|unique:users,email',
+                'telefone' => 'required|string|unique:users,telefone',
+                'cpf_cnpj' => 'required|string|unique:users,cpf_cnpj',
+                'password' => [
+                    'required',
+                    'min:8',
+                    'regex:/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&+#^~`|\\/:";\'<>,.=\-_\[\]{}()])[A-Za-z\d@$!%*?&+#^~`|\\/:";\'<>,.=\-_\[\]{}()]+$/',
+                ],
+                'documentoFrente' => 'nullable|file|mimes:jpeg,jpg,png,pdf|max:5120',
+                'documentoVerso' => 'nullable|file|mimes:jpeg,jpg,png,pdf|max:5120',
+                'selfieDocumento' => 'nullable|file|mimes:jpeg,jpg,png,pdf|max:5120',
+            ], [
+                'username.regex' => 'O campo nome de usuário aceita apenas letras, números, espaços, apóstrofos e hífens.',
+                'name.regex' => 'O nome deve conter apenas letras, espaços, apóstrofos e hífens.',
+                'password.regex' => 'A senha deve conter pelo menos uma letra minúscula, uma letra maiúscula, um número e um caractere especial.',
+                'username.unique' => 'Este nome de usuário já está em uso.',
+                'email.unique' => 'Este email já está em uso.',
+                'telefone.unique' => 'Este telefone já está em uso.',
+                'cpf_cnpj.unique' => 'Este CPF/CNPJ já está em uso.',
+                'cpf_cnpj.required' => 'O CPF/CNPJ é obrigatório.',
+                'documentoFrente.mimes' => 'O documento deve ser uma imagem (JPEG, JPG, PNG) ou PDF.',
+                'documentoFrente.max' => 'O documento não pode exceder 5MB.',
+                'documentoVerso.mimes' => 'O documento deve ser uma imagem (JPEG, JPG, PNG) ou PDF.',
+                'documentoVerso.max' => 'O documento não pode exceder 5MB.',
+                'selfieDocumento.mimes' => 'A selfie deve ser uma imagem (JPEG, JPG, PNG) ou PDF.',
+                'selfieDocumento.max' => 'A selfie não pode exceder 5MB.',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Dados inválidos',
+                    'errors' => $validator->errors()
+                ], 400)->header('Access-Control-Allow-Origin', '*')
+                  ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
+                  ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+            }
+
+            $senhaHash = Hash::make($request->password);
+
+            // Gerando IDs e valores adicionais
+            $clienteId = \Illuminate\Support\Str::uuid()->toString();
+            $saldo = 0;
+            $status = 5; // Status 5 = Pendente de Aprovação pelo Admin
+            $dataCadastroFormatada = \Carbon\Carbon::now('America/Sao_Paulo')->format('Y-m-d H:i:s');
+            
+            // Processar upload de documentos
+            $fotoRgFrente = null;
+            $fotoRgVerso = null;
+            $selfieRg = null;
+            
+            if ($request->hasFile('documentoFrente')) {
+                $file = $request->file('documentoFrente');
+                $filename = 'doc_frente_' . time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+                $file->storeAs('uploads/documentos', $filename, 'public');
+                $fotoRgFrente = '/storage/uploads/documentos/' . $filename;
+            }
+            
+            if ($request->hasFile('documentoVerso')) {
+                $file = $request->file('documentoVerso');
+                $filename = 'doc_verso_' . time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+                $file->storeAs('uploads/documentos', $filename, 'public');
+                $fotoRgVerso = '/storage/uploads/documentos/' . $filename;
+            }
+            
+            if ($request->hasFile('selfieDocumento')) {
+                $file = $request->file('selfieDocumento');
+                $filename = 'selfie_' . time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
+                $file->storeAs('uploads/documentos', $filename, 'public');
+                $selfieRg = '/storage/uploads/documentos/' . $filename;
+            }
+
+            $indicador_ref = $request->input('ref') ?? NULL;
+
+            $app = \App\Models\App::first();
+            $code_ref = uniqid();
+
+            $gerenteComMenosClientes = User::where('permission', 5)
+                ->withCount('clientes')
+                ->orderBy('clientes_count', 'asc')
+                ->first();
+
+            if (isset($indicador_ref) && !is_null($indicador_ref)) {
+                $indicador = User::where('code_ref', $indicador_ref)->first();
+                if ($indicador && $indicador->permission == 5) {
+                    $gerenteComMenosClientes = $indicador;
+                }
+            }
+
+            // Criando usuário
+            $user = User::create([
+                'username' => $request->username,
+                'user_id' => $request->username,
+                'name' => $request->name,
+                'email' => $request->email,
+                'password' => $senhaHash,
+                'telefone' => $request->telefone,
+                'cpf_cnpj' => $request->cpf_cnpj,
+                'saldo' => $saldo,
+                'data_cadastro' => $dataCadastroFormatada,
+                'status' => $status,
+                'cliente_id' => $clienteId,
+                'code_ref' => $code_ref,
+                'indicador_ref' => $indicador_ref,
+                'gerente_id' => $gerenteComMenosClientes->id ?? NULL,
+                'gerente_percentage' => $gerenteComMenosClientes->gerente_percentage ?? 0.00,
+                'avatar' => "/uploads/avatars/avatar_default.jpg",
+                'foto_rg_frente' => $fotoRgFrente,
+                'foto_rg_verso' => $fotoRgVerso,
+                'selfie_rg' => $selfieRg,
+            ]);
+
+            // Criar chaves de API para o usuário
+            $token = \Illuminate\Support\Str::uuid()->toString();
+            $secret = \Illuminate\Support\Str::uuid()->toString();
+            $user_id = $user->user_id;
+
+            UsersKey::create(compact('user_id', 'token', 'secret'));
+
+            // PROCESSAR AFILIADO SE houver parâmetro 'ref' na URL
+            $affiliateCode = $request->get('ref'); 
+            $affiliateUser = null;
+            if ($affiliateCode) {
+                $affiliateUser = User::where('affiliate_code', $affiliateCode)
+                    ->where('is_affiliate', true)
+                    ->where('affiliate_percentage', '>', 0)
+                    ->first();
+                    
+                if ($affiliateUser) {
+                    $user->update([
+                        'affiliate_id' => $affiliateUser->id,
+                        'affiliate_percentage' => $affiliateUser->affiliate_percentage
+                    ]);
+                    
+                    Log::info('[REGISTRO AFFILIATE API] Usuário registrado via affiliate', [
+                        'novo_usuario_id' => $user->id,
+                        'affiliate_id' => $affiliateUser->id,
+                        'affiliate_code' => $affiliateCode,
+                        'affiliate_percentage' => $affiliateUser->affiliate_percentage
+                    ]);
+                }
+            }
+
+            // Criar split interno automático se usuário tem gerente configurado
+            if ($gerenteComMenosClientes && $gerenteComMenosClientes->gerente_percentage > 0) {
+                try {
+                    \App\Models\SplitInterno::create([
+                        'usuario_pagador_id' => $user->id,
+                        'usuario_beneficiario_id' => $gerenteComMenosClientes->id,
+                        'porcentagem_split' => $gerenteComMenosClientes->gerente_percentage,
+                        'tipo_taxa' => \App\Models\SplitInterno::TAXA_DEPOSITO,
+                        'ativo' => true,
+                        'criado_por_admin_id' => 1,
+                        'data_inicio' => now(),
+                        'data_fim' => null,
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error('[REGISTRO AUTOMATICO API] Erro ao criar split interno', [
+                        'erro' => $e->getMessage(),
+                        'novo_usuario_id' => $user->id,
+                        'gerente_id' => $gerenteComMenosClientes->id ?? null
+                    ]);
+                }
+            }
+
+            // Criar split interno automático se usuário foi indicado por affiliate
+            if ($affiliateUser && $affiliateUser->isAffiliateAtivo()) {
+                try {
+                    \App\Models\SplitInterno::create([
+                        'usuario_pagador_id' => $user->id,
+                        'usuario_beneficiario_id' => $affiliateUser->id,
+                        'porcentagem_split' => $affiliateUser->affiliate_percentage,
+                        'tipo_taxa' => \App\Models\SplitInterno::TAXA_DEPOSITO,
+                        'ativo' => true,
+                        'criado_por_admin_id' => 1,
+                        'data_inicio' => now(),
+                        'data_fim' => null,
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error('[REGISTRO AFFILIATE API] Erro ao criar split interno', [
+                        'erro' => $e->getMessage(),
+                        'novo_usuario_id' => $user->id,
+                        'affiliate_id' => $affiliateUser->id ?? null
+                    ]);
+                }
+            }
+
+            Log::info('Usuário registrado com sucesso via API', [
+                'username' => $request->username,
+                'ip' => $request->ip(),
+                'status' => 'pendente_aprovacao'
+            ]);
+
+            // Buscar as chaves criadas
+            $userKeys = UsersKey::where('user_id', $user->user_id)->first();
+
+            // Gerar token de autenticação
+            $authToken = base64_encode(json_encode([
+                'user_id' => $user->username,
+                'token' => $userKeys->token,
+                'secret' => $userKeys->secret,
+                'expires_at' => now()->addHours(24)->timestamp
+            ]));
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Cadastro realizado com sucesso! Sua conta está pendente de aprovação pelo administrador.',
+                'data' => [
+                    'user' => [
+                        'id' => $user->username,
+                        'username' => $user->username,
+                        'email' => $user->email,
+                        'name' => $user->name,
+                        'status' => $user->status,
+                        'status_text' => 'Pendente de Aprovação'
+                    ],
+                    'token' => $authToken,
+                    'api_token' => $userKeys->token,
+                    'api_secret' => $userKeys->secret,
+                    'pending_approval' => true
+                ]
+            ], 201)->header('Access-Control-Allow-Origin', '*')
+              ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
+              ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+        } catch (\Exception $e) {
+            Log::error('Erro no registro via API', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor'
+            ], 500)->header('Access-Control-Allow-Origin', '*');
+        }
+    }
 }
