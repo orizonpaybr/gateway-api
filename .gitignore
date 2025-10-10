@@ -43,3 +43,7 @@ Thumbs.db
 *.7z
 *.tar.gz
 *.tar.bz2
+
+# Uploaded files
+/public/uploads/
+/storage/app/public/uploads/
