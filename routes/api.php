@@ -35,12 +35,19 @@ Route::options('auth/verify-2fa', function () {
         ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
         ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 });
+Route::options('auth/validate-registration', function () {
+    return response('', 200)
+        ->header('Access-Control-Allow-Origin', '*')
+        ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
+        ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+});
 Route::post('auth/login', [AuthController::class, 'login']);
 Route::post('auth/register', [AuthController::class, 'register']);
 Route::post('auth/verify-2fa', [AuthController::class, 'verify2FA']);
+Route::post('auth/validate-registration', [AuthController::class, 'validateRegistrationData']);
+Route::post('auth/logout', [AuthController::class, 'logout']); // Logout não precisa de autenticação
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('auth/verify', [AuthController::class, 'verifyToken']);
-    Route::post('auth/logout', [AuthController::class, 'logout']);
 });
 
 /* USER ROUTES */
@@ -98,6 +105,13 @@ Route::middleware(['check.token.secret'])->group(function () {
     Route::post('notifications/mark-all-read', [NotificationController::class, 'markAllAsRead']);
     Route::get('notifications/stats', [NotificationController::class, 'getStats']);
     Route::post('notifications/deactivate-token', [NotificationController::class, 'deactivateToken']);
+    
+    // Rotas do 2FA
+    Route::get('2fa/status', [App\Http\Controllers\TwoFactorAuthController::class, 'status']);
+    Route::post('2fa/generate-qr', [App\Http\Controllers\TwoFactorAuthController::class, 'generateQrCode']);
+    Route::post('2fa/verify', [App\Http\Controllers\TwoFactorAuthController::class, 'verifyCode']);
+    Route::post('2fa/enable', [App\Http\Controllers\TwoFactorAuthController::class, 'enable']);
+    Route::post('2fa/disable', [App\Http\Controllers\TwoFactorAuthController::class, 'disable']);
 });
 
 Route::get('/link-storage', function (Request $request) {
