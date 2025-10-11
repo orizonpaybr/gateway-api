@@ -66,6 +66,7 @@ class User extends Authenticatable
         "whitelisted_ip",
         "pushcut_pixpago",
         "twofa_secret",
+        "twofa_pin",
         "twofa_enabled",
         "twofa_enabled_at",
         "code_ref",
@@ -128,6 +129,8 @@ class User extends Authenticatable
     protected $hidden = [
         'password',
         'remember_token',
+        'twofa_pin',
+        'twofa_secret',
     ];
 
     /**

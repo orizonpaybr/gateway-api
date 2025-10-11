@@ -60,12 +60,24 @@ class CheckTokenAndSecret
             ]);
         }
         
-        // Verificar apenas status básico (removendo controle de banimento externo)
-        if($user->status != 1){
+        // Verificar status apenas para endpoints que precisam de aprovação
+        // Permitir 2FA mesmo para usuários pendentes
+        $currentPath = $request->path();
+        $allowedPathsForPending = ['api/2fa/status', 'api/2fa/enable', 'api/2fa/verify', 'api/2fa/disable'];
+        
+        $isAllowedForPending = false;
+        foreach ($allowedPathsForPending as $path) {
+            if (str_contains($currentPath, $path)) {
+                $isAllowedForPending = true;
+                break;
+            }
+        }
+        
+        if($user->status != 1 && !$isAllowedForPending){
             return Response::json([
-                'status' => "error",
+                'status' => "pending_approval",
                 'message' => 'Usuário com conta pendente de aprovação.'
-            ], 401);
+            ], 403)->header('Access-Control-Allow-Origin', '*');
         }
         
         // Se o usuário for encontrado, defina o usuário na requisição usando setUserResolver

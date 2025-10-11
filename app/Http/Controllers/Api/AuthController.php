@@ -198,9 +198,8 @@ class AuthController extends Controller
                 ], 401)->header('Access-Control-Allow-Origin', '*');
             }
 
-            // Verificar código 2FA
-            $google2fa = new Google2FA();
-            $valid = $google2fa->verifyKey($user->twofa_secret, $code);
+            // Verificar PIN 2FA
+            $valid = Hash::check($code, $user->twofa_pin);
 
             if (!$valid) {
                 Log::warning('Código 2FA inválido', [
@@ -338,7 +337,9 @@ class AuthController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Logout realizado com sucesso'
-        ]);
+        ])->header('Access-Control-Allow-Origin', '*')
+          ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
+          ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     }
 
     /**
@@ -578,6 +579,78 @@ class AuthController extends Controller
 
         } catch (\Exception $e) {
             Log::error('Erro no registro via API', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor'
+            ], 500)->header('Access-Control-Allow-Origin', '*');
+        }
+    }
+
+    /**
+     * Validar dados únicos antes do cadastro
+     */
+    public function validateRegistrationData(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'username' => 'required|string|regex:/^[\pL\pN\s\'\-]+$/u|unique:users,username',
+                'email' => 'required|string|lowercase|email|max:255|unique:users,email',
+                'telefone' => 'nullable|string|unique:users,telefone',
+                'cpf_cnpj' => 'nullable|string|unique:users,cpf_cnpj',
+            ], [
+                'username.unique' => 'Este nome de usuário já está em uso',
+                'username.regex' => 'O campo nome de usuário aceita apenas letras, números, espaços, apóstrofos e hífens.',
+                'email.unique' => 'Este email já está em uso',
+                'email.email' => 'Email inválido',
+                'telefone.unique' => 'Este telefone já está em uso',
+                'cpf_cnpj.unique' => 'Este CPF/CNPJ já está em uso',
+            ]);
+
+            if ($validator->fails()) {
+                $errors = $validator->errors();
+                $errorMessages = [];
+                
+                if ($errors->has('username')) {
+                    $errorMessages['username'] = $errors->first('username');
+                }
+                if ($errors->has('email')) {
+                    $errorMessages['email'] = $errors->first('email');
+                }
+                if ($errors->has('telefone')) {
+                    $errorMessages['telefone'] = $errors->first('telefone');
+                }
+                if ($errors->has('cpf_cnpj')) {
+                    $errorMessages['cpf_cnpj'] = $errors->first('cpf_cnpj');
+                }
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Dados já existentes',
+                    'errors' => $errorMessages
+                ], 422)->header('Access-Control-Allow-Origin', '*')
+                  ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
+                  ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Dados válidos',
+                'data' => [
+                    'username_available' => true,
+                    'email_available' => true,
+                    'telefone_available' => !$request->has('telefone') || $request->telefone === '',
+                    'cpf_cnpj_available' => !$request->has('cpf_cnpj') || $request->cpf_cnpj === ''
+                ]
+            ])->header('Access-Control-Allow-Origin', '*')
+              ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
+              ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+        } catch (\Exception $e) {
+            Log::error('Erro na validação de dados únicos', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);

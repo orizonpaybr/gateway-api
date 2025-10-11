@@ -63,12 +63,6 @@ Route::middleware(['auth', 'verified'])->group(function () {
       Route::post('/profile/remove-pin', [ProfileController::class, 'removePin'])->name('profile.remove-pin');
       Route::post('/profile/verify-pin', [ProfileController::class, 'verifyPin'])->name('profile.verify-pin');
 
-      // Rotas do 2FA
-      Route::get('/2fa/status', [App\Http\Controllers\TwoFactorAuthController::class, 'status'])->name('2fa.status');
-      Route::post('/2fa/generate-qr', [App\Http\Controllers\TwoFactorAuthController::class, 'generateQrCode'])->name('2fa.generate-qr');
-      Route::post('/2fa/verify', [App\Http\Controllers\TwoFactorAuthController::class, 'verifyCode'])->name('2fa.verify');
-      Route::post('/2fa/enable', [App\Http\Controllers\TwoFactorAuthController::class, 'enable'])->name('2fa.enable');
-      Route::post('/2fa/disable', [App\Http\Controllers\TwoFactorAuthController::class, 'disable'])->name('2fa.disable');
 
       Route::group(['prefix' => 'relatorio'], function () {
           Route::get('/entradas', [RelatoriosControlller::class, 'pixentrada'])->name('profile.relatorio.pixentrada');
