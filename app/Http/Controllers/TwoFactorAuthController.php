@@ -198,11 +198,13 @@ class TwoFactorAuthController extends Controller
             ], 400)->header('Access-Control-Allow-Origin', '*');
         }
 
-        $valid = $this->google2fa->verifyKey($user->twofa_secret, $request->code);
+        // Para PIN-based 2FA, verificar o PIN diretamente
+        $valid = Hash::check($request->code, $user->twofa_pin);
 
         if ($valid) {
             $user->twofa_enabled = false;
             $user->twofa_enabled_at = null;
+            $user->twofa_pin = null; // Limpar o PIN quando desativar
             $user->save();
 
             return response()->json([
@@ -235,7 +237,7 @@ class TwoFactorAuthController extends Controller
             return response()->json([
                 'success' => true,
                 'enabled' => $user->twofa_enabled ?? false,
-                'configured' => !empty($user->twofa_secret),
+                'configured' => !empty($user->twofa_pin),
                 'enabled_at' => $user->twofa_enabled_at
             ])->header('Access-Control-Allow-Origin', '*');
         } catch (\Exception $e) {
