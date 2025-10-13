@@ -30,6 +30,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'check.token.secret' => \App\Http\Middleware\CheckTokenAndSecret::class,
+            'verify.jwt' => \App\Http\Middleware\VerifyJWT::class,
             'check.admin' => \App\Http\Middleware\AdminMiddleware::class,
             'check.auth' => \App\Http\Middleware\AuthMiddleware::class,
             'security' => \App\Http\Middleware\SecurityMiddleware::class,

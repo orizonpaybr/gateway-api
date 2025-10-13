@@ -71,8 +71,8 @@ class AuthController extends Controller
                 ], 401);
             }
 
-            // Verificar se o usuário tem 2FA ativo
-            if ($user->twofa_enabled && $user->twofa_secret) {
+            // Verificar se o usuário tem 2FA ativo (PIN-based)
+            if ($user->twofa_enabled && $user->twofa_pin) {
                 // Gerar token temporário para verificação 2FA
                 $tempToken = base64_encode(json_encode([
                     'user_id' => $user->username,
@@ -191,7 +191,7 @@ class AuthController extends Controller
             // Buscar usuário
             $user = User::where('username', $decoded['user_id'])->first();
             
-            if (!$user || !$user->twofa_enabled || !$user->twofa_secret) {
+            if (!$user || !$user->twofa_enabled || !$user->twofa_pin) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Usuário não encontrado ou 2FA não configurado'

@@ -87,8 +87,15 @@ Route::options('notifications/mark-all-read', function () {
 Route::options('notifications/stats', function () {
     return response('', 200)->header('Access-Control-Allow-Origin', '*');
 });
+Route::options('dashboard/stats', function () {
+    return response('', 200)->header('Access-Control-Allow-Origin', '*');
+});
+Route::options('dashboard/interactive-movement', function () {
+    return response('', 200)->header('Access-Control-Allow-Origin', '*');
+});
 
-Route::middleware(['check.token.secret'])->group(function () {
+// Rotas protegidas com JWT (para frontend)
+Route::middleware(['verify.jwt'])->group(function () {
     Route::get('balance', [UserController::class, 'getBalance']);
     Route::get('transactions', [UserController::class, 'getTransactions']);
     Route::get('transactions/{id}', [UserController::class, 'getTransactionById']);
@@ -97,6 +104,8 @@ Route::middleware(['check.token.secret'])->group(function () {
     Route::post('pix/withdraw', [UserController::class, 'makePixWithdraw']);
     Route::get('statement', [UserController::class, 'getStatement']);
     Route::get('user/real-data', [UserController::class, 'getRealData']);
+    Route::get('dashboard/stats', [UserController::class, 'getDashboardStats']);
+    Route::get('dashboard/interactive-movement', [UserController::class, 'getInteractiveMovement']);
     
     // Rotas de notificações
     Route::post('notifications/register-token', [NotificationController::class, 'registerToken']);
@@ -112,6 +121,11 @@ Route::middleware(['check.token.secret'])->group(function () {
     Route::post('2fa/verify', [App\Http\Controllers\TwoFactorAuthController::class, 'verifyCode']);
     Route::post('2fa/enable', [App\Http\Controllers\TwoFactorAuthController::class, 'enable']);
     Route::post('2fa/disable', [App\Http\Controllers\TwoFactorAuthController::class, 'disable']);
+});
+
+// Rotas protegidas com token + secret (para integrações externas e APIs)
+Route::middleware(['check.token.secret'])->group(function () {
+    // Essas rotas ainda podem usar token + secret para compatibilidade com integrações externas
 });
 
 Route::get('/link-storage', function (Request $request) {
