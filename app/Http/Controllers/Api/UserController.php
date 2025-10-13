@@ -39,7 +39,7 @@ class UserController extends Controller
                 ->sum('amount');
 
             // Log para debug
-            \Log::info('Saldo calculado', [
+            Log::info('Saldo calculado', [
                 'user_id' => $user->username,
                 'saldo_atual' => $user->saldo ?? 0,
                 'total_inflows' => $totalInflows,
@@ -643,7 +643,7 @@ class UserController extends Controller
             $dates = $this->calculateDateRange($periodo, $dataInicio, $dataFim);
             
             // Log para debug
-            \Log::info('Filtro de data aplicado', [
+            Log::info('Filtro de data aplicado', [
                 'periodo' => $periodo,
                 'inicio' => $dates['inicio']->format('Y-m-d H:i:s'),
                 'fim' => $dates['fim']->format('Y-m-d H:i:s'),
@@ -673,7 +673,7 @@ class UserController extends Controller
             $transacoesSaidas = $saidasQuery->orderBy('date', 'desc')->get();
             
             // Log para debug - verificar quantas transações foram encontradas
-            \Log::info('Transações aprovadas encontradas', [
+            Log::info('Transações aprovadas encontradas', [
                 'periodo' => $periodo,
                 'user_id' => $user->username,
                 'saldo_atual' => $user->saldo ?? 0,
@@ -873,6 +873,313 @@ class UserController extends Controller
         
         // Default para CPF se não conseguir detectar
         return 'cpf';
+    }
+
+    /**
+     * Obter dados para movimentação interativa (gráfico + cards)
+     */
+    public function getInteractiveMovement(Request $request)
+    {
+        try {
+            // Pegar usuário do middleware JWT
+            $user = $request->user() ?? $request->user_auth;
+            
+            if (!$user) {
+                Log::error('getInteractiveMovement - Usuário não encontrado no request', [
+                    'has_user' => !empty($request->user()),
+                    'has_user_auth' => !empty($request->user_auth)
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário não autenticado'
+                ], 401)->header('Access-Control-Allow-Origin', '*');
+            }
+
+            $periodo = $request->input('periodo', 'hoje'); // hoje, ontem, 7dias, 30dias
+            
+            // Calcular datas baseado no período
+            $dates = $this->calculateInteractiveDateRange($periodo);
+            
+            Log::info('Movimentação Interativa - Filtro aplicado', [
+                'periodo' => $periodo,
+                'inicio' => $dates['inicio']->format('Y-m-d H:i:s'),
+                'fim' => $dates['fim']->format('Y-m-d H:i:s'),
+                'user_id' => $user->username
+            ]);
+
+            // 1. DADOS PARA OS 4 CARDS (otimizado com uma query)
+            $cardData = $this->getCardDataOptimized($user->username, $dates);
+            
+            // 2. DADOS PARA O GRÁFICO (agrupado por hora)
+            $chartData = $this->getChartDataOptimized($user->username, $dates, $periodo);
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'periodo' => $periodo,
+                    'data_inicio' => $dates['inicio']->format('Y-m-d H:i:s'),
+                    'data_fim' => $dates['fim']->format('Y-m-d H:i:s'),
+                    'cards' => $cardData,
+                    'chart' => $chartData
+                ]
+            ])->header('Access-Control-Allow-Origin', '*');
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao obter movimentação interativa', [
+                'error' => $e->getMessage(),
+                'user_id' => $user->username ?? 'unknown',
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor'
+            ], 500)->header('Access-Control-Allow-Origin', '*');
+        }
+    }
+
+    /**
+     * Calcular intervalo de datas para movimentação interativa
+     */
+    private function calculateInteractiveDateRange($periodo)
+    {
+        $now = \Carbon\Carbon::now('America/Sao_Paulo');
+        
+        switch ($periodo) {
+            case 'hoje':
+                return [
+                    'inicio' => $now->copy()->startOfDay(),
+                    'fim' => $now->copy()->endOfDay()
+                ];
+                
+            case 'ontem':
+                return [
+                    'inicio' => $now->copy()->subDay()->startOfDay(),
+                    'fim' => $now->copy()->subDay()->endOfDay()
+                ];
+                
+            case '7dias':
+                return [
+                    'inicio' => $now->copy()->subDays(6)->startOfDay(),
+                    'fim' => $now->copy()->endOfDay()
+                ];
+                
+            case '30dias':
+                return [
+                    'inicio' => $now->copy()->subDays(29)->startOfDay(),
+                    'fim' => $now->copy()->endOfDay()
+                ];
+                
+            default:
+                return [
+                    'inicio' => $now->copy()->startOfDay(),
+                    'fim' => $now->copy()->endOfDay()
+                ];
+        }
+    }
+
+    /**
+     * Obter dados dos cards de forma otimizada
+     */
+    private function getCardDataOptimized($username, $dates)
+    {
+        // Query otimizada para depósitos
+        $depositosData = \App\Models\Solicitacoes::where('user_id', $username)
+            ->whereBetween('date', [$dates['inicio'], $dates['fim']])
+            ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
+            ->selectRaw('COUNT(*) as quantidade, SUM(amount) as total_valor')
+            ->first();
+
+        // Query otimizada para saques
+        $saquesData = \App\Models\SolicitacoesCashOut::where('user_id', $username)
+            ->whereBetween('date', [$dates['inicio'], $dates['fim']])
+            ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
+            ->selectRaw('COUNT(*) as quantidade, SUM(amount) as total_valor')
+            ->first();
+
+        return [
+            'total_depositos' => (float) ($depositosData->total_valor ?? 0),
+            'qtd_depositos' => (int) ($depositosData->quantidade ?? 0),
+            'total_saques' => (float) ($saquesData->total_valor ?? 0),
+            'qtd_saques' => (int) ($saquesData->quantidade ?? 0)
+        ];
+    }
+
+    /**
+     * Obter dados do gráfico agrupado por hora (otimizado)
+     */
+    private function getChartDataOptimized($username, $dates, $periodo)
+    {
+        // Determinar intervalo de agrupamento baseado no período
+        $groupBy = $this->getGroupByInterval($periodo);
+        
+        // Query otimizada para depósitos agrupados
+        $depositosChart = \App\Models\Solicitacoes::where('user_id', $username)
+            ->whereBetween('date', [$dates['inicio'], $dates['fim']])
+            ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
+            ->selectRaw("DATE_FORMAT(date, '{$groupBy}') as periodo, SUM(amount) as valor")
+            ->groupBy('periodo')
+            ->orderBy('periodo')
+            ->get()
+            ->keyBy('periodo');
+
+        // Query otimizada para saques agrupados
+        $saquesChart = \App\Models\SolicitacoesCashOut::where('user_id', $username)
+            ->whereBetween('date', [$dates['inicio'], $dates['fim']])
+            ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
+            ->selectRaw("DATE_FORMAT(date, '{$groupBy}') as periodo, SUM(amount) as valor")
+            ->groupBy('periodo')
+            ->orderBy('periodo')
+            ->get()
+            ->keyBy('periodo');
+
+        // Gerar períodos completos baseado no intervalo
+        $periodos = $this->generatePeriods($dates['inicio'], $dates['fim'], $periodo);
+        
+        $chartData = [];
+        foreach ($periodos as $periodoItem) {
+            $chartData[] = [
+                'periodo' => $periodoItem['label'],
+                'depositos' => (float) ($depositosChart->get($periodoItem['key'])->valor ?? 0),
+                'saques' => (float) ($saquesChart->get($periodoItem['key'])->valor ?? 0)
+            ];
+        }
+
+        return $chartData;
+    }
+
+    /**
+     * Determinar formato de agrupamento baseado no período
+     */
+    private function getGroupByInterval($periodo)
+    {
+        switch ($periodo) {
+            case 'hoje':
+            case 'ontem':
+                return '%H:00'; // Agrupar por hora
+            case '7dias':
+                return '%Y-%m-%d'; // Agrupar por dia
+            case '30dias':
+                return '%Y-%m-%d'; // Agrupar por dia
+            default:
+                return '%H:00';
+        }
+    }
+
+    /**
+     * Gerar períodos completos para o gráfico
+     */
+    private function generatePeriods($inicio, $fim, $periodo)
+    {
+        $periodos = [];
+        
+        if ($periodo === 'hoje' || $periodo === 'ontem') {
+            // Gerar todas as horas do dia (00:00 a 23:00)
+            $current = $inicio->copy();
+            while ($current->lte($fim)) {
+                $periodos[] = [
+                    'key' => $current->format('H:00'),
+                    'label' => $current->format('H:i')
+                ];
+                $current->addHour();
+            }
+        } else {
+            // Gerar todos os dias do período
+            $current = $inicio->copy();
+            while ($current->lte($fim)) {
+                $periodos[] = [
+                    'key' => $current->format('Y-m-d'),
+                    'label' => $current->format('d/m')
+                ];
+                $current->addDay();
+            }
+        }
+        
+        return $periodos;
+    }
+
+    /**
+     * Obter estatísticas do dashboard (saldo, entradas, saídas, splits do mês)
+     */
+    public function getDashboardStats(Request $request)
+    {
+        try {
+            // Pegar usuário do middleware JWT
+            $user = $request->user() ?? $request->user_auth;
+            
+            if (!$user) {
+                Log::error('getDashboardStats - Usuário não encontrado no request', [
+                    'has_user' => !empty($request->user()),
+                    'has_user_auth' => !empty($request->user_auth)
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário não autenticado'
+                ], 401)->header('Access-Control-Allow-Origin', '*');
+            }
+
+            // Calcular primeiro e último dia do mês atual
+            $startOfMonth = \Carbon\Carbon::now()->startOfMonth();
+            $endOfMonth = \Carbon\Carbon::now()->endOfMonth();
+
+            // 1. SALDO DISPONÍVEL
+            $saldoDisponivel = $user->saldo ?? 0;
+
+            // 2. ENTRADAS DO MÊS (depósitos aprovados)
+            $entradasMes = \App\Models\Solicitacoes::where('user_id', $user->username)
+                ->whereBetween('date', [$startOfMonth, $endOfMonth])
+                ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
+                ->sum('amount');
+
+            // 3. SAÍDAS DO MÊS (saques aprovados)
+            $saidasMes = \App\Models\SolicitacoesCashOut::where('user_id', $user->username)
+                ->whereBetween('date', [$startOfMonth, $endOfMonth])
+                ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
+                ->sum('amount');
+
+            // 4. SPLITS DO MÊS (splits internos executados)
+            $splitsMes = \App\Models\SplitInternoExecutado::whereHas('splitInterno', function($query) use ($user) {
+                    $query->where('usuario_beneficiario_id', $user->id);
+                })
+                ->whereBetween('created_at', [$startOfMonth, $endOfMonth])
+                ->where('status', 'processado')
+                ->sum('valor_split');
+
+            // Log para debug
+            Log::info('Dashboard Stats calculados', [
+                'user_id' => $user->username,
+                'saldo_disponivel' => $saldoDisponivel,
+                'entradas_mes' => $entradasMes,
+                'saidas_mes' => $saidasMes,
+                'splits_mes' => $splitsMes,
+                'periodo' => $startOfMonth->format('Y-m-d') . ' a ' . $endOfMonth->format('Y-m-d')
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'saldo_disponivel' => (float) $saldoDisponivel,
+                    'entradas_mes' => (float) $entradasMes,
+                    'saidas_mes' => (float) $saidasMes,
+                    'splits_mes' => (float) $splitsMes,
+                    'periodo' => [
+                        'inicio' => $startOfMonth->format('Y-m-d'),
+                        'fim' => $endOfMonth->format('Y-m-d')
+                    ]
+                ]
+            ])->header('Access-Control-Allow-Origin', '*');
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao obter estatísticas do dashboard', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor'
+            ], 500)->header('Access-Control-Allow-Origin', '*');
+        }
     }
 
     /**
