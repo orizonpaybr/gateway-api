@@ -46,9 +46,6 @@ Route::post('auth/register', [AuthController::class, 'register']);
 Route::post('auth/verify-2fa', [AuthController::class, 'verify2FA']);
 Route::post('auth/validate-registration', [AuthController::class, 'validateRegistrationData']);
 Route::post('auth/logout', [AuthController::class, 'logout']); // Logout não precisa de autenticação
-Route::middleware('auth:sanctum')->group(function () {
-    Route::get('auth/verify', [AuthController::class, 'verifyToken']);
-});
 
 /* USER ROUTES */
 Route::options('balance', function () {
@@ -99,6 +96,7 @@ Route::options('dashboard/transaction-summary', function () {
 
 // Rotas protegidas com JWT (para frontend)
 Route::middleware(['verify.jwt'])->group(function () {
+    Route::get('auth/verify', [AuthController::class, 'verifyToken']);
     Route::get('balance', [UserController::class, 'getBalance']);
     Route::get('transactions', [UserController::class, 'getTransactions']);
     Route::get('transactions/{id}', [UserController::class, 'getTransactionById']);

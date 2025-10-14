@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\DB;
 
 class UserController extends Controller
 {
@@ -74,36 +75,168 @@ class UserController extends Controller
     public function getTransactions(Request $request)
     {
         try {
-            $user = $this->getUserFromRequest($request);
+            // Pegar usuário do middleware JWT (igual aos outros endpoints que funcionam)
+            $user = $request->user() ?? $request->user_auth;
             
             if (!$user) {
+                Log::error('getTransactions - Usuário não encontrado no request', [
+                    'has_user' => !empty($request->user()),
+                    'has_user_auth' => !empty($request->user_auth)
+                ]);
                 return response()->json([
                     'success' => false,
                     'message' => 'Usuário não autenticado'
                 ], 401)->header('Access-Control-Allow-Origin', '*');
             }
 
+            // Parâmetros de paginação
             $page = $request->get('page', 1);
-            $limit = min($request->get('limit', 20), 100);
+            $limit = min($request->get('limit', 10), 50); // Máximo 50 por página para performance
 
-            $transactions = Transactions::where('user_id', $user->username)
+            // Parâmetros de filtro
+            $tipo = $request->get('tipo'); // 'deposito', 'saque', ou null (todos)
+            $status = $request->get('status'); // Status específico ou null
+            $busca = $request->get('busca'); // Termo de busca
+            $dataInicio = $request->get('data_inicio');
+            $dataFim = $request->get('data_fim');
+
+            Log::info('getTransactions - Parâmetros', [
+                'user_id' => $user->username,
+                'page' => $page,
+                'limit' => $limit,
+                'tipo' => $tipo,
+                'status' => $status,
+                'busca' => $busca
+            ]);
+
+            // Buscar depósitos
+            $depositosQuery = \App\Models\Solicitacoes::where('user_id', $user->username)
+                ->select([
+                    'id',
+                    'idTransaction',
+                    'externalreference',
+                    'amount',
+                    'deposito_liquido as valor_liquido',
+                    'taxa_cash_in as taxa',
+                    'status',
+                    'date',
+                    'created_at',
+                    DB::raw("CAST(client_name AS CHAR CHARACTER SET utf8mb4) as nome_cliente"),
+                    DB::raw("CAST(client_document AS CHAR CHARACTER SET utf8mb4) as documento"),
+                    DB::raw("CAST(COALESCE(adquirente_ref, 'Sistema') AS CHAR CHARACTER SET utf8mb4) as adquirente"),
+                    DB::raw("CAST(COALESCE(descricao_transacao, 'Pagamento Recebido') AS CHAR CHARACTER SET utf8mb4) as descricao"),
+                    DB::raw("'deposito' as tipo")
+                ]);
+
+            // Buscar saques
+            $saquesQuery = \App\Models\SolicitacoesCashOut::where('user_id', $user->username)
+                ->select([
+                    'id',
+                    'idTransaction',
+                    'externalreference',
+                    'amount',
+                    'cash_out_liquido as valor_liquido',
+                    'taxa_cash_out as taxa',
+                    'status',
+                    'date',
+                    'created_at',
+                    DB::raw("CAST(beneficiaryname AS CHAR CHARACTER SET utf8mb4) as nome_cliente"),
+                    DB::raw("CAST(beneficiarydocument AS CHAR CHARACTER SET utf8mb4) as documento"),
+                    DB::raw("CAST(COALESCE(executor_ordem, 'Sistema') AS CHAR CHARACTER SET utf8mb4) as adquirente"),
+                    DB::raw("CAST(COALESCE(descricao_transacao, 'Pagamento Enviado') AS CHAR CHARACTER SET utf8mb4) as descricao"),
+                    DB::raw("'saque' as tipo")
+                ]);
+
+            // Aplicar filtro de período se fornecido
+            if ($dataInicio && $dataFim) {
+                $depositosQuery->whereBetween('date', [$dataInicio, $dataFim]);
+                $saquesQuery->whereBetween('date', [$dataInicio, $dataFim]);
+            }
+
+            // Aplicar filtro de status se fornecido
+            if ($status) {
+                $depositosQuery->where('status', $status);
+                $saquesQuery->where('status', $status);
+            }
+
+            // Aplicar filtro de busca se fornecido (busca por ID ou nome)
+            if ($busca) {
+                $depositosQuery->where(function($query) use ($busca) {
+                    $query->where('idTransaction', 'like', "%{$busca}%")
+                          ->orWhere('externalreference', 'like', "%{$busca}%")
+                          ->orWhere('client_name', 'like', "%{$busca}%");
+                });
+                
+                $saquesQuery->where(function($query) use ($busca) {
+                    $query->where('idTransaction', 'like', "%{$busca}%")
+                          ->orWhere('externalreference', 'like', "%{$busca}%")
+                          ->orWhere('beneficiaryname', 'like', "%{$busca}%");
+                });
+            }
+
+            // Unir as queries baseado no filtro de tipo
+            if ($tipo === 'deposito') {
+                $query = $depositosQuery;
+            } elseif ($tipo === 'saque') {
+                $query = $saquesQuery;
+            } else {
+                // Unir depósitos e saques usando UNION ALL
+                $query = $depositosQuery->union($saquesQuery);
+            }
+
+            // Contar total de registros antes da paginação
+            $totalQuery = DB::query()->fromSub($query, 'transactions');
+            $total = $totalQuery->count();
+
+            // Ordenar e paginar
+            $offset = ($page - 1) * $limit;
+            $transactions = DB::query()
+                ->fromSub($query, 'transactions')
+                ->orderBy('date', 'desc')
                 ->orderBy('created_at', 'desc')
-                ->paginate($limit, ['*'], 'page', $page);
+                ->skip($offset)
+                ->take($limit)
+                ->get();
+
+            // Formatar dados
+            $transactionsFormatted = $transactions->map(function($transaction) {
+                return [
+                    'id' => (int) $transaction->id,
+                    'transaction_id' => $transaction->idTransaction ?? $transaction->externalreference ?? 'N/A',
+                    'tipo' => $transaction->tipo ?? 'deposito',
+                    'amount' => (float) ($transaction->amount ?? 0),
+                    'valor_liquido' => (float) ($transaction->valor_liquido ?? 0),
+                    'taxa' => (float) ($transaction->taxa ?? 0),
+                    'status' => $transaction->status ?? 'PENDING',
+                    'status_legivel' => $this->mapStatus($transaction->status ?? 'PENDING'),
+                    'data' => $transaction->date ?? now()->format('Y-m-d H:i:s'),
+                    'created_at' => $transaction->created_at ?? now()->format('Y-m-d H:i:s'),
+                    'nome_cliente' => $transaction->nome_cliente ?? 'Cliente',
+                    'documento' => $transaction->documento ?? '00000000000',
+                    'adquirente' => $transaction->adquirente ?? 'Sistema',
+                    'descricao' => $transaction->descricao ?? ($transaction->tipo === 'deposito' ? 'Pagamento Recebido' : 'Pagamento Enviado')
+                ];
+            });
+
+            $lastPage = ceil($total / $limit);
 
             return response()->json([
                 'success' => true,
                 'data' => [
-                    'data' => $transactions->items(),
-                    'current_page' => $transactions->currentPage(),
-                    'last_page' => $transactions->lastPage(),
-                    'per_page' => $transactions->perPage(),
-                    'total' => $transactions->total(),
+                    'data' => $transactionsFormatted,
+                    'current_page' => (int) $page,
+                    'last_page' => (int) $lastPage,
+                    'per_page' => (int) $limit,
+                    'total' => (int) $total,
+                    'from' => $offset + 1,
+                    'to' => min($offset + $limit, $total)
                 ]
             ])->header('Access-Control-Allow-Origin', '*');
 
         } catch (\Exception $e) {
             Log::error('Erro ao obter transações', [
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
 
             return response()->json([
@@ -119,9 +252,14 @@ class UserController extends Controller
     public function getTransactionById(Request $request, $id)
     {
         try {
-            $user = $this->getUserFromRequest($request);
+            // Pegar usuário do middleware JWT (igual aos outros endpoints que funcionam)
+            $user = $request->user() ?? $request->user_auth;
             
             if (!$user) {
+                Log::error('getTransactionById - Usuário não encontrado no request', [
+                    'has_user' => !empty($request->user()),
+                    'has_user_auth' => !empty($request->user_auth)
+                ]);
                 return response()->json([
                     'success' => false,
                     'message' => 'Usuário não autenticado'
@@ -154,18 +292,31 @@ class UserController extends Controller
                     'data' => [
                         'id' => $deposito->id,
                         'transaction_id' => $deposito->idTransaction ?? $deposito->externalreference,
-                        'tipo' => 'deposit',
-                        'amount' => $deposito->amount,
-                        'valor_liquido' => $deposito->deposito_liquido,
-                        'taxa' => $deposito->taxa_cash_in,
+                        'tipo' => 'deposito',
+                        'metodo' => 'PIX',
+                        'movimento' => 'Débito',
+                        'amount' => (float) $deposito->amount,
+                        'valor_liquido' => (float) $deposito->deposito_liquido,
+                        'taxa' => (float) $deposito->taxa_cash_in,
                         'status' => $deposito->status,
                         'status_legivel' => $this->mapStatus($deposito->status),
                         'data' => $deposito->date,
                         'created_at' => $deposito->created_at,
-                        'nome' => $deposito->client_name ?? 'Cliente',
-                        'documento' => $deposito->client_document ?? '00000000000',
-                        'adquirente' => $deposito->adquirente ?? 'Sistema',
-                        'description' => $deposito->description ?? 'Depósito via PIX'
+                        'updated_at' => $deposito->updated_at,
+                        // Origem (quem pagou)
+                        'origem' => [
+                            'nome' => $deposito->client_name ?? 'Cliente',
+                            'documento' => $deposito->client_document ?? '00000000000'
+                        ],
+                        // Destino (nossa conta)
+                        'destino' => [
+                            'nome' => $user->name ?? $user->username,
+                            'documento' => $user->cpf_cnpj ?? '00000000000'
+                        ],
+                        'adquirente' => $deposito->adquirente_ref ?? 'Sistema',
+                        'codigo_autenticacao' => $deposito->idTransaction ?? $deposito->externalreference,
+                        'qrcode' => $deposito->qrcode_pix ?? null,
+                        'descricao' => $deposito->descricao_transacao ?? 'Pagamento Recebido'
                     ]
                 ])->header('Access-Control-Allow-Origin', '*');
             }
@@ -191,20 +342,33 @@ class UserController extends Controller
                     'data' => [
                         'id' => $saque->id,
                         'transaction_id' => $saque->idTransaction ?? $saque->externalreference,
-                        'tipo' => 'withdraw',
-                        'amount' => $saque->amount,
-                        'valor_liquido' => $saque->cash_out_liquido,
-                        'taxa' => $saque->taxa_cash_out,
+                        'tipo' => 'saque',
+                        'metodo' => 'PIX',
+                        'movimento' => 'Débito',
+                        'amount' => (float) $saque->amount,
+                        'valor_liquido' => (float) $saque->cash_out_liquido,
+                        'taxa' => (float) $saque->taxa_cash_out,
                         'status' => $saque->status,
                         'status_legivel' => $this->mapStatus($saque->status),
                         'data' => $saque->date,
                         'created_at' => $saque->created_at,
-                        'nome' => $saque->beneficiaryname ?? 'Cliente',
-                        'documento' => $saque->beneficiarydocument ?? '00000000000',
+                        'updated_at' => $saque->updated_at,
+                        // Origem (nossa conta)
+                        'origem' => [
+                            'nome' => $user->name ?? $user->username,
+                            'documento' => $user->cpf_cnpj ?? '00000000000'
+                        ],
+                        // Destino (quem recebeu)
+                        'destino' => [
+                            'nome' => $saque->beneficiaryname ?? 'Beneficiário',
+                            'documento' => $saque->beneficiarydocument ?? '00000000000'
+                        ],
                         'pix_key' => $saque->pix ?? '',
-                        'pix_key_type' => $saque->pixkey ?? '',
-                        'adquirente' => $saque->adquirente ?? 'Sistema',
-                        'description' => $saque->description ?? 'Saque via PIX'
+                        'pix_key_type' => $saque->pixkey ?? 'Não informado',
+                        'adquirente' => $saque->executor_ordem ?? 'Sistema',
+                        'codigo_autenticacao' => $saque->idTransaction ?? $saque->externalreference,
+                        'end_to_end' => $saque->end_to_end ?? null,
+                        'descricao' => $saque->descricao_transacao ?? 'Pagamento Enviado'
                     ]
                 ])->header('Access-Control-Allow-Origin', '*');
             }
@@ -563,37 +727,29 @@ class UserController extends Controller
     public function getProfile(Request $request)
     {
         try {
-            $user = $this->getUserFromRequest($request);
+            // Usar autenticação do middleware verify.jwt
+            $user = $request->user() ?? $request->user_auth;
+            
+            Log::info('getProfile - Usuário autenticado', [
+                'user_id' => $user ? $user->username : 'null',
+                'user_type' => get_class($user ?? 'null')
+            ]);
             
             if (!$user) {
+                Log::warning('getProfile - Usuário não autenticado');
                 return response()->json([
                     'success' => false,
                     'message' => 'Usuário não autenticado'
                 ], 401)->header('Access-Control-Allow-Origin', '*');
             }
 
-            // Fazer requisição para obter dados completos do perfil
-            $profileResponse = Http::get(url('/my-profile?user_id=' . $user->username));
-
-            if ($profileResponse->successful()) {
-                $profileData = $profileResponse->json();
-                
-                return response()->json([
-                    'success' => true,
-                    'data' => array_merge([
-                        'id' => $user->username,
-                        'username' => $user->username,
-                        'email' => $user->email ?? '',
-                        'name' => $user->name ?? $user->username,
-                        'phone' => $user->telefone ?? '',
-                        'cnpj' => $user->cpf_cnpj ?? '',
-                        'status' => $user->status == 1 ? 'active' : 'inactive',
-                        'balance' => $user->saldo ?? 0,
-                    ], $profileData ?? [])
-                ])->header('Access-Control-Allow-Origin', '*');
-            }
-
-            // Fallback para dados básicos se a requisição falhar
+            // Retornar dados do perfil diretamente do usuário autenticado
+            Log::info('getProfile - Retornando dados do perfil', [
+                'user_id' => $user->username,
+                'email' => $user->email ?? 'null',
+                'name' => $user->name ?? 'null'
+            ]);
+            
             return response()->json([
                 'success' => true,
                 'data' => [
@@ -602,15 +758,20 @@ class UserController extends Controller
                     'email' => $user->email ?? '',
                     'name' => $user->name ?? $user->username,
                     'phone' => $user->telefone ?? '',
-                    'cnpj' => $user->cnpj ?? '',
+                    'cnpj' => $user->cpf_cnpj ?? '',
                     'status' => $user->status == 1 ? 'active' : 'inactive',
                     'balance' => $user->saldo ?? 0,
+                    'agency' => $user->agency ?? '',
+                    'status_text' => $user->status == 1 ? 'Ativo' : 'Inativo',
                 ]
             ])->header('Access-Control-Allow-Origin', '*');
 
         } catch (\Exception $e) {
             Log::error('Erro ao obter perfil', [
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString()
             ]);
 
             return response()->json([
