@@ -273,27 +273,8 @@ class AuthController extends Controller
     public function verifyToken(Request $request)
     {
         try {
-            $token = $request->bearerToken();
-            
-            if (!$token) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Token não fornecido'
-                ], 401);
-            }
-
-            // Decodificar token
-            $decoded = json_decode(base64_decode($token), true);
-            
-            if (!$decoded || !isset($decoded['expires_at']) || $decoded['expires_at'] < now()->timestamp) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Token expirado'
-                ], 401);
-            }
-
-            // Buscar usuário
-            $user = User::where('username', $decoded['user_id'])->first();
+            // Com middleware verify.jwt, o usuário já está disponível
+            $user = $request->user() ?? $request->user_auth;
             
             if (!$user) {
                 return response()->json([
@@ -310,6 +291,14 @@ class AuthController extends Controller
                         'username' => $user->username,
                         'email' => $user->email ?? '',
                         'name' => $user->name ?? $user->username,
+                        'status' => $user->status ?? 1,
+                        'status_text' => $user->status_text ?? 'Ativo',
+                        'agency' => $user->agency ?? '',
+                        'balance' => $user->balance ?? 0,
+                        'phone' => $user->phone ?? '',
+                        'cnpj' => $user->cnpj ?? '',
+                        'twofa_enabled' => $user->twofa_enabled ?? false,
+                        'twofa_configured' => $user->twofa_configured ?? false,
                     ]
                 ]
             ]);
