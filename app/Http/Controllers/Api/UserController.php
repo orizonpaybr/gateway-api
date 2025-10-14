@@ -1183,6 +1183,148 @@ class UserController extends Controller
     }
 
     /**
+     * Obter resumo de transações (para os 8 cards abaixo do gráfico)
+     */
+    public function getTransactionSummary(Request $request)
+    {
+        try {
+            // Pegar usuário do middleware JWT
+            $user = $request->user() ?? $request->user_auth;
+            
+            if (!$user) {
+                Log::error('getTransactionSummary - Usuário não encontrado no request');
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário não autenticado'
+                ], 401)->header('Access-Control-Allow-Origin', '*');
+            }
+
+            $periodo = $request->input('periodo', 'hoje'); // hoje, ontem, 7dias, 30dias
+
+            // Calcular datas baseado no período (usando mesma função do gráfico)
+            $dates = $this->calculateInteractiveDateRange($periodo);
+            
+            Log::info('Resumo de Transações - Filtro aplicado', [
+                'periodo' => $periodo,
+                'inicio' => $dates['inicio']->format('Y-m-d H:i:s'),
+                'fim' => $dates['fim']->format('Y-m-d H:i:s'),
+                'user_id' => $user->username
+            ]);
+
+            // 1. QUANTIDADE DE TRANSAÇÕES
+            $quantidadeDepositos = \App\Models\Solicitacoes::where('user_id', $user->username)
+                ->whereBetween('date', [$dates['inicio'], $dates['fim']])
+                ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
+                ->count();
+
+            $quantidadeSaques = \App\Models\SolicitacoesCashOut::where('user_id', $user->username)
+                ->whereBetween('date', [$dates['inicio'], $dates['fim']])
+                ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
+                ->count();
+
+            // 2. TARIFA COBRADA (soma das taxas de depósitos aprovados)
+            $tarifaCobrada = \App\Models\Solicitacoes::where('user_id', $user->username)
+                ->whereBetween('date', [$dates['inicio'], $dates['fim']])
+                ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
+                ->sum('taxa_cash_in');
+
+            // 3. QR CODES (todos os depósitos são QR Codes gerados)
+            $qrCodesGerados = \App\Models\Solicitacoes::where('user_id', $user->username)
+                ->whereBetween('date', [$dates['inicio'], $dates['fim']])
+                ->count();
+
+            $qrCodesPagos = \App\Models\Solicitacoes::where('user_id', $user->username)
+                ->whereBetween('date', [$dates['inicio'], $dates['fim']])
+                ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
+                ->count();
+
+            // 4. ÍNDICE DE CONVERSÃO (QR Codes pagos / QR Codes gerados * 100)
+            $indiceConversao = $qrCodesGerados > 0 
+                ? ($qrCodesPagos / $qrCodesGerados) * 100 
+                : 0;
+
+            // 5. TICKET MÉDIO
+            $ticketMedioDepositos = \App\Models\Solicitacoes::where('user_id', $user->username)
+                ->whereBetween('date', [$dates['inicio'], $dates['fim']])
+                ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
+                ->avg('amount') ?? 0;
+
+            $ticketMedioSaques = \App\Models\SolicitacoesCashOut::where('user_id', $user->username)
+                ->whereBetween('date', [$dates['inicio'], $dates['fim']])
+                ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
+                ->avg('amount') ?? 0;
+
+            // 6. VALOR MÍNIMO E MÁXIMO DE DEPÓSITOS
+            $depositosMinMax = \App\Models\Solicitacoes::where('user_id', $user->username)
+                ->whereBetween('date', [$dates['inicio'], $dates['fim']])
+                ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
+                ->selectRaw('MIN(amount) as min, MAX(amount) as max')
+                ->first();
+
+            // 7. INFRAÇÕES (depósitos bloqueados/rejeitados)
+            $infracoes = \App\Models\Solicitacoes::where('user_id', $user->username)
+                ->whereBetween('date', [$dates['inicio'], $dates['fim']])
+                ->whereIn('status', ['REJECTED', 'CANCELLED', 'BLOCKED'])
+                ->count();
+
+            // 8. PERCENTUAL E VALOR DE INFRAÇÕES
+            $valorInfracoes = \App\Models\Solicitacoes::where('user_id', $user->username)
+                ->whereBetween('date', [$dates['inicio'], $dates['fim']])
+                ->whereIn('status', ['REJECTED', 'CANCELLED', 'BLOCKED'])
+                ->sum('amount');
+
+            $percentualInfracoes = $qrCodesGerados > 0 
+                ? ($infracoes / $qrCodesGerados) * 100 
+                : 0;
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'periodo' => $periodo,
+                    'data_inicio' => $dates['inicio']->format('Y-m-d H:i:s'),
+                    'data_fim' => $dates['fim']->format('Y-m-d H:i:s'),
+                    'quantidadeTransacoes' => [
+                        'depositos' => (int) $quantidadeDepositos,
+                        'saques' => (int) $quantidadeSaques
+                    ],
+                    'tarifaCobrada' => (float) $tarifaCobrada,
+                    'qrCodes' => [
+                        'pagos' => (int) $qrCodesPagos,
+                        'gerados' => (int) $qrCodesGerados
+                    ],
+                    'indiceConversao' => (float) number_format($indiceConversao, 2, '.', ''),
+                    'ticketMedio' => [
+                        'depositos' => (float) $ticketMedioDepositos,
+                        'saques' => (float) $ticketMedioSaques
+                    ],
+                    'valorMinMax' => [
+                        'depositos' => [
+                            'min' => (float) ($depositosMinMax->min ?? 0),
+                            'max' => (float) ($depositosMinMax->max ?? 0)
+                        ]
+                    ],
+                    'infracoes' => (int) $infracoes,
+                    'percentualInfracoes' => [
+                        'percentual' => (float) number_format($percentualInfracoes, 2, '.', ''),
+                        'valorTotal' => (float) $valorInfracoes
+                    ]
+                ]
+            ])->header('Access-Control-Allow-Origin', '*');
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao obter resumo de transações', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor'
+            ], 500)->header('Access-Control-Allow-Origin', '*');
+        }
+    }
+
+    /**
      * Extrair usuário do request (usando middleware check.token.secret)
      */
     private function getUserFromRequest(Request $request)

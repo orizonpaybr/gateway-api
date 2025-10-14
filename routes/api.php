@@ -93,6 +93,9 @@ Route::options('dashboard/stats', function () {
 Route::options('dashboard/interactive-movement', function () {
     return response('', 200)->header('Access-Control-Allow-Origin', '*');
 });
+Route::options('dashboard/transaction-summary', function () {
+    return response('', 200)->header('Access-Control-Allow-Origin', '*');
+});
 
 // Rotas protegidas com JWT (para frontend)
 Route::middleware(['verify.jwt'])->group(function () {
@@ -106,6 +109,7 @@ Route::middleware(['verify.jwt'])->group(function () {
     Route::get('user/real-data', [UserController::class, 'getRealData']);
     Route::get('dashboard/stats', [UserController::class, 'getDashboardStats']);
     Route::get('dashboard/interactive-movement', [UserController::class, 'getInteractiveMovement']);
+    Route::get('dashboard/transaction-summary', [UserController::class, 'getTransactionSummary']);
     
     // Rotas de notificações
     Route::post('notifications/register-token', [NotificationController::class, 'registerToken']);
