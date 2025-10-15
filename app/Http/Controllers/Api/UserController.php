@@ -19,8 +19,12 @@ class UserController extends Controller
     public function getBalance(Request $request)
     {
         try {
-            // Obter usuário do middleware check.token.secret
-            $user = $this->getUserFromRequest($request);
+            // Obter usuário via JWT (padrão dos demais endpoints)
+            $user = $request->user() ?? $request->user_auth;
+            // Fallback de compatibilidade (token antigo/base64) e token+secret
+            if (!$user) {
+                $user = $this->getUserFromToken($request) ?? $this->getUserFromRequest($request);
+            }
             
             if (!$user) {
                 return response()->json([
