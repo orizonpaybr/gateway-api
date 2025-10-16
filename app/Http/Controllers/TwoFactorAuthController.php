@@ -25,52 +25,10 @@ class TwoFactorAuthController extends Controller
      */
     public function generateQrCode(Request $request)
     {
-        try {
-            /** @var \App\Models\User|null $user */
-            $user = Auth::user();
-            
-            if (!$user) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Usuário não autenticado'
-                ], 401);
-            }
-            
-            // Gerar chave secreta se não existir
-            if (!$user->twofa_secret) {
-                $user->twofa_secret = $this->google2fa->generateSecretKey();
-                $user->save();
-            }
-
-            // Definir label a ser exibido no app autenticador: preferir username, depois name, por fim email
-            $accountLabel = $user->username ?? $user->name ?? $user->email;
-            // Gerar URL para o app autenticador com issuer vindo da config (APP_NAME por padrão)
-            $qrCodeUrl = $this->google2fa->getQRCodeUrl(
-                config('google2fa.issuer'),
-                $accountLabel,
-                $user->twofa_secret
-            );
-
-            // Gerar QR Code como SVG
-            $qrCode = (string) QrCode::size(200)->generate($qrCodeUrl);
-            
-            Log::info('QR Code gerado para usuário: ' . $user->email . ' (label: ' . $accountLabel . ', issuer: ' . config('google2fa.issuer') . ')');
-            Log::info('QR Code URL: ' . $qrCodeUrl);
-            Log::info('QR Code SVG length: ' . strlen($qrCode));
-
-            return response()->json([
-                'success' => true,
-                'qr_code' => $qrCode,
-                'secret' => $user->twofa_secret,
-                'manual_entry_key' => $user->twofa_secret
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Erro ao gerar QR Code 2FA: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'message' => 'Erro interno: ' . $e->getMessage()
-            ], 500);
-        }
+        return response()->json([
+            'success' => false,
+            'message' => 'Fluxo de QR Code desativado. O sistema usa apenas PIN.',
+        ], 410);
     }
 
     /**
@@ -82,7 +40,9 @@ class TwoFactorAuthController extends Controller
             'code' => 'required|string|size:6'
         ]);
 
-        $user = $this->getUserFromRequest($request);
+        // Usar usuário autenticado via JWT
+        /** @var \App\Models\User|null $user */
+        $user = $request->user() ?? $request->user_auth ?? Auth::user();
         
         if (!$user) {
             return response()->json([
@@ -128,13 +88,12 @@ class TwoFactorAuthController extends Controller
                 'code' => 'required|string|size:6'
             ]);
 
-            $user = $this->getUserFromRequest($request);
+            // Usar usuário autenticado via JWT
+            /** @var \App\Models\User|null $user */
+            $user = $request->user() ?? $request->user_auth ?? Auth::user();
             
             if (!$user) {
-                Log::error('Usuário não autenticado', [
-                    'token' => $request->input('token') ? 'presente' : 'ausente',
-                    'secret' => $request->input('secret') ? 'presente' : 'ausente'
-                ]);
+                Log::error('Usuário não autenticado via JWT');
                 return response()->json([
                     'success' => false,
                     'message' => 'Usuário não autenticado'
@@ -182,7 +141,9 @@ class TwoFactorAuthController extends Controller
             'code' => 'required|string|size:6'
         ]);
 
-        $user = $this->getUserFromRequest($request);
+        // Usar usuário autenticado via JWT
+        /** @var \App\Models\User|null $user */
+        $user = $request->user() ?? $request->user_auth ?? Auth::user();
         
         if (!$user) {
             return response()->json([
@@ -225,7 +186,9 @@ class TwoFactorAuthController extends Controller
     public function status(Request $request)
     {
         try {
-            $user = $this->getUserFromRequest($request);
+            // Usar usuário autenticado via JWT
+            /** @var \App\Models\User|null $user */
+            $user = $request->user() ?? $request->user_auth ?? Auth::user();
             
             if (!$user) {
                 return response()->json([
@@ -246,40 +209,6 @@ class TwoFactorAuthController extends Controller
                 'success' => false,
                 'message' => 'Erro interno: ' . $e->getMessage()
             ], 500)->header('Access-Control-Allow-Origin', '*');
-        }
-    }
-
-    /**
-     * Obter usuário do request (usando middleware check.token.secret)
-     */
-    private function getUserFromRequest(Request $request)
-    {
-        try {
-            // O middleware check.token.secret já validou o token e secret
-            // e adicionou o usuário ao request
-            $token = $request->input('token');
-            $secret = $request->input('secret');
-            
-            if (!$token || !$secret) {
-                return null;
-            }
-
-            // Buscar as chaves do usuário
-            $userKeys = \App\Models\UsersKey::where('token', $token)
-                ->where('secret', $secret)
-                ->first();
-            
-            if (!$userKeys) {
-                return null;
-            }
-
-            // Buscar o usuário
-            $user = User::where('username', $userKeys->user_id)->first();
-            
-            return $user;
-        } catch (\Exception $e) {
-            Log::error('Erro ao obter usuário do request: ' . $e->getMessage());
-            return null;
         }
     }
 }
