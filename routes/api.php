@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\Adquirentes\AsaasController;
 use App\Http\Controllers\Api\Adquirentes\PrimePay7Controller;
 use App\Http\Controllers\Api\Adquirentes\XDPagController;
 use Illuminate\Support\Facades\Artisan;
+use App\Http\Controllers\Api\PixInfracoesController;
 
 /* AUTHENTICATION ROUTES */
 Route::options('auth/login', function () {
@@ -93,6 +94,12 @@ Route::options('dashboard/interactive-movement', function () {
 Route::options('dashboard/transaction-summary', function () {
     return response('', 200)->header('Access-Control-Allow-Origin', '*');
 });
+Route::options('pix/infracoes', function () {
+    return response('', 200)->header('Access-Control-Allow-Origin', '*');
+});
+Route::options('qrcodes', function () {
+    return response('', 200)->header('Access-Control-Allow-Origin', '*');
+});
 
 // Rotas protegidas com JWT (para frontend)
 Route::middleware(['verify.jwt'])->group(function () {
@@ -108,6 +115,24 @@ Route::middleware(['verify.jwt'])->group(function () {
     Route::get('dashboard/stats', [UserController::class, 'getDashboardStats']);
     Route::get('dashboard/interactive-movement', [UserController::class, 'getInteractiveMovement']);
     Route::get('dashboard/transaction-summary', [UserController::class, 'getTransactionSummary']);
+
+    // Infrações Pix
+    Route::get('pix/infracoes', [PixInfracoesController::class, 'index']);
+    Route::get('pix/infracoes/{id}', [PixInfracoesController::class, 'show']);
+    
+    // QR Codes (Otimizado)
+    Route::get('qrcodes', [App\Http\Controllers\Api\QRCodeController::class, 'index']);
+    
+    // Dashboard Otimizado
+    Route::get('dashboard/stats-optimized', [App\Http\Controllers\Api\OptimizedDashboardController::class, 'getDashboardStats']);
+    Route::get('dashboard/interactive-movement-optimized', [App\Http\Controllers\Api\OptimizedDashboardController::class, 'getInteractiveMovement']);
+    Route::get('dashboard/transaction-summary-optimized', [App\Http\Controllers\Api\OptimizedDashboardController::class, 'getTransactionSummary']);
+    
+    // Transações Otimizadas
+    Route::get('transactions/recent-optimized', [UserController::class, 'getRecentTransactions']);
+    
+    // Infrações PIX Otimizadas
+    Route::get('pix-infracoes-optimized', [PixInfracoesController::class, 'index']);
     
     // Rotas de notificações
     Route::post('notifications/register-token', [NotificationController::class, 'registerToken']);
