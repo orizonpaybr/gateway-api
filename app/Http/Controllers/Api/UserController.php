@@ -52,6 +52,12 @@ class UserController extends Controller
                 'filtro_status' => ['PAID_OUT', 'COMPLETED']
             ]);
 
+            // Determinar tipo de pessoa por CPF/CNPJ e status legível (Aprovado/Pendente)
+            $doc = preg_replace('/\D/', '', (string) ($user->cpf_cnpj ?? ''));
+            $tipoPessoa = ($doc && strlen($doc) > 11) ? 'PJ' : 'PF';
+            $tipoPessoaLegivel = $tipoPessoa === 'PJ' ? 'Pessoa Jurídica' : 'Pessoa Física';
+            $statusAtual = $user->status == 1 ? 'Aprovado' : 'Pendente';
+
             return response()->json([
                 'success' => true,
                 'data' => [
@@ -747,6 +753,12 @@ class UserController extends Controller
                 ], 401)->header('Access-Control-Allow-Origin', '*');
             }
 
+            // Calcular informações derivadas (tipo PF/PJ e status legível)
+            $doc = preg_replace('/\D/', '', (string) ($user->cpf_cnpj ?? ''));
+            $tipoPessoa = ($doc && strlen($doc) > 11) ? 'PJ' : 'PF';
+            $tipoPessoaLegivel = $tipoPessoa === 'PJ' ? 'Pessoa Jurídica' : 'Pessoa Física';
+            $statusAtual = $user->status == 1 ? 'Aprovado' : 'Pendente';
+
             // Retornar dados do perfil diretamente do usuário autenticado
             Log::info('getProfile - Retornando dados do perfil', [
                 'user_id' => $user->username,
@@ -766,7 +778,59 @@ class UserController extends Controller
                     'status' => $user->status == 1 ? 'active' : 'inactive',
                     'balance' => $user->saldo ?? 0,
                     'agency' => $user->agency ?? '',
-                    'status_text' => $user->status == 1 ? 'Ativo' : 'Inativo',
+                    'status_text' => $statusAtual,
+                    // Informações cadastrais adicionais
+                    'company' => [
+                        'razao_social' => $user->razao_social ?? null,
+                        'nome_fantasia' => $user->nome_fantasia ?? null,
+                        'tipo_pessoa' => $tipoPessoa, // PF/PJ
+                        'tipo' => $tipoPessoaLegivel, // Pessoa Física/Jurídica
+                        'area_atuacao' => $user->area_atuacao ?? null,
+                        'status_cadastro' => $user->status_cadastro ?? null,
+                        'status_atual' => $statusAtual,
+                    ],
+                    'contacts' => [
+                        'telefone_principal' => $user->telefone ?? null,
+                        'email_principal' => $user->email ?? null,
+                    ],
+                    // Campos adicionais para tela de Dados da Conta
+                    'taxes' => [
+                        'deposit' => [
+                            'fixed' => (float) ($user->taxa_fixa_deposito ?? $user->taxa_cash_in_fixa ?? 0),
+                            'percent' => (float) ($user->taxa_percentual_deposito ?? $user->taxa_cash_in ?? 0),
+                            'after_limit_fixed' => (float) ($user->taxa_fixa_baixos ?? 0), // fallback
+                            'after_limit_percent' => (float) ($user->taxa_percentual_altos ?? 0),
+                        ],
+                        'withdraw' => [
+                            'dashboard' => [
+                                'fixed' => (float) ($user->taxa_cash_out_fixa ?? 0),
+                                'percent' => (float) ($user->taxa_cash_out ?? 0),
+                                'after_limit_fixed' => (float) ($user->taxa_fixa_padrao_cash_out ?? 0),
+                                'after_limit_percent' => (float) ($user->taxa_percentual_altos ?? 0),
+                            ],
+                            'api' => [
+                                'fixed' => (float) ($user->taxa_saque_api ?? 0),
+                                'percent' => (float) ($user->taxa_saque_cripto ?? 0),
+                                'after_limit_fixed' => (float) ($user->taxa_fixa_pix ?? 0),
+                                'after_limit_percent' => (float) ($user->taxa_percentual_pix ?? 0),
+                            ],
+                        ],
+                        'affiliate' => [
+                            'fixed' => (float) ($user->taxa_fixa_afiliado ?? 0),
+                            'percent' => (float) ($user->taxa_percentual_afiliado ?? 0),
+                        ],
+                    ],
+                    'limits' => [
+                        'deposit_min' => (float) ($user->taxa_flexivel_valor_minimo ?? 15.00),
+                        'withdraw_min' => (float) ($user->limite_mensal_pf ?? 50.00),
+                        'retention_value' => (float) ($user->retencao_valor ?? 0),
+                        'retention_percent' => (float) ($user->retencao_taxa ?? 0),
+                    ],
+                    'features' => [
+                        'saque_automatico' => (bool) ($user->saque_automatico ?? false),
+                        'saque_via_dashboard' => true,
+                        'saque_via_api' => true,
+                    ],
                 ]
             ])->header('Access-Control-Allow-Origin', '*');
 
