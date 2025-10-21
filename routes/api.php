@@ -115,6 +115,8 @@ Route::middleware(['verify.jwt'])->group(function () {
     Route::get('dashboard/stats', [UserController::class, 'getDashboardStats']);
     Route::get('dashboard/interactive-movement', [UserController::class, 'getInteractiveMovement']);
     Route::get('dashboard/transaction-summary', [UserController::class, 'getTransactionSummary']);
+    Route::get('gamification/journey', [UserController::class, 'getGamificationData']);
+    Route::get('gamification/sidebar', [UserController::class, 'getSidebarGamificationData']);
 
     // Infrações Pix
     Route::get('pix/infracoes', [PixInfracoesController::class, 'index']);
