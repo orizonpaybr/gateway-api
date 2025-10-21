@@ -33,15 +33,27 @@ class UserController extends Controller
                 ], 401)->header('Access-Control-Allow-Origin', '*');
             }
 
-            // Calcular totais de transações (entradas) - apenas COMPLETED e PAID_OUT
-            $totalInflows = \App\Models\Solicitacoes::where('user_id', $user->username)
-                ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
-                ->sum('amount');
+            // Cache Redis para dados de saldo (TTL: 2 minutos)
+            $cacheKey = "user_balance_{$user->username}";
+            $balanceData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 120, function() use ($user) {
+                // Calcular totais de transações (entradas) - apenas COMPLETED e PAID_OUT
+                $totalInflows = \App\Models\Solicitacoes::where('user_id', $user->username)
+                    ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
+                    ->sum('amount');
 
-            // Calcular totais de saques (saídas) - apenas COMPLETED e PAID_OUT
-            $totalOutflows = \App\Models\SolicitacoesCashOut::where('user_id', $user->username)
-                ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
-                ->sum('amount');
+                // Calcular totais de saques (saídas) - apenas COMPLETED e PAID_OUT
+                $totalOutflows = \App\Models\SolicitacoesCashOut::where('user_id', $user->username)
+                    ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
+                    ->sum('amount');
+
+                return [
+                    'totalInflows' => $totalInflows,
+                    'totalOutflows' => $totalOutflows
+                ];
+            });
+
+            $totalInflows = $balanceData['totalInflows'];
+            $totalOutflows = $balanceData['totalOutflows'];
 
             // Log para debug
             Log::info('Saldo calculado', [
@@ -110,17 +122,20 @@ class UserController extends Controller
             $dataInicio = $request->get('data_inicio');
             $dataFim = $request->get('data_fim');
 
-            Log::info('getTransactions - Parâmetros', [
-                'user_id' => $user->username,
-                'page' => $page,
-                'limit' => $limit,
-                'tipo' => $tipo,
-                'status' => $status,
-                'busca' => $busca
-            ]);
-
-            // Buscar depósitos
-            $depositosQuery = \App\Models\Solicitacoes::where('user_id', $user->username)
+            // Cache Redis para transações (TTL: 2 minutos)
+            $cacheKey = sprintf('user_transactions_%s_%s_%s_%s_%s_%s_%s_%s', 
+                $user->username, 
+                $page, 
+                $limit, 
+                $tipo ?? 'all', 
+                $status ?? 'all', 
+                $busca ?? 'none', 
+                $dataInicio ?? 'none', 
+                $dataFim ?? 'none'
+            );
+            
+            $transactionsData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 120, function() use ($user, $page, $limit, $tipo, $status, $busca, $dataInicio, $dataFim) {
+                $depositosQuery = \App\Models\Solicitacoes::where('user_id', $user->username)
                 ->select([
                     'id',
                     'idTransaction',
@@ -228,18 +243,23 @@ class UserController extends Controller
                 ];
             });
 
-            $lastPage = ceil($total / $limit);
+                return [
+                    'transactions' => $transactionsFormatted,
+                    'total' => $total,
+                    'total_pages' => ceil($total / $limit)
+                ];
+            });
 
             return response()->json([
                 'success' => true,
                 'data' => [
-                    'data' => $transactionsFormatted,
+                    'data' => $transactionsData['transactions'],
                     'current_page' => (int) $page,
-                    'last_page' => (int) $lastPage,
+                    'last_page' => (int) $transactionsData['total_pages'],
                     'per_page' => (int) $limit,
-                    'total' => (int) $total,
-                    'from' => $offset + 1,
-                    'to' => min($offset + $limit, $total)
+                    'total' => (int) $transactionsData['total'],
+                    'from' => (($page - 1) * $limit) + 1,
+                    'to' => min($page * $limit, $transactionsData['total'])
                 ]
             ])->header('Access-Control-Allow-Origin', '*');
 
@@ -276,13 +296,11 @@ class UserController extends Controller
                 ], 401)->header('Access-Control-Allow-Origin', '*');
             }
 
-            Log::info('Buscando transação por ID', [
-                'transaction_id' => $id,
-                'user_id' => $user->username
-            ]);
-
-            // Primeiro, procurar nas solicitações de depósito (entradas)
-            $deposito = \App\Models\Solicitacoes::where('user_id', $user->username)
+            // Cache Redis para transação específica (TTL: 5 minutos)
+            $cacheKey = "transaction_by_id_{$user->username}_{$id}";
+            
+            $transactionData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 300, function() use ($user, $id) {
+                $deposito = \App\Models\Solicitacoes::where('user_id', $user->username)
                 ->where(function($query) use ($id) {
                     $query->where('id', $id)
                           ->orWhere('idTransaction', $id)
@@ -290,16 +308,14 @@ class UserController extends Controller
                 })
                 ->first();
 
-            if ($deposito) {
-                Log::info('Transação encontrada em depósitos', [
-                    'id' => $deposito->id,
-                    'status' => $deposito->status,
-                    'amount' => $deposito->amount
-                ]);
+                if ($deposito) {
+                    Log::info('Transação encontrada em depósitos', [
+                        'id' => $deposito->id,
+                        'status' => $deposito->status,
+                        'amount' => $deposito->amount
+                    ]);
 
-                return response()->json([
-                    'success' => true,
-                    'data' => [
+                    return [
                         'id' => $deposito->id,
                         'transaction_id' => $deposito->idTransaction ?? $deposito->externalreference,
                         'tipo' => 'deposito',
@@ -327,29 +343,26 @@ class UserController extends Controller
                         'codigo_autenticacao' => $deposito->idTransaction ?? $deposito->externalreference,
                         'qrcode' => $deposito->qrcode_pix ?? null,
                         'descricao' => $deposito->descricao_transacao ?? 'Pagamento Recebido'
-                    ]
-                ])->header('Access-Control-Allow-Origin', '*');
-            }
+                    ];
+                }
 
-            // Se não encontrou em depósitos, procurar em saques (saídas)
-            $saque = \App\Models\SolicitacoesCashOut::where('user_id', $user->username)
-                ->where(function($query) use ($id) {
-                    $query->where('id', $id)
-                          ->orWhere('idTransaction', $id)
-                          ->orWhere('externalreference', $id);
-                })
-                ->first();
+                // Se não encontrou em depósitos, procurar em saques (saídas)
+                $saque = \App\Models\SolicitacoesCashOut::where('user_id', $user->username)
+                    ->where(function($query) use ($id) {
+                        $query->where('id', $id)
+                              ->orWhere('idTransaction', $id)
+                              ->orWhere('externalreference', $id);
+                    })
+                    ->first();
 
-            if ($saque) {
-                Log::info('Transação encontrada em saques', [
-                    'id' => $saque->id,
-                    'status' => $saque->status,
-                    'amount' => $saque->amount
-                ]);
+                if ($saque) {
+                    Log::info('Transação encontrada em saques', [
+                        'id' => $saque->id,
+                        'status' => $saque->status,
+                        'amount' => $saque->amount
+                    ]);
 
-                return response()->json([
-                    'success' => true,
-                    'data' => [
+                    return [
                         'id' => $saque->id,
                         'transaction_id' => $saque->idTransaction ?? $saque->externalreference,
                         'tipo' => 'saque',
@@ -379,7 +392,17 @@ class UserController extends Controller
                         'codigo_autenticacao' => $saque->idTransaction ?? $saque->externalreference,
                         'end_to_end' => $saque->end_to_end ?? null,
                         'descricao' => $saque->descricao_transacao ?? 'Pagamento Enviado'
-                    ]
+                    ];
+                }
+
+                // Não encontrou a transação
+                return null;
+            });
+
+            if ($transactionData) {
+                return response()->json([
+                    'success' => true,
+                    'data' => $transactionData
                 ])->header('Access-Control-Allow-Origin', '*');
             }
 
@@ -753,22 +776,16 @@ class UserController extends Controller
                 ], 401)->header('Access-Control-Allow-Origin', '*');
             }
 
-            // Calcular informações derivadas (tipo PF/PJ e status legível)
-            $doc = preg_replace('/\D/', '', (string) ($user->cpf_cnpj ?? ''));
-            $tipoPessoa = ($doc && strlen($doc) > 11) ? 'PJ' : 'PF';
-            $tipoPessoaLegivel = $tipoPessoa === 'PJ' ? 'Pessoa Jurídica' : 'Pessoa Física';
-            $statusAtual = $user->status == 1 ? 'Aprovado' : 'Pendente';
+            // Cache Redis para dados do perfil (TTL: 5 minutos)
+            $cacheKey = "user_profile_{$user->username}";
+            $profileData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 300, function() use ($user) {
+                // Calcular informações derivadas (tipo PF/PJ e status legível)
+                $doc = preg_replace('/\D/', '', (string) ($user->cpf_cnpj ?? ''));
+                $tipoPessoa = ($doc && strlen($doc) > 11) ? 'PJ' : 'PF';
+                $tipoPessoaLegivel = $tipoPessoa === 'PJ' ? 'Pessoa Jurídica' : 'Pessoa Física';
+                $statusAtual = $user->status == 1 ? 'Aprovado' : 'Pendente';
 
-            // Retornar dados do perfil diretamente do usuário autenticado
-            Log::info('getProfile - Retornando dados do perfil', [
-                'user_id' => $user->username,
-                'email' => $user->email ?? 'null',
-                'name' => $user->name ?? 'null'
-            ]);
-            
-            return response()->json([
-                'success' => true,
-                'data' => [
+                return [
                     'id' => $user->username,
                     'username' => $user->username,
                     'email' => $user->email ?? '',
@@ -779,12 +796,11 @@ class UserController extends Controller
                     'balance' => $user->saldo ?? 0,
                     'agency' => $user->agency ?? '',
                     'status_text' => $statusAtual,
-                    // Informações cadastrais adicionais
                     'company' => [
                         'razao_social' => $user->razao_social ?? null,
                         'nome_fantasia' => $user->nome_fantasia ?? null,
-                        'tipo_pessoa' => $tipoPessoa, // PF/PJ
-                        'tipo' => $tipoPessoaLegivel, // Pessoa Física/Jurídica
+                        'tipo_pessoa' => $tipoPessoa,
+                        'tipo' => $tipoPessoaLegivel,
                         'area_atuacao' => $user->area_atuacao ?? null,
                         'status_cadastro' => $user->status_cadastro ?? null,
                         'status_atual' => $statusAtual,
@@ -793,12 +809,11 @@ class UserController extends Controller
                         'telefone_principal' => $user->telefone ?? null,
                         'email_principal' => $user->email ?? null,
                     ],
-                    // Campos adicionais para tela de Dados da Conta
                     'taxes' => [
                         'deposit' => [
                             'fixed' => (float) ($user->taxa_fixa_deposito ?? $user->taxa_cash_in_fixa ?? 0),
                             'percent' => (float) ($user->taxa_percentual_deposito ?? $user->taxa_cash_in ?? 0),
-                            'after_limit_fixed' => (float) ($user->taxa_fixa_baixos ?? 0), // fallback
+                            'after_limit_fixed' => (float) ($user->taxa_fixa_baixos ?? 0),
                             'after_limit_percent' => (float) ($user->taxa_percentual_altos ?? 0),
                         ],
                         'withdraw' => [
@@ -831,7 +846,12 @@ class UserController extends Controller
                         'saque_via_dashboard' => true,
                         'saque_via_api' => true,
                     ],
-                ]
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $profileData
             ])->header('Access-Control-Allow-Origin', '*');
 
         } catch (\Exception $e) {
@@ -1586,6 +1606,216 @@ class UserController extends Controller
             
         } catch (\Exception $e) {
             return null;
+        }
+    }
+
+    /**
+     * Obter dados de gamificação para a Sidebar (otimizado com cache Redis)
+     */
+    public function getSidebarGamificationData(Request $request)
+    {
+        try {
+            $user = $request->user() ?? $request->user_auth;
+            if (!$user) {
+                $user = $this->getUserFromToken($request) ?? $this->getUserFromRequest($request);
+            }
+            
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário não autenticado'
+                ], 401)->header('Access-Control-Allow-Origin', '*');
+            }
+
+            // Cache key específica para Sidebar (TTL: 3 minutos - mais frequente)
+            $cacheKey = "sidebar_gamification_user_{$user->id}";
+            
+            // Tentar obter dados do cache Redis primeiro
+            $cachedData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 180, function() use ($user) {
+                $gamificationData = \App\Helpers\Helper::meuNivel($user);
+                
+                // Calcular dados específicos para Sidebar
+                $currentLevel = $gamificationData['nivel_atual'];
+                $nextLevel = $gamificationData['proximo_nivel'];
+                
+                return [
+                    'current_level' => $currentLevel ? $currentLevel->nome : null,
+                    'total_deposited' => $gamificationData['total_depositos'],
+                    'current_level_max' => $currentLevel ? $currentLevel->maximo : 100000,
+                    'next_level' => $nextLevel ? [
+                        'name' => $nextLevel->nome,
+                        'minimo' => $nextLevel->minimo,
+                        'maximo' => $nextLevel->maximo
+                    ] : null
+                ];
+            });
+            
+            return response()->json([
+                'success' => true,
+                'data' => $cachedData
+            ])->header('Access-Control-Allow-Origin', '*');
+            
+        } catch (\Exception $e) {
+            Log::error('Erro ao obter dados de gamificação da Sidebar', [
+                'user_id' => $user->id ?? 'unknown',
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor'
+            ], 500)->header('Access-Control-Allow-Origin', '*');
+        }
+    }
+    public function getGamificationData(Request $request)
+    {
+        try {
+            $user = $request->user() ?? $request->user_auth;
+            if (!$user) {
+                $user = $this->getUserFromToken($request) ?? $this->getUserFromRequest($request);
+            }
+            
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário não autenticado'
+                ], 401)->header('Access-Control-Allow-Origin', '*');
+            }
+
+            // Cache key única para o usuário (TTL: 5 minutos)
+            $cacheKey = "gamification_data_user_{$user->id}";
+            
+            // Tentar obter dados do cache Redis primeiro
+            $cachedData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 300, function() use ($user) {
+                return [
+                    'gamification' => \App\Helpers\Helper::meuNivel($user),
+                    'levels' => \App\Helpers\Helper::getNiveis()->sortBy('minimo')->values()
+                ];
+            });
+            
+            $gamificationData = $cachedData['gamification'];
+            $allLevels = $cachedData['levels'];
+            
+            // Calcular progresso para cada nível
+            $achievementTrail = [];
+            foreach ($allLevels as $index => $level) {
+                $isCurrentLevel = $level->id === ($gamificationData['nivel_atual']->id ?? null);
+                $isCompleted = $gamificationData['total_depositos'] >= $level->maximo;
+                $isLocked = $gamificationData['total_depositos'] < $level->minimo;
+                
+                $status = 'Bloqueado';
+                $color = 'text-gray-400';
+                $bgColor = 'bg-gray-400';
+                $progress = 0;
+                
+                if ($isCompleted) {
+                    $status = 'Concluído';
+                    $color = 'text-green-500';
+                    $bgColor = 'bg-green-500';
+                    $progress = 100;
+                } else if ($isCurrentLevel) {
+                    $status = 'Em progresso';
+                    $color = 'text-orange-500';
+                    $bgColor = 'bg-orange-500';
+                    $progress = min(($gamificationData['total_depositos'] / $level->maximo) * 100, 100);
+                }
+                
+                $achievementTrail[] = [
+                    'id' => $level->id,
+                    'name' => $level->nome,
+                    'amount' => 'R$ ' . number_format($level->maximo, 0, ',', '.'),
+                    'status' => $status,
+                    'color' => $color,
+                    'bgColor' => $bgColor,
+                    'progress' => $progress,
+                    'minimo' => $level->minimo,
+                    'maximo' => $level->maximo,
+                    'cor' => $level->cor,
+                    'icone' => $level->icone
+                ];
+            }
+            
+            // Calcular próximo nível e progresso atual
+            $currentLevel = $gamificationData['nivel_atual'];
+            $nextLevel = $gamificationData['proximo_nivel'];
+            $currentProgress = 0;
+            
+            if ($currentLevel && $nextLevel) {
+                $currentProgress = (($gamificationData['total_depositos'] - $currentLevel->minimo) / 
+                    ($nextLevel->minimo - $currentLevel->minimo)) * 100;
+            } else if ($currentLevel && !$nextLevel) {
+                $currentProgress = 100; // Nível máximo
+            }
+            
+            $response = [
+                'success' => true,
+                'data' => [
+                    'current_level' => $currentLevel ? $currentLevel->nome : null,
+                    'total_deposited' => $gamificationData['total_depositos'],
+                    'current_progress' => min($currentProgress, 100),
+                    'next_level' => $nextLevel ? [
+                        'name' => $nextLevel->nome,
+                        'minimo' => $nextLevel->minimo,
+                        'maximo' => $nextLevel->maximo
+                    ] : null,
+                    'achievement_trail' => $achievementTrail,
+                    'achievement_messages' => [
+                        [
+                            'level' => 'Bronze',
+                            'message' => 'Parabéns! Você deu o primeiro passo na sua jornada. Continue assim e veja sua confiança crescer!',
+                            'icon' => '/icons8-medalha-de-terceiro-lugar-48.png'
+                        ],
+                        [
+                            'level' => 'Prata',
+                            'message' => 'Excelente evolução! Você está colhendo os frutos do seu esforço. Parabéns pela dedicação!',
+                            'icon' => '/icons8-medalha-de-segundo-lugar-80.png'
+                        ],
+                        [
+                            'level' => 'Ouro',
+                            'message' => 'Impressionante! Sua persistência está dando resultados. Você está entre os melhores!',
+                            'icon' => '/icons8-medalha-de-primeiro-lugar-48.png'
+                        ],
+                        [
+                            'level' => 'Safira',
+                            'message' => 'Extraordinário! Você é um vencedor de verdade. Sua determinação inspira outros!',
+                            'icon' => '/icons8-logotipo-safira-48.png'
+                        ],
+                        [
+                            'level' => 'Diamante',
+                            'message' => 'Parabéns! Você alcançou o ápice da Jornada Orizon! Sua dedicação e excelência são verdadeiramente inspiradoras.',
+                            'icon' => '/icons8-diamante-64.png'
+                        ]
+                    ],
+                    'summary_cards' => [
+                        'total_deposited' => 'R$ ' . number_format($gamificationData['total_depositos'], 2, ',', '.'),
+                        'current_level' => $currentLevel ? $currentLevel->nome : null,
+                        'next_goal' => $nextLevel ? 
+                            'R$ ' . number_format($currentLevel->maximo - $gamificationData['total_depositos'], 0, ',', '.') : 
+                            'Concluído!'
+                    ]
+                ]
+            ];
+
+            Log::info('Dados de gamificação obtidos (com cache Redis)', [
+                'user_id' => $user->username,
+                'current_level' => $currentLevel ? $currentLevel->nome : null,
+                'total_deposited' => $gamificationData['total_depositos'],
+                'cache_key' => $cacheKey
+            ]);
+
+            return response()->json($response)->header('Access-Control-Allow-Origin', '*');
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao obter dados de gamificação', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor'
+            ], 500)->header('Access-Control-Allow-Origin', '*');
         }
     }
 }
