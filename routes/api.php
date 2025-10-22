@@ -70,6 +70,9 @@ Route::options('pix/withdraw', function () {
 Route::options('statement', function () {
     return response('', 200)->header('Access-Control-Allow-Origin', '*');
 });
+Route::options('extrato', function () {
+    return response('', 200)->header('Access-Control-Allow-Origin', '*');
+});
 Route::options('notifications', function () {
     return response('', 200)->header('Access-Control-Allow-Origin', '*');
 });
@@ -111,6 +114,7 @@ Route::middleware(['verify.jwt'])->group(function () {
     Route::post('pix/generate-qr', [UserController::class, 'generatePixQR']);
     Route::post('pix/withdraw', [UserController::class, 'makePixWithdraw']);
     Route::get('statement', [UserController::class, 'getStatement']);
+    Route::get('extrato', [UserController::class, 'getExtrato']);
     Route::get('user/real-data', [UserController::class, 'getRealData']);
     Route::get('dashboard/stats', [UserController::class, 'getDashboardStats']);
     Route::get('dashboard/interactive-movement', [UserController::class, 'getInteractiveMovement']);

@@ -755,6 +755,215 @@ class UserController extends Controller
     }
 
     /**
+     * Obter extrato completo com paginação e cache Redis
+     */
+    public function getExtrato(Request $request)
+    {
+        try {
+            $user = $request->user() ?? $request->user_auth;
+            if (!$user) {
+                $user = $this->getUserFromToken($request) ?? $this->getUserFromRequest($request);
+            }
+            
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário não autenticado'
+                ], 401)->header('Access-Control-Allow-Origin', '*');
+            }
+
+            // Parâmetros de paginação
+            $page = max((int) $request->get('page', 1), 1);
+            $limit = min((int) $request->get('limit', 20), 100); // Máximo 100 por página
+            
+            // Parâmetros de filtro
+            $periodo = $request->get('periodo', 'hoje');
+            $dataInicio = $request->get('data_inicio');
+            $dataFim = $request->get('data_fim');
+            $busca = trim($request->get('busca', ''));
+            $tipo = $request->get('tipo'); // 'entrada', 'saida', ou null (todos)
+
+            // Cache Redis para extrato (TTL: 3 minutos)
+            $cacheKey = sprintf(
+                'extrato:%s:%d:%d:%s:%s:%s:%s:%s',
+                $user->username,
+                $page,
+                $limit,
+                $periodo,
+                $dataInicio ?: 'null',
+                $dataFim ?: 'null',
+                md5($busca ?: ''),
+                $tipo ?: 'all'
+            );
+
+            $extratoData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 180, function() use ($user, $page, $limit, $periodo, $dataInicio, $dataFim, $busca, $tipo) {
+                
+                // Calcular datas baseado no período
+                $dates = $this->calculateDateRange($periodo, $dataInicio, $dataFim);
+                
+                // Buscar dados de entradas (depósitos) - apenas COMPLETED e PAID_OUT
+                $entradasQuery = \App\Models\Solicitacoes::where('user_id', $user->username)
+                    ->whereBetween('date', [$dates['inicio'], $dates['fim']])
+                    ->whereIn('status', ['PAID_OUT', 'COMPLETED']);
+
+                // Aplicar filtro de busca se fornecido
+                if ($busca) {
+                    $entradasQuery->where(function($query) use ($busca) {
+                        $query->where('transaction_id', 'like', "%{$busca}%")
+                              ->orWhere('nome_cliente', 'like', "%{$busca}%")
+                              ->orWhere('documento', 'like', "%{$busca}%");
+                    });
+                }
+
+                // Buscar dados de saídas (saques) - apenas COMPLETED e PAID_OUT
+                $saidasQuery = \App\Models\SolicitacoesCashOut::where('user_id', $user->username)
+                    ->whereBetween('date', [$dates['inicio'], $dates['fim']])
+                    ->whereIn('status', ['PAID_OUT', 'COMPLETED']);
+
+                // Aplicar filtro de busca se fornecido
+                if ($busca) {
+                    $saidasQuery->where(function($query) use ($busca) {
+                        $query->where('transaction_id', 'like', "%{$busca}%")
+                              ->orWhere('nome_cliente', 'like', "%{$busca}%")
+                              ->orWhere('documento', 'like', "%{$busca}%");
+                    });
+                }
+
+                // Calcular totais
+                $totalEntradas = $entradasQuery->sum('amount');
+                $totalEntradasLiquidas = $entradasQuery->sum('deposito_liquido');
+                $totalTaxasEntradas = $entradasQuery->sum('taxa_cash_in');
+
+                $totalSaidas = $saidasQuery->sum('amount');
+                $totalSaidasLiquidas = $saidasQuery->sum('cash_out_liquido');
+                $totalTaxasSaidas = $saidasQuery->sum('taxa_cash_out');
+
+                // Buscar transações para o extrato
+                $transacoesEntradas = $entradasQuery->orderBy('date', 'desc')->get();
+                $transacoesSaidas = $saidasQuery->orderBy('date', 'desc')->get();
+                
+                // Combinar e ordenar transações
+                $extrato = collect();
+                
+                // Adicionar entradas com tipo 'entrada'
+                foreach ($transacoesEntradas as $entrada) {
+                    $extrato->push([
+                        'id' => $entrada->id,
+                        'transaction_id' => $entrada->transaction_id,
+                        'tipo' => 'entrada',
+                        'descricao' => $entrada->descricao ?: 'Depósito',
+                        'valor' => (float) $entrada->amount,
+                        'valor_liquido' => (float) $entrada->deposito_liquido,
+                        'taxa' => (float) $entrada->taxa_cash_in,
+                        'status' => $entrada->status,
+                        'status_legivel' => $this->getStatusLegivel($entrada->status),
+                        'data' => $entrada->date,
+                        'created_at' => $entrada->created_at,
+                        'nome_cliente' => $entrada->nome_cliente,
+                        'documento' => $entrada->documento,
+                        'adquirente' => $entrada->adquirente,
+                        'end_to_end' => $entrada->end_to_end ?? null,
+                    ]);
+                }
+                
+                // Adicionar saídas com tipo 'saida'
+                foreach ($transacoesSaidas as $saida) {
+                    $extrato->push([
+                        'id' => $saida->id,
+                        'transaction_id' => $saida->transaction_id,
+                        'tipo' => 'saida',
+                        'descricao' => $saida->descricao ?: 'Saque',
+                        'valor' => (float) $saida->amount,
+                        'valor_liquido' => (float) $saida->cash_out_liquido,
+                        'taxa' => (float) $saida->taxa_cash_out,
+                        'status' => $saida->status,
+                        'status_legivel' => $this->getStatusLegivel($saida->status),
+                        'data' => $saida->date,
+                        'created_at' => $saida->created_at,
+                        'nome_cliente' => $saida->nome_cliente,
+                        'documento' => $saida->documento,
+                        'adquirente' => $saida->adquirente,
+                        'end_to_end' => $saida->end_to_end ?? null,
+                    ]);
+                }
+
+                // Aplicar filtro de tipo se especificado
+                if ($tipo === 'entrada') {
+                    $extrato = $extrato->where('tipo', 'entrada');
+                } elseif ($tipo === 'saida') {
+                    $extrato = $extrato->where('tipo', 'saida');
+                }
+
+                // Ordenar por data decrescente
+                $extrato = $extrato->sortByDesc('data')->values();
+
+                // Aplicar paginação
+                $totalItems = $extrato->count();
+                $totalPages = ceil($totalItems / $limit);
+                $offset = ($page - 1) * $limit;
+                $paginatedExtrato = $extrato->slice($offset, $limit)->values();
+
+                return [
+                    'data' => $paginatedExtrato,
+                    'current_page' => $page,
+                    'last_page' => $totalPages,
+                    'per_page' => $limit,
+                    'total' => $totalItems,
+                    'from' => $offset + 1,
+                    'to' => min($offset + $limit, $totalItems),
+                    'resumo' => [
+                        'total_entradas' => $totalEntradas,
+                        'total_entradas_liquidas' => $totalEntradasLiquidas,
+                        'total_taxas_entradas' => $totalTaxasEntradas,
+                        'total_saidas' => $totalSaidas,
+                        'total_saidas_liquidas' => $totalSaidasLiquidas,
+                        'total_taxas_saidas' => $totalTaxasSaidas,
+                        'saldo_atual' => $user->saldo ?? 0,
+                        'saldo_periodo' => $totalEntradasLiquidas - $totalSaidasLiquidas,
+                    ],
+                    'periodo' => $periodo,
+                    'data_inicio' => $dates['inicio']->format('Y-m-d'),
+                    'data_fim' => $dates['fim']->format('Y-m-d'),
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $extratoData
+            ])->header('Access-Control-Allow-Origin', '*');
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao obter extrato', [
+                'error' => $e->getMessage(),
+                'user_id' => $user->username ?? 'unknown',
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor'
+            ], 500)->header('Access-Control-Allow-Origin', '*');
+        }
+    }
+
+    /**
+     * Obter status legível para transações
+     */
+    private function getStatusLegivel($status)
+    {
+        $statusMap = [
+            'COMPLETED' => 'Concluída',
+            'PAID_OUT' => 'Pago',
+            'PENDING' => 'Pendente',
+            'FAILED' => 'Falhou',
+            'CANCELLED' => 'Cancelada',
+            'PROCESSING' => 'Processando',
+        ];
+
+        return $statusMap[$status] ?? ucfirst(strtolower($status));
+    }
+
+    /**
      * Obter perfil completo do usuário
      */
     public function getProfile(Request $request)
