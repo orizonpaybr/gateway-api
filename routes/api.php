@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\Adquirentes\PrimePay7Controller;
 use App\Http\Controllers\Api\Adquirentes\XDPagController;
 use Illuminate\Support\Facades\Artisan;
 use App\Http\Controllers\Api\PixInfracoesController;
+use App\Http\Controllers\Api\PixKeyController;
 
 /* AUTHENTICATION ROUTES */
 Route::options('auth/login', function () {
@@ -103,6 +104,18 @@ Route::options('pix/infracoes', function () {
 Route::options('qrcodes', function () {
     return response('', 200)->header('Access-Control-Allow-Origin', '*');
 });
+Route::options('pix/keys', function () {
+    return response('', 200)->header('Access-Control-Allow-Origin', '*');
+});
+Route::options('pix/keys/{id}', function () {
+    return response('', 200)->header('Access-Control-Allow-Origin', '*');
+});
+Route::options('pix/keys/{id}/set-default', function () {
+    return response('', 200)->header('Access-Control-Allow-Origin', '*');
+});
+Route::options('pix/withdraw-with-key', function () {
+    return response('', 200)->header('Access-Control-Allow-Origin', '*');
+});
 
 // Rotas protegidas com JWT (para frontend)
 Route::middleware(['verify.jwt'])->group(function () {
@@ -125,6 +138,15 @@ Route::middleware(['verify.jwt'])->group(function () {
     // Infrações Pix
     Route::get('pix/infracoes', [PixInfracoesController::class, 'index']);
     Route::get('pix/infracoes/{id}', [PixInfracoesController::class, 'show']);
+    
+    // Chaves PIX
+    Route::get('pix/keys', [PixKeyController::class, 'index']);
+    Route::post('pix/keys', [PixKeyController::class, 'store']);
+    Route::get('pix/keys/{id}', [PixKeyController::class, 'show']);
+    Route::put('pix/keys/{id}', [PixKeyController::class, 'update']);
+    Route::delete('pix/keys/{id}', [PixKeyController::class, 'destroy']);
+    Route::post('pix/keys/{id}/set-default', [PixKeyController::class, 'setDefault']);
+    Route::post('pix/withdraw-with-key', [PixKeyController::class, 'withdraw']);
     
     // QR Codes (Otimizado)
     Route::get('qrcodes', [App\Http\Controllers\Api\QRCodeController::class, 'index']);
