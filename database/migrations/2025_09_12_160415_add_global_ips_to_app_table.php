@@ -12,7 +12,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('app', function (Blueprint $table) {
-            $table->json('global_ips')->nullable()->after('taxa_pix_valor_real_cash_in_padrao')
+            $table->json('global_ips')->nullable()
                 ->comment('IPs globais autorizados para todos os usuários (interface web)');
         });
     }

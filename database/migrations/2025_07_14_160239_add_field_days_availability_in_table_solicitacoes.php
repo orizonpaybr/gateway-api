@@ -12,8 +12,8 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('solicitacoes', function (Blueprint $table) {
-            $table->longText('banking_billet')->nullable()->default(NULL)->after('split_percentage')->change();
-            $table->integer('days_availability')->nullable()->default(NULL)->after('banking_billet');
+            $table->longText('banking_billet')->nullable()->default(NULL)->change();
+            $table->integer('days_availability')->nullable()->default(NULL);
         });
     }
 

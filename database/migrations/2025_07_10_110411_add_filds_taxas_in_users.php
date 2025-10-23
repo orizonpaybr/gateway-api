@@ -12,8 +12,8 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            $table->decimal('taxa_cash_in_fixa',10,2)->default(0)->after('taxa_cash_in');
-            $table->decimal('taxa_cash_out_fixa',10,2)->default(0)->after('taxa_cash_out');
+            $table->decimal('taxa_cash_in_fixa',10,2)->default(0);
+            $table->decimal('taxa_cash_out_fixa',10,2)->default(0);
         });
     }
 

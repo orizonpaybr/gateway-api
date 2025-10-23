@@ -13,8 +13,8 @@ return new class extends Migration
     {
         Schema::table('app', function (Blueprint $table) {
             // Campos para taxas de saque específicas
-            $table->decimal('taxa_saque_api_padrao', 10, 2)->default(5.00)->after('taxa_cash_out_padrao');
-            $table->decimal('taxa_saque_cripto_padrao', 10, 2)->default(1.00)->after('taxa_saque_api_padrao');
+            $table->decimal('taxa_saque_api_padrao', 10, 2)->default(5.00);
+            $table->decimal('taxa_saque_cripto_padrao', 10, 2)->default(1.00);
         });
     }
 

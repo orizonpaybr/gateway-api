@@ -12,9 +12,15 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            $table->string('twofa_secret')->nullable();
-            $table->boolean('twofa_enabled')->default(false);
-            $table->timestamp('twofa_enabled_at')->nullable();
+            if (!Schema::hasColumn('users', 'twofa_secret')) {
+                $table->string('twofa_secret')->nullable();
+            }
+            if (!Schema::hasColumn('users', 'twofa_enabled')) {
+                $table->boolean('twofa_enabled')->default(false);
+            }
+            if (!Schema::hasColumn('users', 'twofa_enabled_at')) {
+                $table->timestamp('twofa_enabled_at')->nullable();
+            }
         });
     }
 

@@ -13,25 +13,25 @@ return new class extends Migration
     {
         Schema::table('app', function (Blueprint $table) {
             // Campos para personalização de relatórios de ENTRADAS
-            $table->boolean('relatorio_entradas_mostrar_meio')->default(true)->after('taxa_flexivel_percentual_alto');
-            $table->boolean('relatorio_entradas_mostrar_transacao_id')->default(true)->after('relatorio_entradas_mostrar_meio');
-            $table->boolean('relatorio_entradas_mostrar_valor')->default(true)->after('relatorio_entradas_mostrar_transacao_id');
-            $table->boolean('relatorio_entradas_mostrar_valor_liquido')->default(true)->after('relatorio_entradas_mostrar_valor');
-            $table->boolean('relatorio_entradas_mostrar_nome')->default(true)->after('relatorio_entradas_mostrar_valor_liquido');
-            $table->boolean('relatorio_entradas_mostrar_documento')->default(true)->after('relatorio_entradas_mostrar_nome');
-            $table->boolean('relatorio_entradas_mostrar_status')->default(true)->after('relatorio_entradas_mostrar_documento');
-            $table->boolean('relatorio_entradas_mostrar_data')->default(true)->after('relatorio_entradas_mostrar_status');
-            $table->boolean('relatorio_entradas_mostrar_taxa')->default(true)->after('relatorio_entradas_mostrar_data');
+            $table->boolean('relatorio_entradas_mostrar_meio')->default(true);
+            $table->boolean('relatorio_entradas_mostrar_transacao_id')->default(true);
+            $table->boolean('relatorio_entradas_mostrar_valor')->default(true);
+            $table->boolean('relatorio_entradas_mostrar_valor_liquido')->default(true);
+            $table->boolean('relatorio_entradas_mostrar_nome')->default(true);
+            $table->boolean('relatorio_entradas_mostrar_documento')->default(true);
+            $table->boolean('relatorio_entradas_mostrar_status')->default(true);
+            $table->boolean('relatorio_entradas_mostrar_data')->default(true);
+            $table->boolean('relatorio_entradas_mostrar_taxa')->default(true);
             
             // Campos para personalização de relatórios de SAÍDAS
-            $table->boolean('relatorio_saidas_mostrar_transacao_id')->default(true)->after('relatorio_entradas_mostrar_taxa');
-            $table->boolean('relatorio_saidas_mostrar_valor')->default(true)->after('relatorio_saidas_mostrar_transacao_id');
-            $table->boolean('relatorio_saidas_mostrar_nome')->default(true)->after('relatorio_saidas_mostrar_valor');
-            $table->boolean('relatorio_saidas_mostrar_chave_pix')->default(true)->after('relatorio_saidas_mostrar_nome');
-            $table->boolean('relatorio_saidas_mostrar_tipo_chave')->default(true)->after('relatorio_saidas_mostrar_chave_pix');
-            $table->boolean('relatorio_saidas_mostrar_status')->default(true)->after('relatorio_saidas_mostrar_tipo_chave');
-            $table->boolean('relatorio_saidas_mostrar_data')->default(true)->after('relatorio_saidas_mostrar_status');
-            $table->boolean('relatorio_saidas_mostrar_taxa')->default(true)->after('relatorio_saidas_mostrar_data');
+            $table->boolean('relatorio_saidas_mostrar_transacao_id')->default(true);
+            $table->boolean('relatorio_saidas_mostrar_valor')->default(true);
+            $table->boolean('relatorio_saidas_mostrar_nome')->default(true);
+            $table->boolean('relatorio_saidas_mostrar_chave_pix')->default(true);
+            $table->boolean('relatorio_saidas_mostrar_tipo_chave')->default(true);
+            $table->boolean('relatorio_saidas_mostrar_status')->default(true);
+            $table->boolean('relatorio_saidas_mostrar_data')->default(true);
+            $table->boolean('relatorio_saidas_mostrar_taxa')->default(true);
         });
     }
 

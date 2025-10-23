@@ -11,26 +11,26 @@ return new class extends Migration
         Schema::table('users', function (Blueprint $table) {
             // Informações cadastrais
             if (!Schema::hasColumn('users', 'area_atuacao')) {
-                $table->string('area_atuacao')->nullable()->after('razao_social');
+                $table->string('area_atuacao')->nullable();
             }
             if (!Schema::hasColumn('users', 'status_cadastro')) {
-                $table->string('status_cadastro')->nullable()->after('area_atuacao');
+                $table->string('status_cadastro')->nullable();
             }
 
             // Retenção
             if (!Schema::hasColumn('users', 'retencao_valor')) {
-                $table->decimal('retencao_valor', 10, 2)->default(0.00)->after('valor_pago_taxa');
+                $table->decimal('retencao_valor', 10, 2)->default(0.00);
             }
             if (!Schema::hasColumn('users', 'retencao_taxa')) {
-                $table->decimal('retencao_taxa', 5, 2)->default(0.00)->after('retencao_valor');
+                $table->decimal('retencao_taxa', 5, 2)->default(0.00);
             }
 
             // Taxas de afiliado
             if (!Schema::hasColumn('users', 'taxa_fixa_afiliado')) {
-                $table->decimal('taxa_fixa_afiliado', 10, 2)->default(0.00)->after('taxa_percentual');
+                $table->decimal('taxa_fixa_afiliado', 10, 2)->default(0.00);
             }
             if (!Schema::hasColumn('users', 'taxa_percentual_afiliado')) {
-                $table->decimal('taxa_percentual_afiliado', 5, 2)->default(0.00)->after('taxa_fixa_afiliado');
+                $table->decimal('taxa_percentual_afiliado', 5, 2)->default(0.00);
             }
         });
     }

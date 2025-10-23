@@ -12,7 +12,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('checkout_build', function (Blueprint $table) {
-            $table->string('checkout_ads_utmfy')->nullable()->after('checkout_ads_tiktok');
+            $table->string('checkout_ads_utmfy')->nullable();
         });
     }
 

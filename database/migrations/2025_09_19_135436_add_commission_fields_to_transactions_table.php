@@ -12,11 +12,11 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('transactions', function (Blueprint $table) {
-            $table->string('gerente_id')->nullable()->after('user_id');
-            $table->string('solicitacao_id')->nullable()->after('gerente_id');
-            $table->decimal('comission_value', 10, 2)->default(0.00)->after('solicitacao_id');
-            $table->decimal('transaction_percent', 5, 2)->default(0.00)->after('comission_value');
-            $table->decimal('comission_percent', 5, 2)->default(0.00)->after('transaction_percent');
+            $table->string('gerente_id')->nullable();
+            $table->string('solicitacao_id')->nullable();
+            $table->decimal('comission_value', 10, 2)->default(0.00);
+            $table->decimal('transaction_percent', 5, 2)->default(0.00);
+            $table->decimal('comission_percent', 5, 2)->default(0.00);
         });
     }
 

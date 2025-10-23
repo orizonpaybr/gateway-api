@@ -12,7 +12,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            $table->integer('permission')->default(1)->description("1: User, >2: Admin")->after('twofa_secret');
+            $table->integer('permission')->default(1)->description("1: User, >2: Admin");
         });
     }
 

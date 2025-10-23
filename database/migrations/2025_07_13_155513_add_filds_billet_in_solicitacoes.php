@@ -12,9 +12,9 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('solicitacoes', function (Blueprint $table) {
-            $table->enum('method', ['pix','billet','card'])->default('pix')->after('id');
-            $table->string('expire_at')->nullable()->default(NULL)->after('updated_at');
-            $table->string('billet_download')->nullable()->default(NULL)->after('paymentCodeBase64');
+            $table->enum('method', ['pix','billet','card'])->default('pix');
+            $table->string('expire_at')->nullable()->default(NULL);
+            $table->string('billet_download')->nullable()->default(NULL);
         });
     }
 

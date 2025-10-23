@@ -12,9 +12,9 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('primepay7', function (Blueprint $table) {
-            $table->string('private_key')->nullable()->after('client_secret');
-            $table->string('public_key')->nullable()->after('private_key');
-            $table->string('withdrawal_key')->nullable()->after('public_key');
+            $table->string('private_key')->nullable();
+            $table->string('public_key')->nullable();
+            $table->string('withdrawal_key')->nullable();
         });
     }
 

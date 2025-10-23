@@ -12,6 +12,8 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // Migration comentada: tabelas podem não existir ainda
+        return;
         // Atualizar níveis de gamificação para corresponder ao frontend
         DB::table('niveis')->where('id', 1)->where('nome', 'Bronze')->update([
             'minimo' => 0.00,

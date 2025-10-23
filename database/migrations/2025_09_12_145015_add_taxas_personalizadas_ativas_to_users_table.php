@@ -13,7 +13,7 @@ return new class extends Migration
     {
         Schema::table('users', function (Blueprint $table) {
             // Campo master para ativar/desativar taxas personalizadas
-            $table->boolean('taxas_personalizadas_ativas')->default(false)->after('integracao_utmfy');
+            $table->boolean('taxas_personalizadas_ativas')->default(false);
         });
     }
 

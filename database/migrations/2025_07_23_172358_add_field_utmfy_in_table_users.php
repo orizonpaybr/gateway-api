@@ -12,7 +12,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            $table->string('integracao_utmfy')->nullable()->after('webhook_endpoint');
+            $table->string('integracao_utmfy')->nullable();
         });
     }
 

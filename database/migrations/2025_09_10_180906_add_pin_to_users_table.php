@@ -12,9 +12,9 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            $table->string('pin', 255)->nullable()->after('password');
-            $table->boolean('pin_active')->default(false)->after('pin');
-            $table->timestamp('pin_created_at')->nullable()->after('pin_active');
+            $table->string('pin', 255)->nullable();
+            $table->boolean('pin_active')->default(false);
+            $table->timestamp('pin_created_at')->nullable();
         });
     }
 

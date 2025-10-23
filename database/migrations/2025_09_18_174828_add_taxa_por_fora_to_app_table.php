@@ -12,7 +12,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('app', function (Blueprint $table) {
-            $table->boolean('taxa_por_fora_api')->default(true)->after('taxa_saque_cripto_padrao');
+            $table->boolean('taxa_por_fora_api')->default(true);
         });
     }
 

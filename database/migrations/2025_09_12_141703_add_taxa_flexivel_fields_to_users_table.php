@@ -12,10 +12,10 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            $table->boolean('taxa_flexivel_ativa')->default(false)->after('taxa_cash_out_fixa');
-            $table->decimal('taxa_flexivel_valor_minimo', 10, 2)->nullable()->after('taxa_flexivel_ativa');
-            $table->decimal('taxa_flexivel_fixa_baixo', 10, 2)->nullable()->after('taxa_flexivel_valor_minimo');
-            $table->decimal('taxa_flexivel_percentual_alto', 10, 2)->nullable()->after('taxa_flexivel_fixa_baixo');
+            $table->boolean('taxa_flexivel_ativa')->default(false);
+            $table->decimal('taxa_flexivel_valor_minimo', 10, 2)->nullable();
+            $table->decimal('taxa_flexivel_fixa_baixo', 10, 2)->nullable();
+            $table->decimal('taxa_flexivel_percentual_alto', 10, 2)->nullable();
         });
     }
 

@@ -12,7 +12,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('solicitacoes', function (Blueprint $table) {
-            $table->string('woovi_identifier')->nullable()->after('idTransaction');
+            $table->string('woovi_identifier')->nullable();
         });
     }
 

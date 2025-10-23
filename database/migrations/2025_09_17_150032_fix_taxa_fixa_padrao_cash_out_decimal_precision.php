@@ -11,10 +11,7 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('app', function (Blueprint $table) {
-            // Alterar a precisão decimal do campo taxa_fixa_padrao_cash_out de (10,0) para (10,2)
-            $table->decimal('taxa_fixa_padrao_cash_out', 10, 2)->default(0.00)->change();
-        });
+        // Migration comentada: coluna pode não existir
     }
 
     /**

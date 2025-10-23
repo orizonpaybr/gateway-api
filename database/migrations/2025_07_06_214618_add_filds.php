@@ -12,8 +12,8 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('ad_mercadopago', function (Blueprint $table) {
-            $table->decimal('taxa_pix_cash_in', 10, 2)->default(5.00)->after('access_token');
-            $table->decimal('taxa_pix_cash_out', 10, 2)->default(5.00)->after('taxa_pix_cash_in');
+            $table->decimal('taxa_pix_cash_in', 10, 2)->default(5.00);
+            $table->decimal('taxa_pix_cash_out', 10, 2)->default(5.00);
         });
     }
 

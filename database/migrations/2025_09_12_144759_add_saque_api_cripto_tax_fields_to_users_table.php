@@ -13,8 +13,8 @@ return new class extends Migration
     {
         Schema::table('users', function (Blueprint $table) {
             // Campos para taxas de saque específicas do usuário
-            $table->decimal('taxa_saque_api', 10, 2)->nullable()->after('taxa_cash_out_fixa');
-            $table->decimal('taxa_saque_cripto', 10, 2)->nullable()->after('taxa_saque_api');
+            $table->decimal('taxa_saque_api', 10, 2)->nullable();
+            $table->decimal('taxa_saque_cripto', 10, 2)->nullable();
         });
     }
 

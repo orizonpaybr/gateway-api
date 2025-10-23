@@ -11,9 +11,7 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('users', function (Blueprint $table) {
-            $table->string('pin', 255)->nullable()->change();
-        });
+        // Migration comentada: coluna pode não existir
     }
 
     /**

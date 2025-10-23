@@ -22,7 +22,7 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('woovi', function (Blueprint $table) {
-            $table->string('app_id')->unique()->after('id');
+            $table->string('app_id')->unique();
         });
     }
 };

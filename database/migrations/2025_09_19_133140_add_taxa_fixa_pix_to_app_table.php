@@ -12,7 +12,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('app', function (Blueprint $table) {
-            $table->decimal('taxa_fixa_pix', 10, 2)->default(0.00)->after('baseline');
+            $table->decimal('taxa_fixa_pix', 10, 2)->default(0.00);
         });
     }
 
