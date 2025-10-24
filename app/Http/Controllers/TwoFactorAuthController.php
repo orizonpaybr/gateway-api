@@ -164,7 +164,8 @@ class TwoFactorAuthController extends Controller
 
         if ($valid) {
             $user->twofa_enabled = false;
-            $user->twofa_enabled_at = null;
+            // ❌ NÃO apagar twofa_enabled_at - mantém histórico de que já foi configurado
+            // $user->twofa_enabled_at = null;
             $user->twofa_pin = null; // Limpar o PIN quando desativar
             $user->save();
 
@@ -200,7 +201,9 @@ class TwoFactorAuthController extends Controller
             return response()->json([
                 'success' => true,
                 'enabled' => $user->twofa_enabled ?? false,
-                'configured' => !empty($user->twofa_pin),
+                // 'configured' = true se foi configurado ALGUMA VEZ (tem enabled_at)
+                // Não pode usar twofa_pin porque é deletado quando desativa
+                'configured' => !is_null($user->twofa_enabled_at),
                 'enabled_at' => $user->twofa_enabled_at
             ])->header('Access-Control-Allow-Origin', '*');
         } catch (\Exception $e) {
