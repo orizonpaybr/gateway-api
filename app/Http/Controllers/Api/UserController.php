@@ -10,6 +10,8 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Cache;
 
 class UserController extends Controller
 {
@@ -233,7 +235,7 @@ class UserController extends Controller
                     'valor_liquido' => (float) ($transaction->valor_liquido ?? 0),
                     'taxa' => (float) ($transaction->taxa ?? 0),
                     'status' => $transaction->status ?? 'PENDING',
-                    'status_legivel' => $this->mapStatus($transaction->status ?? 'PENDING'),
+                    'status_legivel' => $this->getStatusLegivel($transaction->status ?? 'PENDING'),
                     'data' => $transaction->date ?? now()->format('Y-m-d H:i:s'),
                     'created_at' => $transaction->created_at ?? now()->format('Y-m-d H:i:s'),
                     'nome_cliente' => $transaction->nome_cliente ?? 'Cliente',
@@ -325,7 +327,7 @@ class UserController extends Controller
                         'valor_liquido' => (float) $deposito->deposito_liquido,
                         'taxa' => (float) $deposito->taxa_cash_in,
                         'status' => $deposito->status,
-                        'status_legivel' => $this->mapStatus($deposito->status),
+                        'status_legivel' => $this->getStatusLegivel($deposito->status),
                         'data' => $deposito->date,
                         'created_at' => $deposito->created_at,
                         'updated_at' => $deposito->updated_at,
@@ -372,7 +374,7 @@ class UserController extends Controller
                         'valor_liquido' => (float) $saque->cash_out_liquido,
                         'taxa' => (float) $saque->taxa_cash_out,
                         'status' => $saque->status,
-                        'status_legivel' => $this->mapStatus($saque->status),
+                        'status_legivel' => $this->getStatusLegivel($saque->status),
                         'data' => $saque->date,
                         'created_at' => $saque->created_at,
                         'updated_at' => $saque->updated_at,
@@ -799,7 +801,7 @@ class UserController extends Controller
             $extratoData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 180, function() use ($user, $page, $limit, $periodo, $dataInicio, $dataFim, $busca, $tipo) {
                 
                 // Calcular datas baseado no período
-                $dates = $this->calculateDateRange($periodo, $dataInicio, $dataFim);
+                $dates = $this->calculateInteractiveDateRange($periodo);
                 
                 // Buscar dados de entradas (depósitos) - apenas COMPLETED e PAID_OUT
                 $entradasQuery = \App\Models\Solicitacoes::where('user_id', $user->username)
@@ -961,343 +963,6 @@ class UserController extends Controller
         ];
 
         return $statusMap[$status] ?? ucfirst(strtolower($status));
-    }
-
-    /**
-     * Obter perfil completo do usuário
-     */
-    public function getProfile(Request $request)
-    {
-        try {
-            // Usar autenticação do middleware verify.jwt
-            $user = $request->user() ?? $request->user_auth;
-            
-            Log::info('getProfile - Usuário autenticado', [
-                'user_id' => $user ? $user->username : 'null',
-                'user_type' => get_class($user ?? 'null')
-            ]);
-            
-            if (!$user) {
-                Log::warning('getProfile - Usuário não autenticado');
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Usuário não autenticado'
-                ], 401)->header('Access-Control-Allow-Origin', '*');
-            }
-
-            // Cache Redis para dados do perfil (TTL: 5 minutos)
-            $cacheKey = "user_profile_{$user->username}";
-            $profileData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 300, function() use ($user) {
-                // Calcular informações derivadas (tipo PF/PJ e status legível)
-                $doc = preg_replace('/\D/', '', (string) ($user->cpf_cnpj ?? ''));
-                $tipoPessoa = ($doc && strlen($doc) > 11) ? 'PJ' : 'PF';
-                $tipoPessoaLegivel = $tipoPessoa === 'PJ' ? 'Pessoa Jurídica' : 'Pessoa Física';
-                $statusAtual = $user->status == 1 ? 'Aprovado' : 'Pendente';
-
-                return [
-                    'id' => $user->username,
-                    'username' => $user->username,
-                    'email' => $user->email ?? '',
-                    'name' => $user->name ?? $user->username,
-                    'phone' => $user->telefone ?? '',
-                    'cnpj' => $user->cpf_cnpj ?? '',
-                    'status' => $user->status == 1 ? 'active' : 'inactive',
-                    'balance' => $user->saldo ?? 0,
-                    'agency' => $user->agency ?? '',
-                    'status_text' => $statusAtual,
-                    'company' => [
-                        'razao_social' => $user->razao_social ?? null,
-                        'nome_fantasia' => $user->nome_fantasia ?? null,
-                        'tipo_pessoa' => $tipoPessoa,
-                        'tipo' => $tipoPessoaLegivel,
-                        'area_atuacao' => $user->area_atuacao ?? null,
-                        'status_cadastro' => $user->status_cadastro ?? null,
-                        'status_atual' => $statusAtual,
-                    ],
-                    'contacts' => [
-                        'telefone_principal' => $user->telefone ?? null,
-                        'email_principal' => $user->email ?? null,
-                    ],
-                    'taxes' => [
-                        'deposit' => [
-                            'fixed' => (float) ($user->taxa_fixa_deposito ?? $user->taxa_cash_in_fixa ?? 0),
-                            'percent' => (float) ($user->taxa_percentual_deposito ?? $user->taxa_cash_in ?? 0),
-                            'after_limit_fixed' => (float) ($user->taxa_fixa_baixos ?? 0),
-                            'after_limit_percent' => (float) ($user->taxa_percentual_altos ?? 0),
-                        ],
-                        'withdraw' => [
-                            'dashboard' => [
-                                'fixed' => (float) ($user->taxa_cash_out_fixa ?? 0),
-                                'percent' => (float) ($user->taxa_cash_out ?? 0),
-                                'after_limit_fixed' => (float) ($user->taxa_fixa_padrao_cash_out ?? 0),
-                                'after_limit_percent' => (float) ($user->taxa_percentual_altos ?? 0),
-                            ],
-                            'api' => [
-                                'fixed' => (float) ($user->taxa_saque_api ?? 0),
-                                'percent' => (float) ($user->taxa_saque_cripto ?? 0),
-                                'after_limit_fixed' => (float) ($user->taxa_fixa_pix ?? 0),
-                                'after_limit_percent' => (float) ($user->taxa_percentual_pix ?? 0),
-                            ],
-                        ],
-                        'affiliate' => [
-                            'fixed' => (float) ($user->taxa_fixa_afiliado ?? 0),
-                            'percent' => (float) ($user->taxa_percentual_afiliado ?? 0),
-                        ],
-                    ],
-                    'limits' => [
-                        'deposit_min' => (float) ($user->taxa_flexivel_valor_minimo ?? 15.00),
-                        'withdraw_min' => (float) ($user->limite_mensal_pf ?? 50.00),
-                        'retention_value' => (float) ($user->retencao_valor ?? 0),
-                        'retention_percent' => (float) ($user->retencao_taxa ?? 0),
-                    ],
-                    'features' => [
-                        'saque_automatico' => (bool) ($user->saque_automatico ?? false),
-                        'saque_via_dashboard' => true,
-                        'saque_via_api' => true,
-                    ],
-                ];
-            });
-
-            return response()->json([
-                'success' => true,
-                'data' => $profileData
-            ])->header('Access-Control-Allow-Origin', '*');
-
-        } catch (\Exception $e) {
-            Log::error('Erro ao obter perfil', [
-                'error' => $e->getMessage(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine(),
-                'trace' => $e->getTraceAsString()
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Erro interno do servidor'
-            ], 500)->header('Access-Control-Allow-Origin', '*');
-        }
-    }
-
-    /**
-     * Obter dados reais de faturamento e transações
-     */
-    public function getRealData(Request $request)
-    {
-        try {
-            $user = $this->getUserFromRequest($request);
-            
-            if (!$user) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Usuário não autenticado'
-                ], 401)->header('Access-Control-Allow-Origin', '*');
-            }
-
-            $periodo = $request->input('periodo', 'hoje'); // hoje, 7dias, mes, personalizado
-            $dataInicio = $request->input('data_inicio');
-            $dataFim = $request->input('data_fim');
-
-            // Calcular datas baseado no período
-            $dates = $this->calculateDateRange($periodo, $dataInicio, $dataFim);
-            
-            // Log para debug
-            Log::info('Filtro de data aplicado', [
-                'periodo' => $periodo,
-                'inicio' => $dates['inicio']->format('Y-m-d H:i:s'),
-                'fim' => $dates['fim']->format('Y-m-d H:i:s'),
-                'user_id' => $user->username
-            ]);
-
-            // Buscar dados de entradas (depósitos) - apenas COMPLETED e PAID_OUT
-            $entradasQuery = \App\Models\Solicitacoes::where('user_id', $user->username)
-                ->whereBetween('date', [$dates['inicio'], $dates['fim']])
-                ->whereIn('status', ['PAID_OUT', 'COMPLETED']);
-
-            $totalEntradas = $entradasQuery->sum('amount');
-            $totalEntradasLiquidas = $entradasQuery->sum('deposito_liquido');
-            $totalTaxasEntradas = $entradasQuery->sum('taxa_cash_in');
-
-            // Buscar dados de saídas (saques) - apenas COMPLETED e PAID_OUT
-            $saidasQuery = \App\Models\SolicitacoesCashOut::where('user_id', $user->username)
-                ->whereBetween('date', [$dates['inicio'], $dates['fim']])
-                ->whereIn('status', ['PAID_OUT', 'COMPLETED']);
-
-            $totalSaidas = $saidasQuery->sum('amount');
-            $totalSaidasLiquidas = $saidasQuery->sum('cash_out_liquido');
-            $totalTaxasSaidas = $saidasQuery->sum('taxa_cash_out');
-
-            // Buscar transações para o extrato
-            $transacoesEntradas = $entradasQuery->orderBy('date', 'desc')->get();
-            $transacoesSaidas = $saidasQuery->orderBy('date', 'desc')->get();
-            
-            // Log para debug - verificar quantas transações foram encontradas
-            Log::info('Transações aprovadas encontradas', [
-                'periodo' => $periodo,
-                'user_id' => $user->username,
-                'saldo_atual' => $user->saldo ?? 0,
-                'entradas_count' => $transacoesEntradas->count(),
-                'saidas_count' => $transacoesSaidas->count(),
-                'total_entradas' => $totalEntradas,
-                'total_saidas' => $totalSaidas,
-                'total_entradas_liquidas' => $totalEntradasLiquidas,
-                'total_saidas_liquidas' => $totalSaidasLiquidas,
-                'primeira_entrada_date' => $transacoesEntradas->first() ? $transacoesEntradas->first()->date : null,
-                'ultima_entrada_date' => $transacoesEntradas->last() ? $transacoesEntradas->last()->date : null,
-                'filtro_status' => ['PAID_OUT', 'COMPLETED']
-            ]);
-
-            // Combinar e ordenar transações
-            $extrato = collect();
-            
-            // Adicionar entradas com tipo 'deposit'
-            foreach ($transacoesEntradas as $entrada) {
-                $extrato->push([
-                    'id' => $entrada->id,
-                    'tipo' => 'deposit',
-                    'transaction_id' => $entrada->idTransaction ?? $entrada->externalreference,
-                    'valor' => $entrada->amount,
-                    'valor_liquido' => $entrada->deposito_liquido,
-                    'taxa' => $entrada->taxa_cash_in,
-                    'status' => $this->mapStatus($entrada->status),
-                    'data' => $entrada->date,
-                    'nome' => $entrada->client_name ?? 'Cliente',
-                    'documento' => $entrada->client_document ?? '00000000000',
-                    'adquirente' => $entrada->adquirente ?? 'Sistema'
-                ]);
-            }
-
-            // Adicionar saídas com tipo 'withdraw'
-            foreach ($transacoesSaidas as $saida) {
-                $extrato->push([
-                    'id' => $saida->id,
-                    'tipo' => 'withdraw',
-                    'transaction_id' => $saida->idTransaction ?? $saida->externalreference,
-                    'valor' => $saida->amount,
-                    'valor_liquido' => $saida->cash_out_liquido,
-                    'taxa' => $saida->taxa_cash_out,
-                    'status' => $this->mapStatus($saida->status),
-                    'data' => $saida->date,
-                    'nome' => $saida->beneficiaryname ?? 'Cliente',
-                    'documento' => $saida->beneficiarydocument ?? '00000000000',
-                    'pix_key' => $saida->pix ?? '',
-                    'pix_key_type' => $saida->pixkey ?? '',
-                    'adquirente' => $saida->adquirente ?? 'Sistema'
-                ]);
-            }
-
-            // Ordenar por data (mais recente primeiro)
-            $extrato = $extrato->sortByDesc('data')->values();
-
-            return response()->json([
-                'success' => true,
-                'data' => [
-                    'periodo' => $periodo,
-                    'data_inicio' => $dates['inicio'],
-                    'data_fim' => $dates['fim'],
-                    'resumo' => [
-                        'total_entradas' => $totalEntradas,
-                        'total_entradas_liquidas' => $totalEntradasLiquidas,
-                        'total_taxas_entradas' => $totalTaxasEntradas,
-                        'total_saidas' => $totalSaidas,
-                        'total_saidas_liquidas' => $totalSaidasLiquidas,
-                        'total_taxas_saidas' => $totalTaxasSaidas,
-                        'saldo_atual' => $user->saldo ?? 0,
-                        'saldo_periodo' => $user->saldo ?? 0
-                    ],
-                    'extrato' => $extrato,
-                    'contadores' => [
-                        'total_entradas_count' => $transacoesEntradas->count(),
-                        'total_saidas_count' => $transacoesSaidas->count()
-                    ]
-                ]
-            ])->header('Access-Control-Allow-Origin', '*');
-
-        } catch (\Exception $e) {
-            Log::error('Erro ao obter dados reais', [
-                'error' => $e->getMessage(),
-                'user_id' => $user->username ?? 'unknown',
-                'trace' => $e->getTraceAsString()
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Erro interno do servidor'
-            ], 500)->header('Access-Control-Allow-Origin', '*');
-        }
-    }
-
-    /**
-     * Calcular intervalo de datas baseado no período
-     */
-    private function calculateDateRange($periodo, $dataInicio = null, $dataFim = null)
-    {
-        // Usar timezone do Brasil para garantir consistência
-        $now = \Carbon\Carbon::now('America/Sao_Paulo');
-        
-        switch ($periodo) {
-            case 'hoje':
-                return [
-                    'inicio' => $now->copy()->startOfDay(),
-                    'fim' => $now->copy()->endOfDay()
-                ];
-                
-            case '7dias':
-                return [
-                    'inicio' => $now->copy()->subDays(7)->startOfDay(),
-                    'fim' => $now->copy()->endOfDay()
-                ];
-                
-            case 'mes':
-                return [
-                    'inicio' => $now->copy()->startOfMonth(),
-                    'fim' => $now->copy()->endOfMonth()
-                ];
-                
-            case 'personalizado':
-                if ($dataInicio && $dataFim) {
-                    return [
-                        'inicio' => \Carbon\Carbon::parse($dataInicio, 'America/Sao_Paulo')->startOfDay(),
-                        'fim' => \Carbon\Carbon::parse($dataFim, 'America/Sao_Paulo')->endOfDay()
-                    ];
-                }
-                // Fallback para hoje se não tiver datas
-                return [
-                    'inicio' => $now->copy()->startOfDay(),
-                    'fim' => $now->copy()->endOfDay()
-                ];
-                
-            case 'tudo':
-                return [
-                    'inicio' => \Carbon\Carbon::parse('2020-01-01', 'America/Sao_Paulo'),
-                    'fim' => $now->copy()->endOfDay()
-                ];
-                
-            default:
-                return [
-                    'inicio' => $now->copy()->startOfDay(),
-                    'fim' => $now->copy()->endOfDay()
-                ];
-        }
-    }
-
-    /**
-     * Mapear status para formato legível
-     */
-    private function mapStatus($status)
-    {
-        $statusMap = [
-            'WAITING_FOR_APPROVAL' => 'Pendente',
-            'PENDING' => 'Pendente',
-            'PENDING_APPROVAL' => 'Pendente',
-            'PAID_OUT' => 'Aprovado',
-            'COMPLETED' => 'Aprovado',
-            'APPROVED' => 'Aprovado',
-            'CANCELLED' => 'Cancelado',
-            'FAILED' => 'Falhou',
-            'REJECTED' => 'Rejeitado'
-        ];
-
-        return $statusMap[$status] ?? $status;
     }
     private function detectPixKeyType($pixKey)
     {
@@ -2018,6 +1683,397 @@ class UserController extends Controller
         } catch (\Exception $e) {
             Log::error('Erro ao obter dados de gamificação', [
                 'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor'
+            ], 500)->header('Access-Control-Allow-Origin', '*');
+        }
+    }
+
+    /**
+     * Trocar senha do usuário
+     * 
+     * Validações:
+     * - Rate Limiting: 3 tentativas por hora
+     * - 2FA obrigatório: Verifica se 2FA está ativado
+     * - Verifica senha atual com hash bcrypt
+     * - Valida força da nova senha
+     * - Invalida todas as sessões ao trocar senha
+     * - Registra auditoria
+     * 
+     * Performance:
+     * - Usa Redis para rate limiting e invalidação de sessão
+     * - Cache invalidado para dados do usuário
+     */
+    public function changePassword(Request $request)
+    {
+        try {
+            $user = $request->user() ?? $request->user_auth;
+            
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário não autenticado'
+                ], 401)->header('Access-Control-Allow-Origin', '*');
+            }
+
+            // 🔐 RATE LIMITING: 3 tentativas por hora
+            $rateLimitKey = "change_password_attempts_{$user->id}";
+            $attempts = Cache::get($rateLimitKey, 0);
+
+            if ($attempts >= 3) {
+                Log::warning('Rate limit excedido para trocar senha', [
+                    'username' => $user->username,
+                    'ip' => $request->ip(),
+                    'attempts' => $attempts
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Você excedeu o limite de tentativas. Tente novamente em 1 hora.',
+                    'retry_after' => 3600
+                ], 429)->header('Access-Control-Allow-Origin', '*');
+            }
+
+            // Validar dados de entrada
+            // PIN é obrigatório APENAS se 2FA está ativado
+            $rules = [
+                'current_password' => 'required|string|min:6',
+                'new_password' => [
+                    'required',
+                    'string',
+                    'min:8',
+                    'confirmed', // new_password === new_password_confirmation
+                    'different:current_password', // Nova senha diferente da atual
+                    'regex:/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/', // Mínimo: 1 minúscula, 1 maiúscula, 1 dígito
+                ],
+            ];
+
+            // Se 2FA está ativado, PIN é obrigatório
+            if ($user->twofa_enabled) {
+                $rules['twofa_pin'] = 'required|string|size:6|regex:/^\d+/';
+            } else {
+                // Se 2FA está desativado, PIN é opcional (será ignorado)
+                $rules['twofa_pin'] = 'nullable|string';
+            }
+
+            $validator = Validator::make($request->all(), $rules, [
+                'twofa_pin.required' => 'PIN de 2FA é obrigatório para trocar senha.',
+                'twofa_pin.size' => 'PIN deve ter exatamente 6 dígitos.',
+                'twofa_pin.regex' => 'PIN deve conter apenas dígitos.',
+                'new_password.regex' => 'A senha deve conter letras maiúsculas, minúsculas e números.',
+                'new_password.different' => 'A nova senha não pode ser igual à senha atual.',
+                'new_password.confirmed' => 'As senhas não conferem.',
+            ]);
+
+            if ($validator->fails()) {
+                // Incrementar tentativas (apenas falhas de validação)
+                Cache::put($rateLimitKey, $attempts + 1, 3600);
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validação falhou',
+                    'errors' => $validator->errors()
+                ], 422)->header('Access-Control-Allow-Origin', '*');
+            }
+
+            // 🔐 Verificar PIN de 2FA APENAS se está ativado
+            if ($user->twofa_enabled) {
+                if (!Hash::check($request->input('twofa_pin'), $user->twofa_pin)) {
+                    // Incrementar tentativas (falha de autenticação)
+                    Cache::put($rateLimitKey, $attempts + 1, 3600);
+
+                    Log::warning('PIN 2FA incorreto ao trocar senha', [
+                        'username' => $user->username,
+                        'ip' => $request->ip(),
+                        'attempts' => $attempts + 1
+                    ]);
+
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'PIN de 2FA inválido'
+                    ], 401)->header('Access-Control-Allow-Origin', '*');
+                }
+            }
+
+            // 🔐 Verificar se a senha atual está correta
+            if (!Hash::check($request->input('current_password'), $user->password)) {
+                // Incrementar tentativas
+                Cache::put($rateLimitKey, $attempts + 1, 3600);
+
+                Log::warning('Tentativa de trocar senha com senha atual incorreta', [
+                    'username' => $user->username,
+                    'ip' => $request->ip(),
+                    'attempts' => $attempts + 1
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Senha atual incorreta'
+                ], 401)->header('Access-Control-Allow-Origin', '*');
+            }
+
+            // ✅ Atualizar senha com hash bcrypt
+            $user->password = Hash::make($request->input('new_password'));
+            $user->save();
+
+            // Invalidar todas as sessões do usuário no Redis (força logout em todos os dispositivos)
+            $this->invalidateAllUserSessions($user->id);
+
+            // Invalidar cache do usuário
+            Cache::forget("user_balance_{$user->username}");
+            Cache::forget("user_profile_{$user->username}");
+
+            // 🎯 Limpar rate limit após sucesso (reset para próxima hora)
+            Cache::forget($rateLimitKey);
+
+            // Registrar auditoria
+            Log::info('Senha alterada com sucesso (com 2FA)', [
+                'username' => $user->username,
+                'ip' => $request->ip(),
+                'timestamp' => now(),
+                'user_id' => $user->id
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Senha alterada com sucesso. Você será desconectado.',
+            ])->header('Access-Control-Allow-Origin', '*');
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao trocar senha', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'user_id' => $user->id ?? null
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor'
+            ], 500)->header('Access-Control-Allow-Origin', '*');
+        }
+    }
+
+    /**
+     * Invalida todas as sessões do usuário no Redis
+     * Força logout em todos os dispositivos
+     * 
+     * Performance: O(1) com Redis
+     */
+    private function invalidateAllUserSessions($userId)
+    {
+        try {
+            // Chave Redis para armazenar timestamp de invalidação de sessão
+            $invalidationKey = "user_session_invalidate_{$userId}";
+            
+            // Definir timestamp atual como limite de invalidação
+            // Qualquer token emitido ANTES deste timestamp é inválido
+            Cache::put(
+                $invalidationKey,
+                now()->timestamp,
+                24 * 60 * 60 // 24 horas
+            );
+
+            Log::info('Todas as sessões do usuário foram invalidadas', [
+                'user_id' => $userId
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Erro ao invalidar sessões', [
+                'user_id' => $userId,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Obter perfil completo do usuário
+     */
+    public function getProfile(Request $request)
+    {
+        try {
+            $user = $request->user() ?? $request->user_auth;
+            
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário não autenticado'
+                ], 401)->header('Access-Control-Allow-Origin', '*');
+            }
+
+            // Cache Redis para dados do perfil (TTL: 5 minutos)
+            $cacheKey = "user_profile_{$user->username}";
+            $profileData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 300, function() use ($user) {
+                // Calcular informações derivadas (tipo PF/PJ e status legível)
+                $doc = preg_replace('/\D/', '', (string) ($user->cpf_cnpj ?? ''));
+                $tipoPessoa = ($doc && strlen($doc) > 11) ? 'PJ' : 'PF';
+                $tipoPessoaLegivel = $tipoPessoa === 'PJ' ? 'Pessoa Jurídica' : 'Pessoa Física';
+                $statusAtual = $user->status == 1 ? 'Aprovado' : 'Pendente';
+
+                return [
+                    'id' => $user->username,
+                    'username' => $user->username,
+                    'email' => $user->email ?? '',
+                    'name' => $user->name ?? $user->username,
+                    'phone' => $user->telefone ?? '',
+                    'cnpj' => $user->cpf_cnpj ?? '',
+                    'status' => $user->status == 1 ? 'active' : 'inactive',
+                    'balance' => $user->saldo ?? 0,
+                    'agency' => $user->agency ?? '',
+                    'status_text' => $statusAtual,
+                    'company' => [
+                        'razao_social' => $user->razao_social ?? null,
+                        'nome_fantasia' => $user->nome_fantasia ?? null,
+                        'tipo_pessoa' => $tipoPessoa,
+                        'tipo' => $tipoPessoaLegivel,
+                        'area_atuacao' => $user->area_atuacao ?? null,
+                    ],
+                    'contacts' => [
+                        'telefone_principal' => $user->telefone ?? null,
+                        'email_principal' => $user->email ?? null,
+                    ],
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $profileData
+            ])->header('Access-Control-Allow-Origin', '*');
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao obter perfil', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor'
+            ], 500)->header('Access-Control-Allow-Origin', '*');
+        }
+    }
+
+    /**
+     * Obter dados reais de faturamento e transações
+     * Usa calculateInteractiveDateRange para períodos simples
+     */
+    public function getRealData(Request $request)
+    {
+        try {
+            $user = $request->user() ?? $request->user_auth;
+            
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário não autenticado'
+                ], 401)->header('Access-Control-Allow-Origin', '*');
+            }
+
+            $periodo = $request->input('periodo', 'hoje'); // hoje, ontem, 7dias, 30dias
+
+            // Calcular datas usando o novo método otimizado
+            $dates = $this->calculateInteractiveDateRange($periodo);
+            
+            Log::info('Dados Reais - Filtro aplicado', [
+                'periodo' => $periodo,
+                'inicio' => $dates['inicio']->format('Y-m-d H:i:s'),
+                'fim' => $dates['fim']->format('Y-m-d H:i:s'),
+                'user_id' => $user->username
+            ]);
+
+            // Buscar dados de entradas (depósitos) - apenas COMPLETED e PAID_OUT
+            $entradasQuery = \App\Models\Solicitacoes::where('user_id', $user->username)
+                ->whereBetween('date', [$dates['inicio'], $dates['fim']])
+                ->whereIn('status', ['PAID_OUT', 'COMPLETED']);
+
+            $totalEntradas = $entradasQuery->sum('amount');
+            $totalEntradasLiquidas = $entradasQuery->sum('deposito_liquido');
+            $totalTaxasEntradas = $entradasQuery->sum('taxa_cash_in');
+
+            // Buscar dados de saídas (saques) - apenas COMPLETED e PAID_OUT
+            $saidasQuery = \App\Models\SolicitacoesCashOut::where('user_id', $user->username)
+                ->whereBetween('date', [$dates['inicio'], $dates['fim']])
+                ->whereIn('status', ['PAID_OUT', 'COMPLETED']);
+
+            $totalSaidas = $saidasQuery->sum('amount');
+            $totalSaidasLiquidas = $saidasQuery->sum('cash_out_liquido');
+            $totalTaxasSaidas = $saidasQuery->sum('taxa_cash_out');
+
+            // Buscar transações para o extrato
+            $transacoesEntradas = $entradasQuery->orderBy('date', 'desc')->get();
+            $transacoesSaidas = $saidasQuery->orderBy('date', 'desc')->get();
+            
+            // Combinar e ordenar transações
+            $extrato = collect();
+            
+            // Adicionar entradas
+            foreach ($transacoesEntradas as $entrada) {
+                $extrato->push([
+                    'id' => $entrada->id,
+                    'tipo' => 'deposit',
+                    'transaction_id' => $entrada->idTransaction ?? $entrada->externalreference,
+                    'valor' => $entrada->amount,
+                    'valor_liquido' => $entrada->deposito_liquido,
+                    'taxa' => $entrada->taxa_cash_in,
+                    'status' => $this->getStatusLegivel($entrada->status),
+                    'data' => $entrada->date,
+                    'nome' => $entrada->client_name ?? 'Cliente',
+                    'documento' => $entrada->client_document ?? '00000000000',
+                    'adquirente' => $entrada->adquirente ?? 'Sistema'
+                ]);
+            }
+
+            // Adicionar saídas
+            foreach ($transacoesSaidas as $saida) {
+                $extrato->push([
+                    'id' => $saida->id,
+                    'tipo' => 'withdraw',
+                    'transaction_id' => $saida->idTransaction ?? $saida->externalreference,
+                    'valor' => $saida->amount,
+                    'valor_liquido' => $saida->cash_out_liquido,
+                    'taxa' => $saida->taxa_cash_out,
+                    'status' => $this->getStatusLegivel($saida->status),
+                    'data' => $saida->date,
+                    'nome' => $saida->beneficiaryname ?? 'Cliente',
+                    'documento' => $saida->beneficiarydocument ?? '00000000000',
+                    'pix_key' => $saida->pix ?? '',
+                    'pix_key_type' => $saida->pixkey ?? '',
+                    'adquirente' => $saida->adquirente ?? 'Sistema'
+                ]);
+            }
+
+            // Ordenar por data (mais recente primeiro)
+            $extrato = $extrato->sortByDesc('data')->values();
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'periodo' => $periodo,
+                    'data_inicio' => $dates['inicio'],
+                    'data_fim' => $dates['fim'],
+                    'resumo' => [
+                        'total_entradas' => $totalEntradas,
+                        'total_entradas_liquidas' => $totalEntradasLiquidas,
+                        'total_taxas_entradas' => $totalTaxasEntradas,
+                        'total_saidas' => $totalSaidas,
+                        'total_saidas_liquidas' => $totalSaidasLiquidas,
+                        'total_taxas_saidas' => $totalTaxasSaidas,
+                        'saldo_atual' => $user->saldo ?? 0,
+                    ],
+                    'extrato' => $extrato,
+                    'contadores' => [
+                        'total_entradas_count' => $transacoesEntradas->count(),
+                        'total_saidas_count' => $transacoesSaidas->count()
+                    ]
+                ]
+            ])->header('Access-Control-Allow-Origin', '*');
+
+        } catch (\Exception $e) {
+            Log::error('Erro ao obter dados reais', [
+                'error' => $e->getMessage(),
+                'user_id' => $user->username ?? 'unknown',
                 'trace' => $e->getTraceAsString()
             ]);
 
