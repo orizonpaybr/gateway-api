@@ -43,6 +43,12 @@ Route::options('auth/validate-registration', function () {
         ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
         ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 });
+Route::options('auth/change-password', function () {
+    return response('', 200)
+        ->header('Access-Control-Allow-Origin', '*')
+        ->header('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+});
 Route::post('auth/login', [AuthController::class, 'login']);
 Route::post('auth/register', [AuthController::class, 'register']);
 Route::post('auth/verify-2fa', [AuthController::class, 'verify2FA']);
@@ -176,6 +182,10 @@ Route::middleware(['verify.jwt'])->group(function () {
     Route::post('2fa/verify', [App\Http\Controllers\TwoFactorAuthController::class, 'verifyCode']);
     Route::post('2fa/enable', [App\Http\Controllers\TwoFactorAuthController::class, 'enable']);
     Route::post('2fa/disable', [App\Http\Controllers\TwoFactorAuthController::class, 'disable']);
+    
+    // Rotas de segurança e conta
+    // Rate limiting: 3 tentativas por hora (implementado no controller com Redis)
+    Route::post('auth/change-password', [UserController::class, 'changePassword']);
 });
 
 // Rotas protegidas com token + secret (para integrações externas e APIs)
