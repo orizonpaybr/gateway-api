@@ -64,6 +64,7 @@ class User extends Authenticatable
         "media_faturamento",
         "indicador_ref",
         "whitelisted_ip",
+        "ips_saque_permitidos",
         "pushcut_pixpago",
         "twofa_secret",
         "twofa_pin",

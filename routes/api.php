@@ -186,6 +186,13 @@ Route::middleware(['verify.jwt'])->group(function () {
     // Rotas de segurança e conta
     // Rate limiting: 3 tentativas por hora (implementado no controller com Redis)
     Route::post('auth/change-password', [UserController::class, 'changePassword']);
+    
+    // Integração de API - Credenciais e IPs autorizados
+    Route::get('integration/credentials', [App\Http\Controllers\Api\IntegrationController::class, 'getCredentials']);
+    Route::post('integration/regenerate-secret', [App\Http\Controllers\Api\IntegrationController::class, 'regenerateSecret']);
+    Route::get('integration/allowed-ips', [App\Http\Controllers\Api\IntegrationController::class, 'getAllowedIPs']);
+    Route::post('integration/allowed-ips', [App\Http\Controllers\Api\IntegrationController::class, 'addAllowedIP']);
+    Route::delete('integration/allowed-ips/{ip}', [App\Http\Controllers\Api\IntegrationController::class, 'removeAllowedIP']);
 });
 
 // Rotas protegidas com token + secret (para integrações externas e APIs)
