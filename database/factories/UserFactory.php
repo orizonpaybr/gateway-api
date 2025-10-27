@@ -23,12 +23,18 @@ class UserFactory extends Factory
      */
     public function definition(): array
     {
+        $username = fake()->unique()->userName();
+        
         return [
             'name' => fake()->name(),
             'email' => fake()->unique()->safeEmail(),
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
-            'remember_token' => Str::random(10),
+            'username' => $username,
+            'user_id' => $username, // Campo usado para foreign key
+            'cliente_id' => Str::uuid()->toString(), // Campo obrigatório da tabela users
+            'saldo' => 0, // Campo obrigatório
+            'status' => 1, // Campo obrigatório
         ];
     }
 
