@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Hash;
 
 /**
  * Controller para gerenciar integrações de API
@@ -39,7 +40,7 @@ class IntegrationController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Usuário não autenticado'
-                ], 401)->header('Access-Control-Allow-Origin', '*');
+                ], 401);
             }
 
             // Cache das credenciais (5 minutos)
@@ -69,7 +70,7 @@ class IntegrationController extends Controller
                     'status' => $credentials->status == 1 ? 'active' : 'inactive',
                     'created_at' => $credentials->created_at,
                 ]
-            ])->header('Access-Control-Allow-Origin', '*');
+            ]);
 
         } catch (\Exception $e) {
             Log::error('[INTEGRATION] Erro ao obter credenciais', [
@@ -80,7 +81,7 @@ class IntegrationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Erro ao obter credenciais'
-            ], 500)->header('Access-Control-Allow-Origin', '*');
+            ], 500);
         }
     }
 
@@ -104,7 +105,25 @@ class IntegrationController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Usuário não autenticado'
-                ], 401)->header('Access-Control-Allow-Origin', '*');
+                ], 401);
+            }
+
+            // Se 2FA estiver ativo para o usuário, exigir PIN válido
+            if (!empty($user->twofa_enabled) && !empty($user->twofa_pin)) {
+                $request->validate([
+                    'pin' => ['required','string','size:6','regex:/^\d+$/'],
+                ], [
+                    'pin.required' => 'PIN de 2FA é obrigatório para regenerar o secret.',
+                    'pin.size' => 'PIN deve ter exatamente 6 dígitos.',
+                    'pin.regex' => 'PIN deve conter apenas dígitos.',
+                ]);
+
+                if (!Hash::check($request->input('pin'), $user->twofa_pin)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'PIN de 2FA inválido',
+                    ], 401);
+                }
             }
 
             $userKeys = UsersKey::where('user_id', $user->username)->first();
@@ -134,7 +153,7 @@ class IntegrationController extends Controller
                     'client_key' => $userKeys->token,
                     'client_secret' => $newSecret,
                 ]
-            ])->header('Access-Control-Allow-Origin', '*');
+            ]);
 
         } catch (\Exception $e) {
             Log::error('[INTEGRATION] Erro ao regenerar secret', [
@@ -145,7 +164,7 @@ class IntegrationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Erro ao regenerar secret'
-            ], 500)->header('Access-Control-Allow-Origin', '*');
+            ], 500);
         }
     }
 
@@ -168,7 +187,7 @@ class IntegrationController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Usuário não autenticado'
-                ], 401)->header('Access-Control-Allow-Origin', '*');
+                ], 401);
             }
 
             // Cache dos IPs (2 minutos)
@@ -187,7 +206,7 @@ class IntegrationController extends Controller
                     'ips' => $ips,
                     'count' => count($ips)
                 ]
-            ])->header('Access-Control-Allow-Origin', '*');
+            ]);
 
         } catch (\Exception $e) {
             Log::error('[INTEGRATION] Erro ao obter IPs', [
@@ -198,7 +217,7 @@ class IntegrationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Erro ao obter IPs autorizados'
-            ], 500)->header('Access-Control-Allow-Origin', '*');
+            ], 500);
         }
     }
 
@@ -227,22 +246,44 @@ class IntegrationController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Usuário não autenticado'
-                ], 401)->header('Access-Control-Allow-Origin', '*');
+                ], 401);
             }
 
-            $validator = Validator::make($request->all(), [
+            // Construir regras de validação de forma condicional
+            $rules = [
                 'ip' => 'required|ip'
-            ], [
+            ];
+            $messages = [
                 'ip.required' => 'O IP é obrigatório',
                 'ip.ip' => 'Formato de IP inválido'
-            ]);
+            ];
+
+            // Se 2FA estiver ativo, exigir PIN
+            if (!empty($user->twofa_enabled) && !empty($user->twofa_pin)) {
+                $rules['pin'] = 'required|string|size:6|regex:/^\d+$/';
+                $messages['pin.required'] = 'PIN de 2FA é obrigatório para adicionar IP.';
+                $messages['pin.size'] = 'PIN deve ter exatamente 6 dígitos.';
+                $messages['pin.regex'] = 'PIN deve conter apenas dígitos.';
+            }
+
+            $validator = Validator::make($request->all(), $rules, $messages);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Dados inválidos',
                     'errors' => $validator->errors()
-                ], 400)->header('Access-Control-Allow-Origin', '*');
+                ], 400);
+            }
+
+            // Verificar PIN se 2FA estiver ativo
+            if (!empty($user->twofa_enabled) && !empty($user->twofa_pin)) {
+                if (!Hash::check($request->input('pin'), $user->twofa_pin)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'PIN de 2FA inválido',
+                    ], 401);
+                }
             }
 
             $ip = $request->input('ip');
@@ -254,7 +295,7 @@ class IntegrationController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Usuário não encontrado'
-                ], 404)->header('Access-Control-Allow-Origin', '*');
+                ], 404);
             }
             
             $result = \App\Traits\IPManagementTrait::addAllowedIP($userRefreshed, $ip);
@@ -263,7 +304,7 @@ class IntegrationController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'IP já está autorizado'
-                ], 400)->header('Access-Control-Allow-Origin', '*');
+                ], 400);
             }
 
             // Limpar cache
@@ -281,7 +322,7 @@ class IntegrationController extends Controller
                 'data' => [
                     'ips' => \App\Traits\IPManagementTrait::getAllowedIPs($userRefreshed)
                 ]
-            ])->header('Access-Control-Allow-Origin', '*');
+            ]);
 
         } catch (\Exception $e) {
             Log::error('[INTEGRATION] Erro ao adicionar IP', [
@@ -292,7 +333,7 @@ class IntegrationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Erro ao adicionar IP'
-            ], 500)->header('Access-Control-Allow-Origin', '*');
+            ], 500);
         }
     }
 
@@ -321,7 +362,7 @@ class IntegrationController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Usuário não autenticado'
-                ], 401)->header('Access-Control-Allow-Origin', '*');
+                ], 401);
             }
 
             // Validar formato do IP
@@ -329,7 +370,36 @@ class IntegrationController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Formato de IP inválido'
-                ], 400)->header('Access-Control-Allow-Origin', '*');
+                ], 400);
+            }
+
+            // Se 2FA estiver ativo, exigir PIN
+            // Para DELETE, o body pode vir como JSON na requisição
+            if (!empty($user->twofa_enabled) && !empty($user->twofa_pin)) {
+                // Ler body do request (DELETE pode ter body)
+                $requestBody = json_decode($request->getContent(), true);
+                $pin = $requestBody['pin'] ?? $request->input('pin');
+                
+                if (empty($pin)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'PIN de 2FA é obrigatório para remover IP.',
+                    ], 400);
+                }
+
+                if (strlen($pin) !== 6 || !preg_match('/^\d+$/', $pin)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'PIN deve ter exatamente 6 dígitos.',
+                    ], 400);
+                }
+
+                if (!Hash::check($pin, $user->twofa_pin)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'PIN de 2FA inválido',
+                    ], 401);
+                }
             }
 
             // Buscar usuário atualizado
@@ -339,7 +409,7 @@ class IntegrationController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Usuário não encontrado'
-                ], 404)->header('Access-Control-Allow-Origin', '*');
+                ], 404);
             }
             
             $result = \App\Traits\IPManagementTrait::removeAllowedIP($userRefreshed, $ip);
@@ -348,7 +418,7 @@ class IntegrationController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'IP não encontrado'
-                ], 404)->header('Access-Control-Allow-Origin', '*');
+                ], 404);
             }
 
             // Limpar cache
@@ -366,7 +436,7 @@ class IntegrationController extends Controller
                 'data' => [
                     'ips' => \App\Traits\IPManagementTrait::getAllowedIPs($userRefreshed)
                 ]
-            ])->header('Access-Control-Allow-Origin', '*');
+            ]);
 
         } catch (\Exception $e) {
             Log::error('[INTEGRATION] Erro ao remover IP', [
@@ -377,7 +447,7 @@ class IntegrationController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Erro ao remover IP'
-            ], 500)->header('Access-Control-Allow-Origin', '*');
+            ], 500);
         }
     }
 

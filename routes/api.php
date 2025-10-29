@@ -188,11 +188,13 @@ Route::middleware(['verify.jwt'])->group(function () {
     Route::post('auth/change-password', [UserController::class, 'changePassword']);
     
     // Integração de API - Credenciais e IPs autorizados
-    Route::get('integration/credentials', [App\Http\Controllers\Api\IntegrationController::class, 'getCredentials']);
-    Route::post('integration/regenerate-secret', [App\Http\Controllers\Api\IntegrationController::class, 'regenerateSecret']);
-    Route::get('integration/allowed-ips', [App\Http\Controllers\Api\IntegrationController::class, 'getAllowedIPs']);
-    Route::post('integration/allowed-ips', [App\Http\Controllers\Api\IntegrationController::class, 'addAllowedIP']);
-    Route::delete('integration/allowed-ips/{ip}', [App\Http\Controllers\Api\IntegrationController::class, 'removeAllowedIP']);
+    // Rate limiting: GET credentials (60 req/min), POST regenerate-secret (5 req/min), IP management (20 req/min)
+    // CORS seguro: middleware 'secure.cors' controla origens permitidas via FRONTEND_URL
+    Route::get('integration/credentials', [App\Http\Controllers\Api\IntegrationController::class, 'getCredentials'])->middleware(['secure.cors', 'throttle:60,1']);
+    Route::post('integration/regenerate-secret', [App\Http\Controllers\Api\IntegrationController::class, 'regenerateSecret'])->middleware(['secure.cors', 'throttle:5,1']);
+    Route::get('integration/allowed-ips', [App\Http\Controllers\Api\IntegrationController::class, 'getAllowedIPs'])->middleware(['secure.cors', 'throttle:60,1']);
+    Route::post('integration/allowed-ips', [App\Http\Controllers\Api\IntegrationController::class, 'addAllowedIP'])->middleware(['secure.cors', 'throttle:20,1']);
+    Route::delete('integration/allowed-ips/{ip}', [App\Http\Controllers\Api\IntegrationController::class, 'removeAllowedIP'])->middleware(['secure.cors', 'throttle:20,1']);
 });
 
 // Rotas protegidas com token + secret (para integrações externas e APIs)
