@@ -4,15 +4,22 @@ namespace App\Observers;
 
 use App\Models\SolicitacoesCashOut;
 use App\Services\PushNotificationService;
+use App\Services\NotificationPreferenceService;
 use Illuminate\Support\Facades\Log;
 
 class SolicitacoesCashOutObserver
 {
+    private const APPROVED_STATUSES = ['PAID_OUT', 'COMPLETED', 'PAID', 'APPROVED'];
+    
     private $pushService;
+    private $preferenceService;
 
-    public function __construct(PushNotificationService $pushService)
-    {
+    public function __construct(
+        PushNotificationService $pushService,
+        NotificationPreferenceService $preferenceService
+    ) {
         $this->pushService = $pushService;
+        $this->preferenceService = $preferenceService;
     }
 
     /**
@@ -20,11 +27,8 @@ class SolicitacoesCashOutObserver
      */
     public function created(SolicitacoesCashOut $solicitacoesCashOut): void
     {
-        // Status que indicam saque aprovado (varia por adquirente)
-        $approvedStatuses = ['PAID_OUT', 'COMPLETED', 'PAID', 'APPROVED'];
-        
         // Enviar notificação quando um saque é criado com status aprovado
-        if (in_array($solicitacoesCashOut->status, $approvedStatuses)) {
+        if (in_array($solicitacoesCashOut->status, self::APPROVED_STATUSES)) {
             $this->sendWithdrawNotification($solicitacoesCashOut);
         }
     }
@@ -34,12 +38,9 @@ class SolicitacoesCashOutObserver
      */
     public function updated(SolicitacoesCashOut $solicitacoesCashOut): void
     {
-        // Status que indicam saque aprovado (varia por adquirente)
-        $approvedStatuses = ['PAID_OUT', 'COMPLETED', 'PAID', 'APPROVED'];
-        
         // Verificar se o status mudou para um status de aprovado
         if ($solicitacoesCashOut->wasChanged('status') && 
-            in_array($solicitacoesCashOut->status, $approvedStatuses)) {
+            in_array($solicitacoesCashOut->status, self::APPROVED_STATUSES)) {
             $this->sendWithdrawNotification($solicitacoesCashOut);
         }
     }
@@ -74,7 +75,16 @@ class SolicitacoesCashOutObserver
     private function sendWithdrawNotification(SolicitacoesCashOut $solicitacao): void
     {
         try {
-            Log::info('Observer: Enviando notificação de saque aprovado', [
+            // Verificar se o usuário quer receber notificações de saque
+            if (!$this->preferenceService->shouldNotify($solicitacao->user_id, 'withdrawal')) {
+                Log::info('[OBSERVER] Notificação de saque bloqueada por preferência do usuário', [
+                    'solicitacao_id' => $solicitacao->id,
+                    'user_id' => $solicitacao->user_id
+                ]);
+                return;
+            }
+
+            Log::info('[OBSERVER] Enviando notificação de saque aprovado', [
                 'solicitacao_id' => $solicitacao->id,
                 'user_id' => $solicitacao->user_id,
                 'amount' => $solicitacao->cash_out_liquido
@@ -87,7 +97,7 @@ class SolicitacoesCashOutObserver
             );
 
         } catch (\Exception $e) {
-            Log::error('Erro ao enviar notificação de saque via Observer', [
+            Log::error('[OBSERVER] Erro ao enviar notificação de saque via Observer', [
                 'solicitacao_id' => $solicitacao->id,
                 'error' => $e->getMessage()
             ]);

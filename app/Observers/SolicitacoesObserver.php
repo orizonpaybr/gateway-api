@@ -4,15 +4,22 @@ namespace App\Observers;
 
 use App\Models\Solicitacoes;
 use App\Services\PushNotificationService;
+use App\Services\NotificationPreferenceService;
 use Illuminate\Support\Facades\Log;
 
 class SolicitacoesObserver
 {
+    private const APPROVED_STATUSES = ['PAID_OUT', 'COMPLETED', 'PAID', 'APPROVED'];
+    
     private $pushService;
+    private $preferenceService;
 
-    public function __construct(PushNotificationService $pushService)
-    {
+    public function __construct(
+        PushNotificationService $pushService,
+        NotificationPreferenceService $preferenceService
+    ) {
         $this->pushService = $pushService;
+        $this->preferenceService = $preferenceService;
     }
 
     /**
@@ -36,11 +43,8 @@ class SolicitacoesObserver
             'user_id' => $solicitacoes->user_id
         ]);
         
-        // Status que indicam depósito aprovado (varia por adquirente)
-        $approvedStatuses = ['PAID_OUT', 'COMPLETED', 'PAID', 'APPROVED'];
-        
         // Verificar se o status mudou para um status de aprovado
-        if ($solicitacoes->wasChanged('status') && in_array($solicitacoes->status, $approvedStatuses)) {
+        if ($solicitacoes->wasChanged('status') && in_array($solicitacoes->status, self::APPROVED_STATUSES)) {
             Log::info('[OBSERVER] Status mudou para aprovado - enviando notificação', [
                 'solicitacao_id' => $solicitacoes->id,
                 'user_id' => $solicitacoes->user_id,
@@ -52,7 +56,7 @@ class SolicitacoesObserver
             Log::info('[OBSERVER] Condições não atendidas para envio de notificação', [
                 'wasChanged' => $solicitacoes->wasChanged('status'),
                 'status' => $solicitacoes->status,
-                'is_approved' => in_array($solicitacoes->status, $approvedStatuses)
+                'is_approved' => in_array($solicitacoes->status, self::APPROVED_STATUSES)
             ]);
         }
     }
@@ -87,6 +91,15 @@ class SolicitacoesObserver
     private function sendDepositNotification(Solicitacoes $solicitacao): void
     {
         try {
+            // Verificar se o usuário quer receber notificações de depósito
+            if (!$this->preferenceService->shouldNotify($solicitacao->user_id, 'deposit')) {
+                Log::info('[OBSERVER] Notificação de depósito bloqueada por preferência do usuário', [
+                    'solicitacao_id' => $solicitacao->id,
+                    'user_id' => $solicitacao->user_id
+                ]);
+                return;
+            }
+
             Log::info('[OBSERVER] Enviando notificação de depósito aprovado', [
                 'solicitacao_id' => $solicitacao->id,
                 'user_id' => $solicitacao->user_id,

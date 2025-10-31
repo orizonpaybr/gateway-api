@@ -95,6 +95,18 @@ Route::options('notifications/mark-all-read', function () {
 Route::options('notifications/stats', function () {
     return response('', 200)->header('Access-Control-Allow-Origin', '*');
 });
+Route::options('notification-preferences', function () {
+    return response('', 200)->header('Access-Control-Allow-Origin', '*');
+});
+Route::options('notification-preferences/toggle/{type}', function () {
+    return response('', 200)->header('Access-Control-Allow-Origin', '*');
+});
+Route::options('notification-preferences/disable-all', function () {
+    return response('', 200)->header('Access-Control-Allow-Origin', '*');
+});
+Route::options('notification-preferences/enable-all', function () {
+    return response('', 200)->header('Access-Control-Allow-Origin', '*');
+});
 Route::options('dashboard/stats', function () {
     return response('', 200)->header('Access-Control-Allow-Origin', '*');
 });
@@ -168,13 +180,26 @@ Route::middleware(['verify.jwt'])->group(function () {
     // Infrações PIX Otimizadas
     Route::get('pix-infracoes-optimized', [PixInfracoesController::class, 'index']);
     
-    // Rotas de notificações
-    Route::post('notifications/register-token', [NotificationController::class, 'registerToken']);
-    Route::get('notifications', [NotificationController::class, 'getNotifications']);
-    Route::post('notifications/{id}/read', [NotificationController::class, 'markAsRead']);
-    Route::post('notifications/mark-all-read', [NotificationController::class, 'markAllAsRead']);
-    Route::get('notifications/stats', [NotificationController::class, 'getStats']);
-    Route::post('notifications/deactivate-token', [NotificationController::class, 'deactivateToken']);
+    // Rotas de notificações (com rate limiting)
+    Route::middleware('throttle:60,1')->group(function () {
+        Route::post('notifications/register-token', [NotificationController::class, 'registerToken']);
+        Route::get('notifications', [NotificationController::class, 'getNotifications']);
+        Route::post('notifications/{id}/read', [NotificationController::class, 'markAsRead']);
+        Route::post('notifications/mark-all-read', [NotificationController::class, 'markAllAsRead']);
+        Route::get('notifications/stats', [NotificationController::class, 'getStats']);
+        Route::post('notifications/deactivate-token', [NotificationController::class, 'deactivateToken']);
+    });
+    
+    // Rotas de preferências de notificação (com rate limiting mais permissivo)
+    Route::middleware('throttle:30,1')->group(function () {
+        // Aceita GET e POST para compatibilidade com o front (POST carrega token/secret no body)
+        Route::get('notification-preferences', [App\Http\Controllers\Api\NotificationPreferenceController::class, 'getPreferences']);
+        Route::post('notification-preferences', [App\Http\Controllers\Api\NotificationPreferenceController::class, 'getPreferences']);
+        Route::put('notification-preferences', [App\Http\Controllers\Api\NotificationPreferenceController::class, 'updatePreferences']);
+        Route::post('notification-preferences/toggle/{type}', [App\Http\Controllers\Api\NotificationPreferenceController::class, 'togglePreference']);
+        Route::post('notification-preferences/disable-all', [App\Http\Controllers\Api\NotificationPreferenceController::class, 'disableAll']);
+        Route::post('notification-preferences/enable-all', [App\Http\Controllers\Api\NotificationPreferenceController::class, 'enableAll']);
+    });
     
     // Rotas do 2FA
     Route::get('2fa/status', [App\Http\Controllers\TwoFactorAuthController::class, 'status']);
