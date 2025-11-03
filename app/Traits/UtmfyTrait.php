@@ -6,6 +6,7 @@ use App\Models\Solicitacoes;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class UtmfyTrait
 {
@@ -19,7 +20,6 @@ class UtmfyTrait
      */
     public static function gerarUTM($method, $status, $data, $apiToken, $ip, $description)
     {
-
         $dataAtual = Carbon::now()->format('Y-m-d H:i:s');
         Http::withHeaders([
             'x-api-token' => $apiToken,
