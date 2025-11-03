@@ -440,7 +440,8 @@ class UserController extends Controller
     public function generatePixQR(Request $request)
     {
         try {
-            $user = $this->getUserFromRequest($request);
+            // Obter usuário do middleware verify.jwt
+            $user = $request->user() ?? $request->input('user_auth');
             
             if (!$user) {
                 return response()->json([

@@ -14,6 +14,11 @@ class Pixup extends Model
         "url",
         "webhook_secret",
         "taxa_adquirente_entradas",
-        "taxa_adquirente_saidas"
+        "taxa_adquirente_saidas",
+        "status"
+    ];
+    
+    protected $casts = [
+        'status' => 'boolean'
     ];
 }

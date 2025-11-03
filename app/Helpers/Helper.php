@@ -10,6 +10,7 @@ use App\Models\App;
 use App\Models\CheckoutBuild;
 use App\Models\Nivel;
 use App\Models\Transactions;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -26,21 +27,21 @@ class Helper
      */
     public static function adquirenteDefault($user_id = null, $paymentType = 'pix')
     {
-        \Log::info('Helper::adquirenteDefault - User ID recebido', [
+        Log::info('Helper::adquirenteDefault - User ID recebido', [
             'user_id' => $user_id,
             'payment_type' => $paymentType
         ]);
         
         // Se um user_id foi fornecido, verificar se o usuário tem preferência
         if ($user_id) {
-            $user = User::where('user_id', $user_id)->first();
-            \Log::info('Helper::adquirenteDefault - Usuário encontrado', ['found' => $user ? 'Sim' : 'Não']);
+            $user = User::where('username', $user_id)->first();
+            Log::info('Helper::adquirenteDefault - Usuário encontrado', ['found' => $user ? 'Sim' : 'Não']);
             
             if ($user) {
                 // Verificar adquirente específica baseada no tipo de pagamento
                 if ($paymentType === 'card_billet') {
                     // Cartão e Boleto
-                    \Log::info('Helper::adquirenteDefault - Verificando adquirente Cartão+Boleto', [
+                    Log::info('Helper::adquirenteDefault - Verificando adquirente Cartão+Boleto', [
                         'preferred' => $user->preferred_adquirente_card_billet ?? 'NULL',
                         'override' => $user->adquirente_card_billet_override ? 'Sim' : 'Não'
                     ]);
@@ -50,7 +51,7 @@ class Helper
                             ->where('status', 1)
                             ->first();
                         if ($adquirentePreferida) {
-                            \Log::info('Helper::adquirenteDefault - Retornando adquirente Cartão+Boleto preferida', [
+                            Log::info('Helper::adquirenteDefault - Retornando adquirente Cartão+Boleto preferida', [
                                 'referencia' => $adquirentePreferida->referencia
                             ]);
                             return $adquirentePreferida->referencia;
@@ -58,7 +59,7 @@ class Helper
                     }
                 } else {
                     // PIX (padrão)
-                    \Log::info('Helper::adquirenteDefault - Verificando adquirente PIX', [
+                    Log::info('Helper::adquirenteDefault - Verificando adquirente PIX', [
                         'preferred' => $user->preferred_adquirente ?? 'NULL',
                         'override' => $user->adquirente_override ? 'Sim' : 'Não'
                     ]);
@@ -68,7 +69,7 @@ class Helper
                             ->where('status', 1)
                             ->first();
                         if ($adquirentePreferida) {
-                            \Log::info('Helper::adquirenteDefault - Retornando adquirente PIX preferida', [
+                            Log::info('Helper::adquirenteDefault - Retornando adquirente PIX preferida', [
                                 'referencia' => $adquirentePreferida->referencia
                             ]);
                             return $adquirentePreferida->referencia;
@@ -81,12 +82,12 @@ class Helper
         // Fallback para adquirente padrão global do sistema baseada no tipo
         if ($paymentType === 'card_billet') {
             $adquirente = Adquirente::where('is_default_card_billet', 1)->first();
-            \Log::info('Helper::adquirenteDefault - Adquirente Cartão+Boleto padrão global', [
+            Log::info('Helper::adquirenteDefault - Adquirente Cartão+Boleto padrão global', [
                 'referencia' => $adquirente ? $adquirente->referencia : 'NULL'
             ]);
         } else {
             $adquirente = Adquirente::where('is_default', 1)->first();
-            \Log::info('Helper::adquirenteDefault - Adquirente PIX padrão global', [
+            Log::info('Helper::adquirenteDefault - Adquirente PIX padrão global', [
                 'referencia' => $adquirente ? $adquirente->referencia : 'NULL'
             ]);
         }
@@ -128,7 +129,7 @@ class Helper
             // CORREÇÃO 2: Incluir as taxas no cálculo do total de saques
             $totalSaquesPagos = SolicitacoesCashOut::where('user_id', $user_id)
                 ->whereIn('status', ['PAID_OUT', 'COMPLETED']) // Agora inclui PAID_OUT
-                ->sum(\DB::raw('amount + taxa_cash_out')); // Soma valor + taxa
+                ->sum(DB::raw('amount + taxa_cash_out')); // Soma valor + taxa
 
             Log::info('calculaSaldoLiquido: Saques pagos', [
                 'user_id' => $user_id,
