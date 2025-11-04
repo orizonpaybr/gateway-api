@@ -134,6 +134,15 @@ Route::options('pix/keys/{id}/set-default', function () {
 Route::options('pix/withdraw-with-key', function () {
     return response('', 200)->header('Access-Control-Allow-Origin', '*');
 });
+Route::options('admin/dashboard/stats', function () {
+    return response('', 200)->header('Access-Control-Allow-Origin', '*');
+});
+Route::options('admin/dashboard/users', function () {
+    return response('', 200)->header('Access-Control-Allow-Origin', '*');
+});
+Route::options('admin/dashboard/transactions', function () {
+    return response('', 200)->header('Access-Control-Allow-Origin', '*');
+});
 
 // Rotas protegidas com JWT (para frontend)
 Route::middleware(['verify.jwt'])->group(function () {
@@ -173,6 +182,11 @@ Route::middleware(['verify.jwt'])->group(function () {
     Route::get('dashboard/stats-optimized', [App\Http\Controllers\Api\OptimizedDashboardController::class, 'getDashboardStats']);
     Route::get('dashboard/interactive-movement-optimized', [App\Http\Controllers\Api\OptimizedDashboardController::class, 'getInteractiveMovement']);
     Route::get('dashboard/transaction-summary-optimized', [App\Http\Controllers\Api\OptimizedDashboardController::class, 'getTransactionSummary']);
+    
+    // Dashboard Administrativo (apenas para admins - permission == 3)
+    Route::get('admin/dashboard/stats', [App\Http\Controllers\Api\AdminDashboardController::class, 'getDashboardStats']);
+    Route::get('admin/dashboard/users', [App\Http\Controllers\Api\AdminDashboardController::class, 'getUsers']);
+    Route::get('admin/dashboard/transactions', [App\Http\Controllers\Api\AdminDashboardController::class, 'getRecentTransactions']);
     
     // Transações Otimizadas
     Route::get('transactions/recent-optimized', [UserController::class, 'getRecentTransactions']);
