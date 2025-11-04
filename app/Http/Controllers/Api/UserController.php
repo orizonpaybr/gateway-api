@@ -1918,6 +1918,8 @@ class UserController extends Controller
                     'username' => $user->username,
                     'email' => $user->email ?? '',
                     'name' => $user->name ?? $user->username,
+                    // Campo de permissão necessário para exibir recursos de administrador no frontend
+                    'permission' => $user->permission ?? null,
                     'phone' => $user->telefone ?? '',
                     'cnpj' => $user->cpf_cnpj ?? '',
                     'status' => $user->status == 1 ? 'active' : 'inactive',
