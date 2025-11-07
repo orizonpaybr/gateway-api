@@ -46,6 +46,7 @@ class User extends Authenticatable
         "taxa_cash_out_fixa",
         "token",
         "banido",
+        "aprovado_alguma_vez",
         "cliente_id",
         "taxa_percentual",
         "volume_transacional",
