@@ -136,6 +136,7 @@ trait UserRequestTrait
             'taxa_flexivel_valor_minimo' => 'nullable|numeric|min:0',
             'taxa_flexivel_fixa_baixo' => 'nullable|numeric|min:0',
             'taxa_flexivel_percentual_alto' => 'nullable|numeric|min:0|max:100',
+            'observacoes_taxas' => 'nullable|string|max:1000',
         ];
     }
 }

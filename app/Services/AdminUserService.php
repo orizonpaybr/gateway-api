@@ -199,15 +199,27 @@ class AdminUserService
                 // Sistema flexível
                 'sistema_flexivel_ativo', 'valor_minimo_flexivel', 'taxa_fixa_baixos', 'taxa_percentual_altos',
                 'taxa_flexivel_ativa', 'taxa_flexivel_valor_minimo', 'taxa_flexivel_fixa_baixo', 'taxa_flexivel_percentual_alto',
+                // Observações
+                'observacoes_taxas',
                 // Adquirentes / overrides
                 'preferred_adquirente', 'adquirente_override',
                 'preferred_adquirente_card_billet', 'adquirente_card_billet_override'
             ];
             
             $updateData = [];
+            // Campos que devem ser convertidos de string vazia para null
+            $nullableFields = ['telefone', 'data_nascimento', 'cpf_cnpj', 'cpf', 'cep', 'rua', 'estado', 'cidade', 'bairro', 'numero_residencia', 'complemento', 'observacoes_taxas'];
+            
             foreach ($allowedFields as $field) {
                 if (array_key_exists($field, $data)) {
-                    $updateData[$field] = $data[$field];
+                    $value = $data[$field];
+                    
+                    // Converter strings vazias para null em campos nullable
+                    if (in_array($field, $nullableFields) && $value === '') {
+                        $updateData[$field] = null;
+                    } else {
+                        $updateData[$field] = $value;
+                    }
                 }
             }
             
@@ -264,10 +276,11 @@ class AdminUserService
                 throw new \Exception('Não é possível deletar o administrador principal');
             }
             
-            // Marcar como banido/inativo ao invés de deletar fisicamente
+            // Marcar como inativo (excluído) ao invés de deletar fisicamente
+            // Não marcar como banido, pois banido é para bloqueio, não exclusão
             $user->update([
                 'status' => UserStatus::INACTIVE,
-                'banido' => true
+                'banido' => false
             ]);
             
             // Limpar cache
@@ -315,7 +328,10 @@ class AdminUserService
                 throw new \Exception('Usuário já está aprovado');
             }
             
-            $user->update(['status' => UserStatus::ACTIVE]);
+            $user->update([
+                'status' => UserStatus::ACTIVE,
+                'aprovado_alguma_vez' => true
+            ]);
             
             // Limpar cache
             CacheKeyService::forgetUser($userId);
@@ -354,7 +370,7 @@ class AdminUserService
      * @return User
      * @throws \Exception
      */
-    public function toggleUserBlock(int $userId, bool $block = true): User
+    public function toggleUserBlock(int $userId, bool $block = true, bool $approve = false): User
     {
         DB::beginTransaction();
         
@@ -366,10 +382,19 @@ class AdminUserService
                 throw new \Exception('Não é possível bloquear o administrador principal');
             }
             
-            $user->update([
-                'status' => $block ? UserStatus::INACTIVE : UserStatus::ACTIVE,
-                'banido' => $block
-            ]);
+            // Se está desbloqueando e deve aprovar também
+            if (!$block && $approve) {
+                $user->update([
+                    'status' => UserStatus::ACTIVE,
+                    'banido' => false,
+                    'aprovado_alguma_vez' => true
+                ]);
+            } else {
+                $user->update([
+                    'status' => $block ? UserStatus::INACTIVE : UserStatus::ACTIVE,
+                    'banido' => $block
+                ]);
+            }
             
             // Limpar cache
             CacheKeyService::forgetUser($userId);
@@ -378,7 +403,8 @@ class AdminUserService
             
             DB::commit();
             
-            Log::warning('Usuário ' . ($block ? 'bloqueado' : 'desbloqueado') . ' pelo admin', [
+            $action = $block ? 'bloqueado' : ($approve ? 'desbloqueado e aprovado' : 'desbloqueado');
+            Log::warning('Usuário ' . $action . ' pelo admin', [
                 'user_id' => $userId,
                 'username' => $user->username,
                 'action_by' => Auth::id()
