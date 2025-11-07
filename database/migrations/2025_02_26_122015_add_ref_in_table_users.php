@@ -12,14 +12,14 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('users', function (Blueprint $table) {
-           /*  $table->string('code_ref')->nullable(); // Permite nulo
-            $table->string('indicador_ref')->nullable(); // Pode ser nulo
-
+            // Adicionar code_ref se não existir
+            if (!Schema::hasColumn('users', 'code_ref')) {
+                $table->string('code_ref')->nullable()->after('indicador_ref');
+            }
+            
             // Garante que code_ref seja único caso seja necessário
-            $table->unique('code_ref');
-
-            // Define indicador_ref como chave estrangeira de code_ref
-            $table->foreign('indicador_ref')->references('code_ref')->on('users')->nullOnDelete(); */
+            // Removendo unique temporariamente para permitir valores nulos
+            // $table->unique('code_ref');
         });
     }
 
@@ -29,9 +29,9 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            $table->dropForeign(['indicador_ref']);
-            $table->dropUnique(['code_ref']);
-            $table->dropColumn(['code_ref', 'indicador_ref']);
+            if (Schema::hasColumn('users', 'code_ref')) {
+                $table->dropColumn('code_ref');
+            }
         });
     }
 };
