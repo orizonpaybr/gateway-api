@@ -1904,6 +1904,21 @@ class UserController extends Controller
                 ], 401)->header('Access-Control-Allow-Origin', '*');
             }
 
+            // Verificar se usuário pode fazer login
+            if (!\App\Helpers\UserStatusHelper::canLogin($user)) {
+                \Illuminate\Support\Facades\Log::warning('Tentativa de acessar perfil com conta inativa/banida', [
+                    'username' => $user->username,
+                    'status' => $user->status,
+                    'banido' => $user->banido,
+                    'ip' => $request->ip()
+                ]);
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Sua conta foi desativada ou bloqueada. Entre em contato com o suporte.'
+                ], 403)->header('Access-Control-Allow-Origin', '*');
+            }
+
             // Cache Redis para dados do perfil (TTL: 5 minutos)
             $cacheKey = "user_profile_{$user->username}";
             $profileData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 300, function() use ($user) {

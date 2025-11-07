@@ -196,6 +196,7 @@ Route::middleware(['verify.jwt'])->group(function () {
         Route::post('admin/users', [App\Http\Controllers\Api\AdminDashboardController::class, 'storeUser']);
         Route::put('admin/users/{id}', [App\Http\Controllers\Api\AdminDashboardController::class, 'updateUser']);
         Route::delete('admin/users/{id}', [App\Http\Controllers\Api\AdminDashboardController::class, 'deleteUser']);
+        Route::get('admin/default-fees', [App\Http\Controllers\Api\AdminDashboardController::class, 'getDefaultFees']);
         Route::post('admin/users/{id}/approve', [App\Http\Controllers\Api\AdminDashboardController::class, 'approveUser']);
         Route::post('admin/users/{id}/toggle-block', [App\Http\Controllers\Api\AdminDashboardController::class, 'toggleBlockUser']);
         Route::post('admin/users/{id}/adjust-balance', [App\Http\Controllers\Api\AdminDashboardController::class, 'adjustBalance']);
