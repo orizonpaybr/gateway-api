@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\UsersKey;
+use App\Constants\UserStatus;
+use App\Helpers\{UserStatusHelper, AppSettingsHelper};
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
@@ -69,6 +71,23 @@ class AuthController extends Controller
                     'success' => false,
                     'message' => 'Senha incorreta'
                 ], 401);
+            }
+
+            // Verificar se usuário pode fazer login
+            if (!UserStatusHelper::canLogin($user)) {
+                Log::warning('Tentativa de login com conta inativa/banida', [
+                    'username' => $username,
+                    'status' => $user->status,
+                    'banido' => $user->banido,
+                    'ip' => $request->ip()
+                ]);
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Sua conta foi desativada ou bloqueada. Entre em contato com o suporte.'
+                ], 403)->header('Access-Control-Allow-Origin', '*')
+                  ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
+                  ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
             }
 
             // Verificar se o usuário tem 2FA ativo (PIN-based)
@@ -200,6 +219,21 @@ class AuthController extends Controller
                 ], 401)->header('Access-Control-Allow-Origin', '*');
             }
 
+            // Verificar se usuário pode fazer login
+            if (!UserStatusHelper::canLogin($user)) {
+                Log::warning('Tentativa de login 2FA com conta inativa/banida', [
+                    'username' => $user->username,
+                    'status' => $user->status,
+                    'banido' => $user->banido,
+                    'ip' => $request->ip()
+                ]);
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Sua conta foi desativada ou bloqueada. Entre em contato com o suporte.'
+                ], 403)->header('Access-Control-Allow-Origin', '*');
+            }
+
             // Verificar PIN 2FA
             $valid = Hash::check($code, $user->twofa_pin);
 
@@ -285,6 +319,21 @@ class AuthController extends Controller
                     'success' => false,
                     'message' => 'Usuário não encontrado'
                 ], 401);
+            }
+
+            // Verificar se usuário pode fazer login
+            if (!UserStatusHelper::canLogin($user)) {
+                Log::warning('Tentativa de verificar token com conta inativa/banida', [
+                    'username' => $user->username,
+                    'status' => $user->status,
+                    'banido' => $user->banido,
+                    'ip' => $request->ip()
+                ]);
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Sua conta foi desativada ou bloqueada. Entre em contato com o suporte.'
+                ], 403);
             }
 
             return response()->json([
@@ -388,7 +437,7 @@ class AuthController extends Controller
             // Gerando IDs e valores adicionais
             $clienteId = \Illuminate\Support\Str::uuid()->toString();
             $saldo = 0;
-            $status = 5; // Status 5 = Pendente de Aprovação pelo Admin
+            $status = UserStatus::PENDING; // Status pendente - aguardando aprovação do admin
             $dataCadastroFormatada = \Carbon\Carbon::now('America/Sao_Paulo')->format('Y-m-d H:i:s');
             
             // Processar upload de documentos
@@ -419,17 +468,27 @@ class AuthController extends Controller
 
             $indicador_ref = $request->input('ref') ?? NULL;
 
-            $app = \App\Models\App::first();
+            // Não é necessário buscar App aqui, apenas gerar code_ref
             $code_ref = uniqid();
 
-            $gerenteComMenosClientes = User::where('permission', 5)
-                ->withCount('clientes')
-                ->orderBy('clientes_count', 'asc')
-                ->first();
+            $gerenteComMenosClientes = null;
+            try {
+                $gerenteComMenosClientes = User::where('permission', \App\Constants\UserPermission::MANAGER)
+                    ->withCount('clientes')
+                    ->orderBy('clientes_count', 'asc')
+                    ->first();
+            } catch (\Exception $e) {
+                Log::warning('Erro ao buscar gerente com withCount, tentando sem', [
+                    'error' => $e->getMessage()
+                ]);
+                $gerenteComMenosClientes = User::where('permission', \App\Constants\UserPermission::MANAGER)
+                    ->first();
+            }
 
             if (isset($indicador_ref) && !is_null($indicador_ref)) {
                 $indicador = User::where('code_ref', $indicador_ref)->first();
-                if ($indicador && $indicador->permission == 5) {
+                // Se o indicador for gerente (permission = 2), usar ele como gerente
+                if ($indicador && $indicador->permission == \App\Constants\UserPermission::MANAGER) {
                     $gerenteComMenosClientes = $indicador;
                 }
             }
@@ -446,6 +505,7 @@ class AuthController extends Controller
                 'saldo' => $saldo,
                 'data_cadastro' => $dataCadastroFormatada,
                 'status' => $status,
+                'permission' => \App\Constants\UserPermission::CLIENT, // Sempre CLIENT (1) no cadastro
                 'cliente_id' => $clienteId,
                 'code_ref' => $code_ref,
                 'indicador_ref' => $indicador_ref,
@@ -462,7 +522,12 @@ class AuthController extends Controller
             $secret = \Illuminate\Support\Str::uuid()->toString();
             $user_id = $user->user_id;
 
-            UsersKey::create(compact('user_id', 'token', 'secret'));
+            UsersKey::create([
+                'user_id' => $user_id,
+                'token' => $token,
+                'secret' => $secret,
+                'status' => 'active' // Campo obrigatório na tabela users_key
+            ]);
 
             // PROCESSAR AFILIADO SE houver parâmetro 'ref' na URL
             $affiliateCode = $request->get('ref'); 
@@ -573,12 +638,20 @@ class AuthController extends Controller
         } catch (\Exception $e) {
             Log::error('Erro no registro via API', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+                'request_data' => [
+                    'username' => $request->input('username'),
+                    'email' => $request->input('email'),
+                    'has_files' => $request->hasFile('documentoFrente') || $request->hasFile('documentoVerso') || $request->hasFile('selfieDocumento'),
+                ]
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Erro interno do servidor'
+                'message' => 'Erro interno do servidor',
+                'error' => app()->environment('local') ? $e->getMessage() : null
             ], 500)->header('Access-Control-Allow-Origin', '*');
         }
     }

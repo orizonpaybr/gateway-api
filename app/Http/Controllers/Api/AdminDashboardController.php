@@ -9,6 +9,7 @@ use App\Models\UsersKey;
 use App\Models\Adquirente;
 use App\Http\Requests\Admin\{StoreUserRequest, UpdateUserRequest, AffiliateSettingsRequest};
 use App\Constants\{UserStatus, UserPermission, AffiliateSettings};
+use App\Helpers\{UserStatusHelper, AppSettingsHelper};
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\{Cache, DB, Log, Redis};
 use Carbon\Carbon;
@@ -167,6 +168,9 @@ class AdminDashboardController extends Controller
                 // Determinar texto de permissão usando constant
                 $permissionText = UserPermission::getText($user->permission ?? UserPermission::CLIENT);
 
+                // Determinar status_text usando helper (DRY)
+                $statusTexto = UserStatusHelper::getStatusText($user);
+
                 return [
                     'id' => $user->id,
                     'user_id' => $user->user_id,
@@ -175,6 +179,9 @@ class AdminDashboardController extends Controller
                     'username' => $user->username,
                     'cpf_cnpj' => $user->cpf_cnpj,
                     'status' => $user->status,
+                    'status_text' => $statusTexto,
+                    'banido' => (bool) ($user->banido ?? false),
+                    'aprovado_alguma_vez' => (bool) ($user->aprovado_alguma_vez ?? false),
                     'saldo' => $user->saldo,
                     'permission' => $user->permission ?? UserPermission::CLIENT,
                     'permission_text' => $permissionText,
@@ -243,11 +250,8 @@ class AdminDashboardController extends Controller
             // Pendentes (status PENDING usando constant)
             $pendingRegistrations = User::where('status', UserStatus::PENDING)->count();
             
-            // Banidos (status INACTIVE ou banido = true usando constant)
-            $bannedUsers = User::where(function($q) {
-                $q->where('status', UserStatus::INACTIVE)
-                  ->orWhere('banido', true);
-            })->count();
+            // Banidos (apenas banido = true, excluídos não contam como banidos)
+            $bannedUsers = User::where('banido', true)->count();
 
             $stats = [
                 'total_registrations' => $totalRegistrations,
@@ -781,8 +785,19 @@ class AdminDashboardController extends Controller
             // Montar payload detalhado (sanitizado)
             $keys = UsersKey::where('user_id', $user->user_id)->first();
 
-            // Usar constant para status
-            $statusTexto = UserStatus::getText($user->status);
+            // Determinar status_text usando helper (DRY)
+            $statusTexto = UserStatusHelper::getStatusText($user);
+
+            // Buscar taxas padrão do sistema (tabela app) com cache
+            $setting = AppSettingsHelper::getSettings();
+            
+            // Determinar se usa taxas personalizadas ou globais
+            $usandoPersonalizadas = $user->taxas_personalizadas_ativas ?? false;
+            
+            // IMPORTANTE: No contexto de edição (admin), sempre retornar os valores salvos no banco
+            // O flag taxas_personalizadas_ativas só afeta qual valor é USADO no sistema,
+            // mas no modal de edição devemos mostrar os valores salvos, mesmo que não estejam ativos
+            // Se o valor não existir no banco, aí sim usar o padrão do sistema
 
             $detail = [
                 'id' => $user->id,
@@ -793,6 +808,8 @@ class AdminDashboardController extends Controller
                 'permission' => (int) ($user->permission ?? UserPermission::CLIENT),
                 'status' => (int) $user->status,
                 'status_text' => $statusTexto,
+                'banido' => (bool) ($user->banido ?? false),
+                'aprovado_alguma_vez' => (bool) ($user->aprovado_alguma_vez ?? false),
                 'created_at' => optional($user->created_at)->toDateTimeString(),
                 // Identificação
                 'cpf' => $user->cpf,
@@ -815,35 +832,65 @@ class AdminDashboardController extends Controller
                 // Integrações
                 'token' => $keys->token ?? null,
                 'secret' => $keys->secret ?? null,
-                // Documentação (URLs)
+                // Documentação (caminhos relativos - serão resolvidos pelo frontend)
                 'documents' => [
                     'rg_frente' => $user->foto_rg_frente,
                     'rg_verso' => $user->foto_rg_verso,
                     'selfie_rg' => $user->selfie_rg,
                 ],
-                // Taxas - Depósito
-                'taxa_percentual_deposito' => $user->taxa_percentual_deposito,
-                'taxa_fixa_deposito' => $user->taxa_fixa_deposito,
-                'valor_minimo_deposito' => $user->valor_minimo_deposito,
+                // Taxas - SEMPRE retornar valores salvos no banco (se existirem), senão usar padrão
+                // Converter para float para garantir que retorne número e não string
+                'taxas_personalizadas_ativas' => $usandoPersonalizadas,
+                'taxa_percentual_deposito' => (float) ($user->taxa_percentual_deposito !== null 
+                    ? $user->taxa_percentual_deposito 
+                    : ($setting->taxa_cash_in_padrao ?? 4.00)),
+                'taxa_fixa_deposito' => (float) ($user->taxa_fixa_deposito !== null 
+                    ? $user->taxa_fixa_deposito 
+                    : ($setting->taxa_fixa_padrao ?? 0.00)),
+                'valor_minimo_deposito' => (float) ($user->valor_minimo_deposito !== null
+                    ? $user->valor_minimo_deposito 
+                    : ($setting->deposito_minimo ?? 1.00)),
                 // Taxas - Saque
-                'taxa_percentual_pix' => $user->taxa_percentual_pix,
-                'taxa_minima_pix' => $user->taxa_minima_pix,
-                'taxa_fixa_pix' => $user->taxa_fixa_pix,
-                'valor_minimo_saque' => $user->valor_minimo_saque,
+                'taxa_percentual_pix' => (float) ($user->taxa_percentual_pix !== null
+                    ? $user->taxa_percentual_pix 
+                    : ($setting->taxa_cash_out_padrao ?? 4.00)),
+                'taxa_minima_pix' => (float) ($user->taxa_minima_pix !== null
+                    ? $user->taxa_minima_pix 
+                    : 0.80),
+                'taxa_fixa_pix' => (float) ($user->taxa_fixa_pix !== null
+                    ? $user->taxa_fixa_pix 
+                    : ($setting->taxa_fixa_pix ?? 0.00)),
+                'valor_minimo_saque' => (float) ($user->valor_minimo_saque !== null
+                    ? $user->valor_minimo_saque 
+                    : ($setting->saque_minimo ?? 1.00)),
                 // Limites e extras
-                'limite_mensal_pf' => $user->limite_mensal_pf,
-                'taxa_saque_api' => $user->taxa_saque_api,
-                'taxa_saque_crypto' => $user->taxa_saque_crypto,
+                'limite_mensal_pf' => (float) ($user->limite_mensal_pf !== null
+                    ? $user->limite_mensal_pf 
+                    : ($setting->limite_saque_mensal ?? 50000.00)),
+                'taxa_saque_api' => (float) ($user->taxa_saque_api !== null
+                    ? $user->taxa_saque_api 
+                    : ($setting->taxa_saque_api_padrao ?? 5.00)),
+                'taxa_saque_crypto' => (float) ($user->taxa_saque_crypto !== null
+                    ? $user->taxa_saque_crypto 
+                    : ($setting->taxa_saque_cripto_padrao ?? 1.00)),
                 // Sistema Flexível
-                'sistema_flexivel_ativo' => (bool) ($user->sistema_flexivel_ativo ?? $user->taxa_flexivel_ativa),
-                'valor_minimo_flexivel' => $user->valor_minimo_flexivel ?? $user->taxa_flexivel_valor_minimo,
-                'taxa_fixa_baixos' => $user->taxa_fixa_baixos ?? $user->taxa_flexivel_fixa_baixo,
-                'taxa_percentual_altos' => $user->taxa_percentual_altos ?? $user->taxa_flexivel_percentual_alto,
+                'sistema_flexivel_ativo' => (bool) ($user->sistema_flexivel_ativo ?? false),
+                'valor_minimo_flexivel' => (float) ($user->valor_minimo_flexivel !== null
+                    ? $user->valor_minimo_flexivel 
+                    : ($setting->taxa_flexivel_valor_minimo ?? 15.00)),
+                'taxa_fixa_baixos' => (float) ($user->taxa_fixa_baixos !== null
+                    ? $user->taxa_fixa_baixos 
+                    : ($setting->taxa_flexivel_fixa_baixo ?? 1.00)),
+                'taxa_percentual_altos' => (float) ($user->taxa_percentual_altos !== null
+                    ? $user->taxa_percentual_altos 
+                    : ($setting->taxa_flexivel_percentual_alto ?? 4.00)),
                 // Afiliados
                 'is_affiliate' => (bool) ($user->is_affiliate ?? false),
                 'affiliate_percentage' => (float) ($user->affiliate_percentage ?? 0),
                 'affiliate_code' => $user->affiliate_code,
                 'affiliate_link' => $user->affiliate_link,
+                // Observações
+                'observacoes_taxas' => $user->observacoes_taxas ?? null,
             ];
 
             return $this->successResponse(['user' => $detail]);
@@ -855,6 +902,55 @@ class AdminDashboardController extends Controller
             ]);
             
             return $this->errorResponse('Erro ao obter usuário', 500);
+        }
+    }
+    
+    /**
+     * Obter taxas padrão do sistema
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getDefaultFees(Request $request)
+    {
+        try {
+            // Verificação de admin feita pelo middleware 'ensure.admin'
+            $setting = AppSettingsHelper::getSettings();
+            
+            if (!$setting) {
+                return $this->errorResponse('Configurações do sistema não encontradas', 404);
+            }
+            
+            // Retornar todas as taxas padrão do sistema
+            $defaultFees = [
+                // Taxas de depósito
+                'taxa_percentual_deposito' => (float) ($setting->taxa_cash_in_padrao ?? 4.00),
+                'taxa_fixa_deposito' => (float) ($setting->taxa_fixa_padrao ?? 0.00),
+                'valor_minimo_deposito' => (float) ($setting->deposito_minimo ?? 1.00),
+                // Taxas de saque
+                'taxa_percentual_pix' => (float) ($setting->taxa_cash_out_padrao ?? 4.00),
+                'taxa_minima_pix' => 0.80, // Valor fixo padrão
+                'taxa_fixa_pix' => (float) ($setting->taxa_fixa_pix ?? 0.00),
+                'valor_minimo_saque' => (float) ($setting->saque_minimo ?? 1.00),
+                // Limites e extras
+                'limite_mensal_pf' => (float) ($setting->limite_saque_mensal ?? 50000.00),
+                'taxa_saque_api' => (float) ($setting->taxa_saque_api_padrao ?? 5.00),
+                'taxa_saque_crypto' => (float) ($setting->taxa_saque_cripto_padrao ?? 1.00),
+                // Sistema flexível
+                'sistema_flexivel_ativo' => (bool) ($setting->taxa_flexivel_ativa ?? false),
+                'valor_minimo_flexivel' => (float) ($setting->taxa_flexivel_valor_minimo ?? 15.00),
+                'taxa_fixa_baixos' => (float) ($setting->taxa_flexivel_fixa_baixo ?? 1.00),
+                'taxa_percentual_altos' => (float) ($setting->taxa_flexivel_percentual_alto ?? 4.00),
+            ];
+            
+            return $this->successResponse(['fees' => $defaultFees]);
+            
+        } catch (\Exception $e) {
+            Log::error('Erro ao obter taxas padrão', [
+                'error' => $e->getMessage()
+            ]);
+            
+            return $this->errorResponse('Erro ao obter taxas padrão', 500);
         }
     }
     
@@ -989,10 +1085,17 @@ class AdminDashboardController extends Controller
         try {
             // Verificação de admin feita pelo middleware 'ensure.admin'
             $block = $request->input('block', true);
-            $userData = $this->userService->toggleUserBlock($id, $block);
+            $approve = $request->input('approve', false);
+            $userData = $this->userService->toggleUserBlock($id, $block, $approve);
+            
+            $message = $block 
+                ? 'Usuário bloqueado com sucesso' 
+                : ($approve 
+                    ? 'Usuário desbloqueado e aprovado com sucesso' 
+                    : 'Usuário desbloqueado com sucesso');
             
             return $this->successResponse([
-                'message' => $block ? 'Usuário bloqueado com sucesso' : 'Usuário desbloqueado com sucesso',
+                'message' => $message,
                 'user' => $userData
             ]);
             
