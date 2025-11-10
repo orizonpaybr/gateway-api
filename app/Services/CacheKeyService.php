@@ -3,7 +3,7 @@
 namespace App\Services;
 
 use Carbon\Carbon;
-use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Facades\{Cache, Log};
 
 /**
  * Service para centralizar cache keys
@@ -63,20 +63,17 @@ class CacheKeyService
     
     /**
      * Limpar cache de usuário específico
-     * Usa Redis explicitamente (seguindo padrão do projeto)
+     * Usa Cache facade (padronizado - usa Redis se configurado)
      */
     public static function forgetUser(int $userId): void
     {
         try {
             $key1 = self::adminUser($userId, true);
             $key2 = self::adminUser($userId, false);
-            Redis::del($key1);
-            Redis::del($key2);
-            // Fallback para Cache facade
-            \Illuminate\Support\Facades\Cache::forget($key1);
-            \Illuminate\Support\Facades\Cache::forget($key2);
+            Cache::forget($key1);
+            Cache::forget($key2);
         } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::warning('Erro ao limpar cache Redis de usuário', [
+            Log::warning('Erro ao limpar cache de usuário', [
                 'user_id' => $userId,
                 'error' => $e->getMessage()
             ]);
@@ -85,17 +82,15 @@ class CacheKeyService
     
     /**
      * Limpar cache de estatísticas de usuários
-     * Usa Redis explicitamente (seguindo padrão do projeto)
+     * Usa Cache facade (padronizado - usa Redis se configurado)
      */
     public static function forgetUsersStats(): void
     {
         try {
             $key = self::adminUsersStats();
-            Redis::del($key);
-            // Fallback para Cache facade
-            \Illuminate\Support\Facades\Cache::forget($key);
+            Cache::forget($key);
         } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::warning('Erro ao limpar cache Redis de estatísticas', [
+            Log::warning('Erro ao limpar cache de estatísticas', [
                 'error' => $e->getMessage()
             ]);
         }
@@ -103,7 +98,7 @@ class CacheKeyService
     
     /**
      * Limpar cache de dashboard por período
-     * Usa Redis explicitamente (seguindo padrão do projeto)
+     * Usa Cache facade (padronizado - usa Redis se configurado)
      */
     public static function forgetDashboardStats(?string $periodo = null): void
     {
@@ -115,22 +110,28 @@ class CacheKeyService
                 $periodos = ['hoje', 'ontem', '7dias', '30dias', 'mes_atual', 'mes_anterior', 'tudo'];
             }
             
-            // Limpar usando padrão de chaves Redis
-            $pattern = 'admin:dashboard:stats:*';
-            $keys = Redis::keys($pattern);
+            // Limpar usando tags se suportado pelo driver
+            $store = Cache::getStore();
             
-            if (!empty($keys)) {
-                Redis::del($keys);
-            }
-            
-            // Fallback para Cache facade
             foreach ($periodos as $p) {
-                if (method_exists(\Illuminate\Support\Facades\Cache::getStore(), 'tags')) {
-                    \Illuminate\Support\Facades\Cache::tags(['admin:dashboard', $p])->flush();
+                if (method_exists($store, 'tags')) {
+                    try {
+                        Cache::tags(['admin:dashboard', $p])->flush();
+                    } catch (\Exception $e) {
+                        // Tags podem não ser suportadas por todos os drivers
+                        Log::debug('Tags não suportadas pelo driver de cache', [
+                            'error' => $e->getMessage()
+                        ]);
+                    }
+                } else {
+                    // Fallback: limpar cache manualmente para períodos conhecidos
+                    // Nota: sem tags, não podemos limpar por padrão de forma eficiente
+                    // O cache expirará naturalmente pelo TTL
+                    Log::debug('Driver de cache não suporta tags, cache expirará pelo TTL');
                 }
             }
         } catch (\Exception $e) {
-            \Illuminate\Support\Facades\Log::warning('Erro ao limpar cache Redis de dashboard', [
+            Log::warning('Erro ao limpar cache de dashboard', [
                 'error' => $e->getMessage()
             ]);
         }

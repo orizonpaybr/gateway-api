@@ -5,11 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Facades\Redis;
-use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\{Cache, Log, Validator, Hash};
 
 /**
  * Controller para gerenciar integração com Utmify
@@ -337,7 +333,6 @@ class UtmifyController extends Controller
         try {
             $cacheKey = self::CACHE_PREFIX . "config_{$username}";
             Cache::forget($cacheKey);
-            Redis::del($cacheKey);
             
             Log::debug('[UTMIFY] Cache limpo', ['username' => $username]);
         } catch (\Exception $e) {

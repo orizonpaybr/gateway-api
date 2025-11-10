@@ -3,8 +3,7 @@
 namespace App\Helpers;
 
 use App\Models\App;
-use Illuminate\Support\Facades\Redis;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\{Cache, Log};
 
 /**
  * Helper para configurações do App com cache
@@ -24,35 +23,17 @@ class AppSettingsHelper
     public static function getSettings(): ?App
     {
         try {
-            $cached = Redis::get(self::CACHE_KEY);
-            if ($cached) {
-                $data = json_decode($cached, true);
-                if ($data) {
-                    // Reconstruir modelo App a partir dos dados em cache
-                    return App::find($data['id'] ?? null);
-                }
-            }
+            // Usar Cache facade (padronizado - usa Redis se configurado)
+            return Cache::remember(self::CACHE_KEY, self::CACHE_TTL, function () {
+                return App::first();
+            });
         } catch (\Exception $e) {
-            Log::warning('Erro ao ler cache Redis de App settings, usando query direta', [
+            Log::warning('Erro ao usar cache de App settings, usando query direta', [
                 'error' => $e->getMessage()
             ]);
+            // Fallback: buscar sem cache
+            return App::first();
         }
-        
-        // Se não estiver no cache, buscar do banco
-        $setting = App::first();
-        
-        // Armazenar no Redis
-        if ($setting) {
-            try {
-                Redis::setex(self::CACHE_KEY, self::CACHE_TTL, json_encode($setting->toArray()));
-            } catch (\Exception $e) {
-                Log::warning('Erro ao escrever cache Redis de App settings', [
-                    'error' => $e->getMessage()
-                ]);
-            }
-        }
-        
-        return $setting;
     }
     
     /**
@@ -61,9 +42,9 @@ class AppSettingsHelper
     public static function forgetCache(): void
     {
         try {
-            Redis::del(self::CACHE_KEY);
+            Cache::forget(self::CACHE_KEY);
         } catch (\Exception $e) {
-            Log::warning('Erro ao limpar cache Redis de App settings', [
+            Log::warning('Erro ao limpar cache de App settings', [
                 'error' => $e->getMessage()
             ]);
         }

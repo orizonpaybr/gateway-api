@@ -3,9 +3,7 @@
 namespace App\Services;
 
 use App\Models\NotificationPreference;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Redis;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\{Cache, Log};
 
 class NotificationPreferenceService
 {
@@ -35,26 +33,15 @@ class NotificationPreferenceService
         $cacheKey = self::CACHE_PREFIX . $userId;
 
         try {
-            // Tentar obter do Redis primeiro
-            $cached = Redis::get($cacheKey);
-            
-            if ($cached) {
-                return json_decode($cached, true);
-            }
-
-            // Se não estiver no cache, buscar do banco (sem duplicar cache)
-            $preferences = NotificationPreference::firstOrCreate(
-                ['user_id' => $userId],
-                self::DEFAULT_PREFERENCES
-            );
-            
-            $data = $preferences->toArray();
-
-            // Armazenar no Redis
-            Redis::setex($cacheKey, self::CACHE_TTL, json_encode($data));
-
-            return $data;
-
+            // Usar Cache facade (padronizado - usa Redis se configurado)
+            return Cache::remember($cacheKey, self::CACHE_TTL, function () use ($userId) {
+                $preferences = NotificationPreference::firstOrCreate(
+                    ['user_id' => $userId],
+                    self::DEFAULT_PREFERENCES
+                );
+                
+                return $preferences->toArray();
+            });
         } catch (\Exception $e) {
             Log::error('Erro ao obter preferências de notificação', [
                 'user_id' => $userId,
@@ -132,7 +119,7 @@ class NotificationPreferenceService
     {
         try {
             $cacheKey = self::CACHE_PREFIX . $userId;
-            Redis::del($cacheKey);
+            Cache::forget($cacheKey);
             
             Log::debug('Cache de preferências limpo', ['user_id' => $userId]);
         } catch (\Exception $e) {

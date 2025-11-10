@@ -49,33 +49,17 @@ class QRCodeController extends Controller
             // Cache por 2 minutos para dados dinâmicos
             $cacheTtl = 120;
 
-            $payload = Cache::remember($cacheKey, $cacheTtl, function () use ($user, $page, $limit, $busca, $dataInicio, $dataFim, $status) {
-                // Query otimizada usando UNION ALL para buscar em ambas as tabelas
-                $query = $this->buildOptimizedQuery($user->username, $busca, $dataInicio, $dataFim, $status);
-                
-                // Contar total
-                $totalQuery = clone $query;
-                $total = $totalQuery->count();
-                
-                // Paginação
-                $offset = ($page - 1) * $limit;
-                $items = $query->offset($offset)->limit($limit)->get();
-                
-                // Formatar dados
-                $formattedItems = $items->map(function ($item) {
-                    return $this->formatQRCodeItem($item);
+            // Usar tags para facilitar limpeza em massa
+            $store = Cache::getStore();
+            $useTags = method_exists($store, 'tags');
+            
+            $payload = $useTags
+                ? Cache::tags(['qrcodes', 'dynamic', $user->username])->remember($cacheKey, $cacheTtl, function () use ($user, $page, $limit, $busca, $dataInicio, $dataFim, $status) {
+                    return $this->buildQRCodeData($user, $page, $limit, $busca, $dataInicio, $dataFim, $status);
+                })
+                : Cache::remember($cacheKey, $cacheTtl, function () use ($user, $page, $limit, $busca, $dataInicio, $dataFim, $status) {
+                    return $this->buildQRCodeData($user, $page, $limit, $busca, $dataInicio, $dataFim, $status);
                 });
-
-                return [
-                    'data' => $formattedItems,
-                    'current_page' => $page,
-                    'last_page' => max((int) ceil($total / $limit), 1),
-                    'per_page' => $limit,
-                    'total' => $total,
-                    'from' => $total > 0 ? $offset + 1 : 0,
-                    'to' => min($offset + $limit, $total),
-                ];
-            });
 
             return response()->json([
                 'success' => true,
@@ -94,6 +78,38 @@ class QRCodeController extends Controller
                 'message' => 'Erro interno do servidor'
             ], 500)->header('Access-Control-Allow-Origin', '*');
         }
+    }
+
+    /**
+     * Construir dados de QR Code (extraído para reutilização)
+     */
+    private function buildQRCodeData($user, $page, $limit, $busca, $dataInicio, $dataFim, $status)
+    {
+        // Query otimizada usando UNION ALL para buscar em ambas as tabelas
+        $query = $this->buildOptimizedQuery($user->username, $busca, $dataInicio, $dataFim, $status);
+        
+        // Contar total
+        $totalQuery = clone $query;
+        $total = $totalQuery->count();
+        
+        // Paginação
+        $offset = ($page - 1) * $limit;
+        $items = $query->offset($offset)->limit($limit)->get();
+        
+        // Formatar dados
+        $formattedItems = $items->map(function ($item) {
+            return $this->formatQRCodeItem($item);
+        });
+
+        return [
+            'data' => $formattedItems,
+            'current_page' => $page,
+            'last_page' => max((int) ceil($total / $limit), 1),
+            'per_page' => $limit,
+            'total' => $total,
+            'from' => $total > 0 ? $offset + 1 : 0,
+            'to' => min($offset + $limit, $total),
+        ];
     }
 
     /**
@@ -222,13 +238,44 @@ class QRCodeController extends Controller
 
     /**
      * Limpar cache do usuário
+     * CRÍTICO para gateway de pagamento - invalida cache imediatamente quando transações mudam
+     * Usa Cache facade (padronizado - usa Redis se configurado)
      */
-    private function clearUserCache($username)
+    public static function clearUserCache(string $username): void
     {
-        $pattern = "qrcodes:dynamic:{$username}:*";
-        $keys = Cache::getRedis()->keys($pattern);
-        if (!empty($keys)) {
-            Cache::getRedis()->del($keys);
+        try {
+            // Limpar cache usando tags se suportado (Redis suporta tags)
+            $store = Cache::getStore();
+            
+            if (method_exists($store, 'tags')) {
+                try {
+                    // Limpar TODAS as chaves de cache de QR codes do usuário usando tags
+                    // Isso é crítico para gateway de pagamento - dados devem ser atualizados imediatamente
+                    Cache::tags(['qrcodes', 'dynamic', $username])->flush();
+                    
+                    Log::debug('Cache de QR codes limpo para usuário', [
+                        'username' => $username
+                    ]);
+                } catch (\Exception $e) {
+                    Log::warning('Erro ao limpar cache de QR codes usando tags', [
+                        'username' => $username,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            } else {
+                // Fallback: sem tags, tentar limpar manualmente chaves conhecidas
+                // Para gateway de pagamento, isso é crítico - dados devem ser atualizados
+                Log::warning('Driver de cache não suporta tags - cache pode não ser limpo imediatamente', [
+                    'username' => $username,
+                    'impact' => 'Dados podem ficar desatualizados por até 2 minutos (TTL)'
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::error('Erro crítico ao limpar cache de QR codes', [
+                'username' => $username,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
         }
     }
 }
