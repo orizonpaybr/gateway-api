@@ -19,7 +19,7 @@ class UserStatus
         return match($status) {
             self::INACTIVE => 'Inativo',
             self::ACTIVE => 'Aprovado',
-            self::PENDING => 'Aguardando aprovação',
+            self::PENDING => 'Pendente',
             default => 'Indefinido',
         };
     }
