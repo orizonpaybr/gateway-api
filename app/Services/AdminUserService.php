@@ -4,7 +4,7 @@ namespace App\Services;
 
 use App\Models\User;
 use App\Models\UsersKey;
-use Illuminate\Support\Facades\{Auth, Cache, DB, Hash, Log, Redis};
+use Illuminate\Support\Facades\{Auth, Cache, DB, Hash, Log};
 use Illuminate\Support\Str;
 use Carbon\Carbon;
 use App\Constants\{UserStatus, UserPermission};
@@ -37,62 +37,51 @@ class AdminUserService
     {
         $cacheKey = CacheKeyService::adminUser($userId, $withRelations);
         
-        // Usar Redis explicitamente (seguindo padrão do projeto)
+        // Usar Cache facade (padronizado - usa Redis se configurado)
         try {
-            $cached = Redis::get($cacheKey);
-            if ($cached) {
-                $userData = json_decode($cached, true);
-                if ($userData && isset($userData['id'])) {
-                    // Reconstruir modelo User a partir dos dados em cache
-                    $user = User::find($userData['id']);
-                    if ($user) {
-                        // Se precisar de relações e não tiver no cache, buscar
-                        if ($withRelations && !isset($userData['depositos'])) {
-                            $user->load([
-                                'depositos' => fn($q) => $q->latest()->limit(10),
-                                'saques' => fn($q) => $q->latest()->limit(10),
-                                'chaves'
-                            ]);
-                        }
-                        return $user;
-                    }
+            $user = Cache::remember($cacheKey, self::CACHE_TTL_USER, function () use ($userId, $withRelations) {
+                $query = User::where('id', $userId);
+                
+                if ($withRelations) {
+                    $query->with([
+                        'depositos' => fn($q) => $q->latest()->limit(10),
+                        'saques' => fn($q) => $q->latest()->limit(10),
+                        'chaves'
+                    ]);
                 }
+                
+                return $query->first();
+            });
+            
+            // Se precisar de relações e não foram carregadas, buscar agora
+            if ($user && $withRelations && !$user->relationLoaded('depositos')) {
+                $user->load([
+                    'depositos' => fn($q) => $q->latest()->limit(10),
+                    'saques' => fn($q) => $q->latest()->limit(10),
+                    'chaves'
+                ]);
             }
+            
+            return $user;
         } catch (\Exception $e) {
-            Log::warning('Erro ao ler cache Redis de usuário, usando query direta', [
+            Log::warning('Erro ao usar cache de usuário, usando query direta', [
                 'user_id' => $userId,
                 'error' => $e->getMessage()
             ]);
-        }
-        
-        // Se não estiver no cache, buscar do banco
-        $query = User::where('id', $userId);
-        
-        if ($withRelations) {
-            $query->with([
-                'depositos' => fn($q) => $q->latest()->limit(10),
-                'saques' => fn($q) => $q->latest()->limit(10),
-                'chaves'
-            ]);
-        }
-        
-        $user = $query->first();
-        
-        // Armazenar no Redis
-        if ($user) {
-            try {
-                // Armazenar apenas dados básicos (não relações completas)
-                $cacheData = $user->toArray();
-                Redis::setex($cacheKey, self::CACHE_TTL_USER, json_encode($cacheData));
-            } catch (\Exception $e) {
-                Log::warning('Erro ao escrever cache Redis de usuário', [
-                    'user_id' => $userId,
-                    'error' => $e->getMessage()
+            
+            // Fallback: buscar sem cache
+            $query = User::where('id', $userId);
+            
+            if ($withRelations) {
+                $query->with([
+                    'depositos' => fn($q) => $q->latest()->limit(10),
+                    'saques' => fn($q) => $q->latest()->limit(10),
+                    'chaves'
                 ]);
             }
+            
+            return $query->first();
         }
-        
-        return $user;
     }
     
     /**
@@ -416,6 +405,58 @@ class AdminUserService
             DB::rollBack();
             
             Log::error('Erro ao bloquear/desbloquear usuário', [
+                'user_id' => $userId,
+                'error' => $e->getMessage()
+            ]);
+            
+            throw $e;
+        }
+    }
+    
+    /**
+     * Bloquear/desbloquear saque do usuário
+     *
+     * @param int $userId
+     * @param bool $block
+     * @return User
+     * @throws \Exception
+     */
+    public function toggleWithdrawBlock(int $userId, bool $block = true): User
+    {
+        DB::beginTransaction();
+        
+        try {
+            $user = User::findOrFail($userId);
+            
+            // Não permitir bloquear saque do admin principal
+            if ($user->permission == UserPermission::ADMIN && $user->id == 1) {
+                throw new \Exception('Não é possível bloquear saque do administrador principal');
+            }
+            
+            $user->update([
+                'saque_bloqueado' => $block
+            ]);
+            
+            // Limpar cache
+            CacheKeyService::forgetUser($userId);
+            CacheKeyService::forgetUsersStats();
+            CacheKeyService::forgetDashboardStats();
+            
+            DB::commit();
+            
+            $action = $block ? 'bloqueado' : 'desbloqueado';
+            Log::warning('Saque do usuário ' . $action . ' pelo admin', [
+                'user_id' => $userId,
+                'username' => $user->username,
+                'action_by' => Auth::id()
+            ]);
+            
+            return $user->fresh();
+            
+        } catch (\Exception $e) {
+            DB::rollBack();
+            
+            Log::error('Erro ao bloquear/desbloquear saque do usuário', [
                 'user_id' => $userId,
                 'error' => $e->getMessage()
             ]);

@@ -11,7 +11,7 @@ use App\Http\Requests\Admin\{StoreUserRequest, UpdateUserRequest, AffiliateSetti
 use App\Constants\{UserStatus, UserPermission, AffiliateSettings};
 use App\Helpers\{UserStatusHelper, AppSettingsHelper};
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\{Cache, DB, Log, Redis};
+use Illuminate\Support\Facades\{Cache, DB, Log};
 use Carbon\Carbon;
 
 /**
@@ -61,26 +61,19 @@ class AdminDashboardController extends Controller
             // Cache key baseado no período usando CacheKeyService
             $cacheKey = CacheKeyService::adminDashboardStats($periodo, $dataInicio, $dataFim);
             
-            // Usar Redis explicitamente para otimização (seguindo padrão do projeto)
+            // Usar Cache facade (padronizado - usa Redis se configurado)
             try {
-                $cached = Redis::get($cacheKey);
-                if ($cached) {
-                    return $this->successResponse(json_decode($cached, true));
-                }
+                $stats = Cache::remember($cacheKey, self::CACHE_TTL_DASHBOARD, function () use ($dataInicio, $dataFim) {
+                    return $this->calculateDashboardStats($dataInicio, $dataFim);
+                });
+                
+                return $this->successResponse($stats);
             } catch (\Exception $e) {
-                Log::warning('Erro ao ler cache Redis, usando fallback', ['error' => $e->getMessage()]);
+                Log::warning('Erro ao usar cache, calculando diretamente', ['error' => $e->getMessage()]);
+                // Fallback: calcular sem cache
+                $stats = $this->calculateDashboardStats($dataInicio, $dataFim);
+                return $this->successResponse($stats);
             }
-            
-            // Se não estiver no cache, calcular e armazenar
-            $stats = $this->calculateDashboardStats($dataInicio, $dataFim);
-            
-            try {
-                Redis::setex($cacheKey, self::CACHE_TTL_DASHBOARD, json_encode($stats));
-            } catch (\Exception $e) {
-                Log::warning('Erro ao escrever cache Redis, continuando sem cache', ['error' => $e->getMessage()]);
-            }
-
-            return $this->successResponse($stats);
 
         } catch (\Exception $e) {
             Log::error('Erro ao obter stats do dashboard admin', [
@@ -181,6 +174,7 @@ class AdminDashboardController extends Controller
                     'status' => $user->status,
                     'status_text' => $statusTexto,
                     'banido' => (bool) ($user->banido ?? false),
+                    'saque_bloqueado' => (bool) ($user->saque_bloqueado ?? false),
                     'aprovado_alguma_vez' => (bool) ($user->aprovado_alguma_vez ?? false),
                     'saldo' => $user->saldo,
                     'permission' => $user->permission ?? UserPermission::CLIENT,
@@ -228,45 +222,51 @@ class AdminDashboardController extends Controller
             // Cache key para estatísticas de usuários usando CacheKeyService
             $cacheKey = CacheKeyService::adminUsersStats();
             
-            // Usar Redis explicitamente para otimização (seguindo padrão do projeto)
+            // Usar Cache facade (padronizado - usa Redis se configurado)
             try {
-                $cached = Redis::get($cacheKey);
-                if ($cached) {
-                    return $this->successResponse(json_decode($cached, true));
-                }
-            } catch (\Exception $e) {
-                Log::warning('Erro ao ler cache Redis, usando fallback', ['error' => $e->getMessage()]);
-            }
-            
-            // Se não estiver no cache, calcular e armazenar
-            // Total de registros
-            $totalRegistrations = User::count();
-            
-            // Registros do mês atual
-            $monthRegistrations = User::whereMonth('created_at', now()->month)
-                ->whereYear('created_at', now()->year)
-                ->count();
-            
-            // Pendentes (status PENDING usando constant)
-            $pendingRegistrations = User::where('status', UserStatus::PENDING)->count();
-            
-            // Banidos (apenas banido = true, excluídos não contam como banidos)
-            $bannedUsers = User::where('banido', true)->count();
+                $stats = Cache::remember($cacheKey, 300, function () {
+                    // Total de registros
+                    $totalRegistrations = User::count();
+                    
+                    // Registros do mês atual
+                    $monthRegistrations = User::whereMonth('created_at', now()->month)
+                        ->whereYear('created_at', now()->year)
+                        ->count();
+                    
+                    // Pendentes (status PENDING usando constant)
+                    $pendingRegistrations = User::where('status', UserStatus::PENDING)->count();
+                    
+                    // Banidos (apenas banido = true, excluídos não contam como banidos)
+                    $bannedUsers = User::where('banido', true)->count();
 
-            $stats = [
-                'total_registrations' => $totalRegistrations,
-                'month_registrations' => $monthRegistrations,
-                'pending_registrations' => $pendingRegistrations,
-                'banned_users' => $bannedUsers,
-            ];
-            
-            try {
-                Redis::setex($cacheKey, 300, json_encode($stats)); // 5 minutos
+                    return [
+                        'total_registrations' => $totalRegistrations,
+                        'month_registrations' => $monthRegistrations,
+                        'pending_registrations' => $pendingRegistrations,
+                        'banned_users' => $bannedUsers,
+                    ];
+                });
+                
+                return $this->successResponse($stats);
             } catch (\Exception $e) {
-                Log::warning('Erro ao escrever cache Redis, continuando sem cache', ['error' => $e->getMessage()]);
+                Log::warning('Erro ao usar cache, calculando diretamente', ['error' => $e->getMessage()]);
+                // Fallback: calcular sem cache
+                $totalRegistrations = User::count();
+                $monthRegistrations = User::whereMonth('created_at', now()->month)
+                    ->whereYear('created_at', now()->year)
+                    ->count();
+                $pendingRegistrations = User::where('status', UserStatus::PENDING)->count();
+                $bannedUsers = User::where('banido', true)->count();
+                
+                $stats = [
+                    'total_registrations' => $totalRegistrations,
+                    'month_registrations' => $monthRegistrations,
+                    'pending_registrations' => $pendingRegistrations,
+                    'banned_users' => $bannedUsers,
+                ];
+                
+                return $this->successResponse($stats);
             }
-
-            return $this->successResponse($stats);
 
         } catch (\Exception $e) {
             Log::error('Erro ao obter estatísticas de usuários', [
@@ -432,19 +432,15 @@ class AdminDashboardController extends Controller
         // Lucro líquido (lucro - taxas de adquirentes)
         $lucroLiquido = ($lucroDepositos + $lucroSaques) - ($taxasAdquirentes['entradas'] + $taxasAdquirentes['saidas']);
 
-        // Saldo total em carteiras (usando Redis explicitamente)
+        // Saldo total em carteiras (usando Cache facade padronizado)
         $balanceCacheKey = CacheKeyService::totalWalletsBalance();
         try {
-            $cached = Redis::get($balanceCacheKey);
-            if ($cached !== null) {
-                $saldoTotalCarteiras = (float) $cached;
-            } else {
-                $saldoTotalCarteiras = User::sum('saldo');
-                Redis::setex($balanceCacheKey, 300, (string) $saldoTotalCarteiras); // 5 minutos
-            }
+            $saldoTotalCarteiras = Cache::remember($balanceCacheKey, 300, function () {
+                return (float) User::sum('saldo');
+            });
         } catch (\Exception $e) {
-            Log::warning('Erro ao ler/escrever cache Redis de saldo, usando cálculo direto', ['error' => $e->getMessage()]);
-            $saldoTotalCarteiras = User::sum('saldo');
+            Log::warning('Erro ao usar cache de saldo, usando cálculo direto', ['error' => $e->getMessage()]);
+            $saldoTotalCarteiras = (float) User::sum('saldo');
         }
 
         return [
@@ -557,26 +553,14 @@ class AdminDashboardController extends Controller
         $taxasAdquirentesEntradas = 0;
         $taxasAdquirentesSaidas = 0;
         
-        // Buscar taxa da XDPag (adquirente padrão) usando Redis explicitamente
+        // Buscar taxa da XDPag (adquirente padrão) usando Cache facade padronizado
         $xdpagCacheKey = CacheKeyService::xdpagConfig();
         try {
-            $cached = Redis::get($xdpagCacheKey);
-            if ($cached) {
-                $xdpag = json_decode($cached, true);
-                if ($xdpag) {
-                    $xdpag = (object) $xdpag; // Converter para objeto se necessário
-                } else {
-                    $xdpag = \App\Models\XDPag::first();
-                    Redis::setex($xdpagCacheKey, 3600, json_encode($xdpag)); // 1 hora
-                }
-            } else {
-                $xdpag = \App\Models\XDPag::first();
-                if ($xdpag) {
-                    Redis::setex($xdpagCacheKey, 3600, json_encode($xdpag)); // 1 hora
-                }
-            }
+            $xdpag = Cache::remember($xdpagCacheKey, 3600, function () {
+                return \App\Models\XDPag::first();
+            });
         } catch (\Exception $e) {
-            Log::warning('Erro ao ler/escrever cache Redis de XDPag, usando query direta', ['error' => $e->getMessage()]);
+            Log::warning('Erro ao usar cache de XDPag, usando query direta', ['error' => $e->getMessage()]);
             $xdpag = \App\Models\XDPag::first();
         }
 
@@ -809,6 +793,7 @@ class AdminDashboardController extends Controller
                 'status' => (int) $user->status,
                 'status_text' => $statusTexto,
                 'banido' => (bool) ($user->banido ?? false),
+                'saque_bloqueado' => (bool) ($user->saque_bloqueado ?? false),
                 'aprovado_alguma_vez' => (bool) ($user->aprovado_alguma_vez ?? false),
                 'created_at' => optional($user->created_at)->toDateTimeString(),
                 // Identificação
@@ -1101,6 +1086,39 @@ class AdminDashboardController extends Controller
             
         } catch (\Exception $e) {
             Log::error('Erro ao bloquear/desbloquear usuário', [
+                'user_id' => $id,
+                'error' => $e->getMessage()
+            ]);
+            
+            return $this->errorResponse($e->getMessage(), 500);
+        }
+    }
+    
+    /**
+     * Bloquear/desbloquear saque do usuário
+     * 
+     * @param Request $request
+     * @param int $id
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function toggleWithdrawBlock(Request $request, int $id)
+    {
+        try {
+            // Verificação de admin feita pelo middleware 'ensure.admin'
+            $block = $request->input('block', true);
+            $userData = $this->userService->toggleWithdrawBlock($id, $block);
+            
+            $message = $block 
+                ? 'Saque do usuário bloqueado com sucesso' 
+                : 'Saque do usuário desbloqueado com sucesso';
+            
+            return $this->successResponse([
+                'message' => $message,
+                'user' => $userData
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Erro ao bloquear/desbloquear saque do usuário', [
                 'user_id' => $id,
                 'error' => $e->getMessage()
             ]);

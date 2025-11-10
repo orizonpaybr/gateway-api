@@ -598,6 +598,19 @@ class UserController extends Controller
             $description = $request->input('description', 'Saque via PIX');
             $pin = $request->input('pin');
 
+            // Verificar se o saque está bloqueado para este usuário
+            if ($user->saque_bloqueado ?? false) {
+                Log::warning('Tentativa de saque bloqueado via API', [
+                    'user_id' => $user->id,
+                    'username' => $user->username,
+                    'ip' => $request->ip()
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Saque bloqueado para este usuário. Entre em contato com o suporte.'
+                ], 403)->header('Access-Control-Allow-Origin', '*');
+            }
+
             // Verificar se o usuário tem saldo suficiente
             if ($user->saldo < $amount) {
                 return response()->json([
