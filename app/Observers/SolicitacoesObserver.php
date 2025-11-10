@@ -5,6 +5,7 @@ namespace App\Observers;
 use App\Models\Solicitacoes;
 use App\Services\PushNotificationService;
 use App\Services\NotificationPreferenceService;
+use App\Http\Controllers\Api\QRCodeController;
 use Illuminate\Support\Facades\Log;
 
 class SolicitacoesObserver
@@ -27,7 +28,11 @@ class SolicitacoesObserver
      */
     public function created(Solicitacoes $solicitacoes): void
     {
-        //
+        // Limpar cache de QR codes quando nova transação é criada
+        // CRÍTICO para gateway de pagamento - dados devem ser atualizados imediatamente
+        if ($solicitacoes->user_id) {
+            QRCodeController::clearUserCache($solicitacoes->user_id);
+        }
     }
 
     /**
@@ -42,6 +47,12 @@ class SolicitacoesObserver
             'wasChanged' => $solicitacoes->wasChanged('status'),
             'user_id' => $solicitacoes->user_id
         ]);
+        
+        // Limpar cache de QR codes quando transação é atualizada
+        // CRÍTICO para gateway de pagamento - dados devem ser atualizados imediatamente
+        if ($solicitacoes->user_id) {
+            QRCodeController::clearUserCache($solicitacoes->user_id);
+        }
         
         // Verificar se o status mudou para um status de aprovado
         if ($solicitacoes->wasChanged('status') && in_array($solicitacoes->status, self::APPROVED_STATUSES)) {

@@ -5,6 +5,7 @@ namespace App\Observers;
 use App\Models\SolicitacoesCashOut;
 use App\Services\PushNotificationService;
 use App\Services\NotificationPreferenceService;
+use App\Http\Controllers\Api\QRCodeController;
 use Illuminate\Support\Facades\Log;
 
 class SolicitacoesCashOutObserver
@@ -27,6 +28,12 @@ class SolicitacoesCashOutObserver
      */
     public function created(SolicitacoesCashOut $solicitacoesCashOut): void
     {
+        // Limpar cache de QR codes quando nova transação é criada
+        // CRÍTICO para gateway de pagamento - dados devem ser atualizados imediatamente
+        if ($solicitacoesCashOut->user_id) {
+            QRCodeController::clearUserCache($solicitacoesCashOut->user_id);
+        }
+        
         // Enviar notificação quando um saque é criado com status aprovado
         if (in_array($solicitacoesCashOut->status, self::APPROVED_STATUSES)) {
             $this->sendWithdrawNotification($solicitacoesCashOut);
@@ -38,6 +45,12 @@ class SolicitacoesCashOutObserver
      */
     public function updated(SolicitacoesCashOut $solicitacoesCashOut): void
     {
+        // Limpar cache de QR codes quando transação é atualizada
+        // CRÍTICO para gateway de pagamento - dados devem ser atualizados imediatamente
+        if ($solicitacoesCashOut->user_id) {
+            QRCodeController::clearUserCache($solicitacoesCashOut->user_id);
+        }
+        
         // Verificar se o status mudou para um status de aprovado
         if ($solicitacoesCashOut->wasChanged('status') && 
             in_array($solicitacoesCashOut->status, self::APPROVED_STATUSES)) {
