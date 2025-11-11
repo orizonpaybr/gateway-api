@@ -135,14 +135,20 @@ class SaqueController extends Controller
 
         // Verificar se o saque automático está ativo
         if ($setting->saque_automatico) {
-            // Verificar se o valor está dentro do limite para saque automático
-            if ($request->amount <= $setting->limite_saque_automatico) {
+            // Nova regra:
+            // - Se limite_saque_automatico for NULL => automático para todos os valores
+            // - Se houver limite => automático até o limite, acima disso vira manual
+            // Considera 'sem limite' quando for null ou <= 0
+            $temLimite = !is_null($setting->limite_saque_automatico) && (float)$setting->limite_saque_automatico > 0;
+            $dentroDoLimite = !$temLimite || ((float)$request->amount <= (float)$setting->limite_saque_automatico);
+
+            if ($dentroDoLimite) {
                 // Processar saque automático
                 return $this->processarSaqueAutomatico($request, $default, $setting, $isInterfaceWeb);
-            } else {
-                // Valor acima do limite, processar como manual
-                return $this->processarSaqueManual($request, $default, $isInterfaceWeb);
             }
+
+            // Valor acima do limite (quando definido): processar como manual
+            return $this->processarSaqueManual($request, $default, $isInterfaceWeb);
         } else {
             // Modo manual ativo, processar como manual
             return $this->processarSaqueManual($request, $default, $isInterfaceWeb);
