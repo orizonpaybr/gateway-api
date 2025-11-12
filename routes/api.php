@@ -214,6 +214,16 @@ Route::middleware(['verify.jwt'])->group(function () {
         Route::get('admin/withdrawals/{id}', [App\Http\Controllers\Api\WithdrawalController::class, 'show'])->where('id', '[0-9]+');
         Route::post('admin/withdrawals/{id}/approve', [App\Http\Controllers\Api\WithdrawalController::class, 'approve'])->where('id', '[0-9]+');
         Route::post('admin/withdrawals/{id}/reject', [App\Http\Controllers\Api\WithdrawalController::class, 'reject'])->where('id', '[0-9]+');
+        
+        // Rotas do módulo financeiro (Admin)
+        Route::get('admin/financial/transactions', [App\Http\Controllers\Api\FinancialController::class, 'getAllTransactions']);
+        Route::get('admin/financial/transactions/stats', [App\Http\Controllers\Api\FinancialController::class, 'getTransactionsStats']);
+        Route::get('admin/financial/wallets', [App\Http\Controllers\Api\FinancialController::class, 'getWallets']);
+        Route::get('admin/financial/wallets/stats', [App\Http\Controllers\Api\FinancialController::class, 'getWalletsStats']);
+        Route::get('admin/financial/deposits', [App\Http\Controllers\Api\FinancialController::class, 'getDeposits']);
+        Route::get('admin/financial/deposits/stats', [App\Http\Controllers\Api\FinancialController::class, 'getDepositsStats']);
+        Route::get('admin/financial/withdrawals', [App\Http\Controllers\Api\FinancialController::class, 'getWithdrawals']);
+        Route::get('admin/financial/withdrawals/stats', [App\Http\Controllers\Api\FinancialController::class, 'getWithdrawalsStats']);
     });
     
     // Transações Otimizadas
