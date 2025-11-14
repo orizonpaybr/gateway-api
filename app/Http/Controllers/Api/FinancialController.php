@@ -91,12 +91,13 @@ class FinancialController extends Controller
     public function getWallets(Request $request): JsonResponse
     {
         try {
+            // Validação e sanitização de entrada
             $filters = [
-                'page' => $request->get('page', 1),
-                'limit' => min($request->get('limit', 20), 100),
-                'busca' => $request->get('busca'),
+                'page' => max(1, (int) $request->get('page', 1)),
+                'limit' => min(max(1, (int) $request->get('limit', 20)), 100),
+                'busca' => $request->get('busca') ? trim($request->get('busca')) : null,
                 'tipo_usuario' => $request->get('tipo_usuario'),
-                'ordenar' => $request->get('ordenar', 'saldo_desc'),
+                'ordenar' => $this->validateSortOrder($request->get('ordenar', 'saldo_desc')),
             ];
 
             $data = $this->financialService->getWallets($filters);
@@ -106,6 +107,7 @@ class FinancialController extends Controller
             Log::error('Erro ao buscar carteiras', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
+                'filters' => $request->all(),
             ]);
 
             return $this->errorResponse('Erro ao buscar carteiras', 500);
@@ -250,5 +252,14 @@ class FinancialController extends Controller
             'success' => false,
             'message' => $message,
         ], $statusCode);
+    }
+
+    /**
+     * Validar ordem de ordenação
+     */
+    private function validateSortOrder(?string $order): string
+    {
+        $allowedOrders = ['saldo_desc', 'saldo_asc', 'nome_asc'];
+        return in_array($order, $allowedOrders) ? $order : 'saldo_desc';
     }
 }

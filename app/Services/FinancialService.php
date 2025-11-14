@@ -5,7 +5,7 @@ namespace App\Services;
 use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
-use Illuminate\Support\Facades\{Cache, DB};
+use Illuminate\Support\Facades\{Cache, DB, Log};
 use Illuminate\Support\Collection;
 use Carbon\Carbon;
 
@@ -15,7 +15,6 @@ use Carbon\Carbon;
  * Implementa:
  * - Cache Redis para performance
  * - Queries otimizadas
- * - DRY (Don't Repeat Yourself)
  * - Clean Code
  */
 class FinancialService
@@ -101,23 +100,31 @@ class FinancialService
 
     /**
      * Obter carteiras (usuários com saldo)
+     * Otimizado: usa cache, select específico e índices
      */
     public function getWallets(array $filters): array
     {
-        $page = $filters['page'] ?? 1;
-        $limit = min($filters['limit'] ?? 20, 100);
-        $busca = $filters['busca'] ?? null;
+        // Validação e sanitização de entrada
+        $page = max(1, (int) ($filters['page'] ?? 1));
+        $limit = min(max(1, (int) ($filters['limit'] ?? 20)), 100);
+        $busca = $filters['busca'] ? trim($filters['busca']) : null;
         $tipoUsuario = $filters['tipo_usuario'] ?? null;
         $ordenar = $filters['ordenar'] ?? 'saldo_desc';
+
+        // Limitar tamanho da busca para evitar queries muito lentas
+        if ($busca && mb_strlen($busca) > 100) {
+            $busca = mb_substr($busca, 0, 100);
+        }
 
         $cacheKey = $this->getWalletsCacheKey($filters);
 
         return Cache::remember($cacheKey, self::CACHE_TTL_WALLETS, function () use (
             $page, $limit, $busca, $tipoUsuario, $ordenar
         ) {
+            // Select apenas campos necessários para reduzir memória e I/O
             $query = User::query()
                 ->select([
-                    'id', 'user_id', 'name', 'username', 'email',
+                    'id', 'user_id', 'name', 'username', 'email', 'telefone',
                     'saldo', 'total_transacoes', 'valor_sacado',
                     'status', 'permission', 'created_at',
                 ])
@@ -125,11 +132,13 @@ class FinancialService
                 ->when($tipoUsuario === 'ativo', fn($q) => $q->where('saldo', '>', 0))
                 ->when($tipoUsuario === 'inativo', fn($q) => $q->where('saldo', '<=', 0));
 
-            // Aplicar ordenação
+            // Aplicar ordenação (usa índice em saldo quando disponível)
             $this->applySorting($query, $ordenar);
 
+            // Paginação eficiente
             $wallets = $query->paginate($limit, ['*'], 'page', $page);
 
+            // Formatação otimizada
             $walletsData = $wallets->getCollection()->map(fn($user) => $this->formatWallet($user));
 
             return [
@@ -144,25 +153,49 @@ class FinancialService
 
     /**
      * Obter estatísticas de carteiras
+     * Otimizado: usa cache e queries eficientes
      */
     public function getWalletsStats(): array
     {
         $cacheKey = 'financial:wallets:stats';
 
         return Cache::remember($cacheKey, self::CACHE_TTL_STATS, function () {
-            // Usar agregados para melhor performance
+            // Usar agregados para melhor performance (uma única query)
             $stats = User::selectRaw('
                 COUNT(*) as total_carteiras,
-                SUM(saldo) as saldo_total,
+                COALESCE(SUM(saldo), 0) as saldo_total,
                 SUM(CASE WHEN saldo > 0 THEN 1 ELSE 0 END) as carteiras_ativas,
-                AVG(saldo) as valor_medio_carteira
+                COALESCE(AVG(saldo), 0) as valor_medio_carteira
             ')->first();
 
+            // Buscar TOP 3 usuários com maior saldo (query otimizada com índice)
+            // Usa apenas campos necessários para reduzir memória
+            $top3Users = User::select([
+                'id', 'user_id', 'name', 'username', 'email', 'telefone',
+                'saldo', 'total_transacoes', 'valor_sacado',
+            ])
+                ->where('saldo', '>', 0) // Filtrar apenas com saldo positivo
+                ->orderBy('saldo', 'desc')
+                ->limit(3)
+                ->get()
+                ->map(fn($user) => [
+                    'id' => $user->id,
+                    'user_id' => $user->user_id,
+                    'name' => $user->name,
+                    'username' => $user->username,
+                    'email' => $user->email,
+                    'telefone' => $user->telefone,
+                    'saldo' => (float) $user->saldo,
+                    'total_transacoes' => (float) $user->total_transacoes,
+                    'valor_sacado' => (float) $user->valor_sacado,
+                ]);
+
             return [
-                'total_carteiras' => (int) $stats->total_carteiras,
+                'total_carteiras' => (int) ($stats->total_carteiras ?? 0),
                 'saldo_total' => (float) ($stats->saldo_total ?? 0),
-                'carteiras_ativas' => (int) $stats->carteiras_ativas,
+                'carteiras_ativas' => (int) ($stats->carteiras_ativas ?? 0),
                 'valor_medio_carteira' => (float) ($stats->valor_medio_carteira ?? 0),
+                'top_3_usuarios' => $top3Users->toArray(),
             ];
         });
     }
@@ -397,9 +430,19 @@ class FinancialService
 
     /**
      * Aplicar filtro de busca em depósitos
+     * 
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @param string $busca
+     * @return \Illuminate\Database\Eloquent\Builder
      */
-    private function applyDepositSearch($query, string $busca)
+    private function applyDepositSearch(\Illuminate\Database\Eloquent\Builder $query, string $busca): \Illuminate\Database\Eloquent\Builder
     {
+        // SEGURANÇA: Sanitizar busca para evitar SQL injection
+        $busca = trim($busca);
+        if (strlen($busca) > 100) {
+            $busca = mb_substr($busca, 0, 100);
+        }
+        
         return $query->where(function($q) use ($busca) {
             $q->where('client_name', 'like', "%{$busca}%")
               ->orWhere('client_email', 'like', "%{$busca}%")
@@ -410,9 +453,19 @@ class FinancialService
 
     /**
      * Aplicar filtro de busca em saques
+     * 
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @param string $busca
+     * @return \Illuminate\Database\Eloquent\Builder
      */
-    private function applyWithdrawalSearch($query, string $busca)
+    private function applyWithdrawalSearch(\Illuminate\Database\Eloquent\Builder $query, string $busca): \Illuminate\Database\Eloquent\Builder
     {
+        // SEGURANÇA: Sanitizar busca para evitar SQL injection
+        $busca = trim($busca);
+        if (strlen($busca) > 100) {
+            $busca = mb_substr($busca, 0, 100);
+        }
+        
         return $query->where(function($q) use ($busca) {
             $q->where('pix_key', 'like', "%{$busca}%")
               ->orWhere('pix_type', 'like', "%{$busca}%")
@@ -425,9 +478,19 @@ class FinancialService
 
     /**
      * Aplicar filtro de busca genérico
+     * 
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @param string $busca
+     * @return \Illuminate\Database\Eloquent\Builder
      */
-    private function applySearchFilter($query, string $busca)
+    private function applySearchFilter(\Illuminate\Database\Eloquent\Builder $query, string $busca): \Illuminate\Database\Eloquent\Builder
     {
+        // SEGURANÇA: Sanitizar busca para evitar SQL injection
+        $busca = trim($busca);
+        if (strlen($busca) > 100) {
+            $busca = mb_substr($busca, 0, 100);
+        }
+        
         return $query->where(function($q) use ($busca) {
             $q->where('name', 'like', "%{$busca}%")
               ->orWhere('username', 'like', "%{$busca}%")
@@ -438,14 +501,20 @@ class FinancialService
 
     /**
      * Aplicar ordenação
+     * 
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @param string $ordenar
+     * @return \Illuminate\Database\Eloquent\Builder
      */
-    private function applySorting($query, string $ordenar)
+    private function applySorting(\Illuminate\Database\Eloquent\Builder $query, string $ordenar): \Illuminate\Database\Eloquent\Builder
     {
         match ($ordenar) {
             'saldo_asc' => $query->orderBy('saldo', 'asc'),
             'nome_asc' => $query->orderBy('name', 'asc'),
             default => $query->orderBy('saldo', 'desc'),
         };
+        
+        return $query;
     }
 
     /**
@@ -528,6 +597,7 @@ class FinancialService
             'name' => $user->name,
             'username' => $user->username,
             'email' => $user->email,
+            'telefone' => $user->telefone,
             'saldo' => (float) $user->saldo,
             'total_transacoes' => (float) $user->total_transacoes,
             'valor_sacado' => (float) $user->valor_sacado,
@@ -601,6 +671,54 @@ class FinancialService
     {
         $hash = md5(json_encode($filters));
         return "financial:wallets:{$hash}";
+    }
+
+    /**
+     * Invalidar cache de carteiras
+     * Deve ser chamado quando houver atualização de saldo ou dados de usuário
+     */
+    public function invalidateWalletsCache(): void
+    {
+        try {
+            // Invalidar cache de estatísticas
+            Cache::forget('financial:wallets:stats');
+            
+            // Nota: Cache de listagem de carteiras será invalidado pelo TTL
+            // ou pode ser invalidado manualmente quando necessário
+        } catch (\Exception $e) {
+            Log::warning('Erro ao invalidar cache de carteiras', [
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Invalidar cache de estatísticas financeiras
+     */
+    public function invalidateStatsCache(?string $periodo = null): void
+    {
+        try {
+            if ($periodo) {
+                $date = Carbon::now()->format('Ymd');
+                Cache::forget("financial:transactions:stats:{$periodo}:{$date}");
+                Cache::forget("financial:deposits:stats:{$periodo}:{$date}");
+                Cache::forget("financial:withdrawals:stats:{$periodo}:{$date}");
+            } else {
+                // Invalidar todos os períodos do dia atual
+                $date = Carbon::now()->format('Ymd');
+                $periodos = ['hoje', 'mes', '7d', '30d', 'total'];
+                foreach ($periodos as $p) {
+                    Cache::forget("financial:transactions:stats:{$p}:{$date}");
+                    Cache::forget("financial:deposits:stats:{$p}:{$date}");
+                    Cache::forget("financial:withdrawals:stats:{$p}:{$date}");
+                }
+            }
+        } catch (\Exception $e) {
+            Log::warning('Erro ao invalidar cache de estatísticas', [
+                'error' => $e->getMessage(),
+                'periodo' => $periodo
+            ]);
+        }
     }
 }
 

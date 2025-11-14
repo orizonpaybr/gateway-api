@@ -190,6 +190,7 @@ Route::middleware(['verify.jwt'])->group(function () {
         Route::get('admin/dashboard/users', [App\Http\Controllers\Api\AdminDashboardController::class, 'getUsers']);
         Route::get('admin/dashboard/users-stats', [App\Http\Controllers\Api\AdminDashboardController::class, 'getUserStats']);
         Route::get('admin/dashboard/transactions', [App\Http\Controllers\Api\AdminDashboardController::class, 'getRecentTransactions']);
+        Route::get('admin/dashboard/cache-metrics', [App\Http\Controllers\Api\AdminDashboardController::class, 'getCacheMetrics']);
         
         // CRUD de Usuários (Admin)
         Route::get('admin/users/{id}', [App\Http\Controllers\Api\AdminDashboardController::class, 'showUser']);
