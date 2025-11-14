@@ -30,6 +30,11 @@ class AdminDashboardController extends Controller
     // Constantes para TTL de cache
     private const CACHE_TTL_DASHBOARD = 120; // 2 minutos
     private const CACHE_TTL_USERS = 300; // 5 minutos
+    private const CACHE_TTL_RECENT_TRANSACTIONS = 30; // 30 segundos
+    
+    // Constantes para validação
+    private const MAX_TRANSACTIONS_LIMIT = 100;
+    private const MIN_TRANSACTIONS_LIMIT = 1;
     
     /**
      * Service para gerenciamento de usuários
@@ -210,6 +215,58 @@ class AdminDashboardController extends Controller
     }
 
     /**
+     * Obter métricas de cache Redis
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getCacheMetrics(Request $request)
+    {
+        try {
+            $cacheMetricsService = app(\App\Services\CacheMetricsService::class);
+            
+            // Obter métricas gerais (sempre retorna array, mesmo em caso de erro)
+            $metrics = $cacheMetricsService->getCacheMetrics();
+            
+            // Obter métricas financeiras (sempre retorna array, mesmo em caso de erro)
+            $financialMetrics = $cacheMetricsService->getFinancialCacheMetrics();
+            
+            // Garantir que sempre retornamos uma estrutura válida
+            return $this->successResponse([
+                'general' => $metrics ?? [
+                    'redis_connected' => false,
+                    'error' => 'Erro ao obter métricas gerais',
+                ],
+                'financial' => $financialMetrics ?? [
+                    'total_financial_keys' => 0,
+                    'wallets_keys' => 0,
+                    'stats_keys' => 0,
+                    'error' => 'Erro ao obter métricas financeiras',
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Erro ao obter métricas de cache', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            
+            // Retornar estrutura válida mesmo em caso de erro
+            return $this->successResponse([
+                'general' => [
+                    'redis_connected' => false,
+                    'error' => $e->getMessage(),
+                ],
+                'financial' => [
+                    'total_financial_keys' => 0,
+                    'wallets_keys' => 0,
+                    'stats_keys' => 0,
+                    'error' => $e->getMessage(),
+                ],
+            ]);
+        }
+    }
+
+    /**
      * Obter estatísticas de usuários para os cards
      * 
      * @param Request $request
@@ -280,6 +337,11 @@ class AdminDashboardController extends Controller
     /**
      * Obter transações recentes com filtros
      * 
+     * ✅ MELHORIAS APLICADAS:
+     * - Validação de entrada
+     * - Cache Redis para performance
+     * - Logging melhorado com contexto
+     * 
      * @param Request $request
      * @return \Illuminate\Http\JsonResponse
      */
@@ -287,77 +349,77 @@ class AdminDashboardController extends Controller
     {
         try {
             // Verificação de admin feita pelo middleware 'ensure.admin'
-            $type = $request->input('type'); // 'deposit', 'withdraw', null (ambos)
-            $status = $request->input('status');
-            $limit = $request->input('limit', 50);
+            
+            // VALIDAÇÃO DE ENTRADA
+            $validated = $this->validateTransactionFilters($request);
+            $type = $validated['type'];
+            $status = $validated['status'];
+            $limit = $validated['limit'];
+            
+            // CACHE: Gerar cache key baseada nos filtros
+            $cacheKey = CacheKeyService::adminRecentTransactions($type, $status, $limit);
+            
+            // CACHE: Usar cache com TTL curto (30s) para dados recentes
+            $transactions = Cache::remember($cacheKey, self::CACHE_TTL_RECENT_TRANSACTIONS, function () use ($type, $status, $limit) {
+                // Buscar depósitos e saques separadamente, já ordenados no banco
+                $deposits = collect();
+                $withdraws = collect();
 
-            // CORREÇÃO: Buscar depósitos e saques separadamente, já ordenados no banco
-            $deposits = collect();
-            $withdraws = collect();
+                // Buscar depósitos
+                if (!$type || $type === 'deposit') {
+                    $deposits = Solicitacoes::with(['user' => function ($query) {
+                        $query->select('id', 'user_id', 'name', 'username');
+                    }])
+                        ->when($status, fn($q) => $q->where('status', $status))
+                        ->orderBy('created_at', 'desc')
+                        ->limit($limit)
+                        ->get()
+                        ->map(fn($item) => $this->formatTransaction($item, 'deposit'));
+                }
 
-            // Buscar depósitos
-            if (!$type || $type === 'deposit') {
-                $deposits = Solicitacoes::with('user:id,user_id,name,username')
-                    ->when($status, fn($q) => $q->where('status', $status))
-                    ->orderBy('created_at', 'desc')
-                    ->limit($limit)
-                    ->get()
+                // Buscar saques
+                if (!$type || $type === 'withdraw') {
+                    $withdraws = SolicitacoesCashOut::with(['user' => function ($query) {
+                        $query->select('id', 'user_id', 'name', 'username');
+                    }])
+                        ->when($status, fn($q) => $q->where('status', $status))
+                        ->orderBy('created_at', 'desc')
+                        ->limit($limit)
+                        ->get()
+                        ->map(fn($item) => $this->formatTransaction($item, 'withdraw'));
+                }
+
+                // Converter para Collection padrão antes de mesclar
+                $depositsArray = $deposits->toArray();
+                $withdrawsArray = $withdraws->toArray();
+                
+                // Usar Collection padrão do Laravel (não Eloquent Collection)
+                $allTransactions = collect(array_merge($depositsArray, $withdrawsArray));
+                
+                // Ordenar usando closure para acessar corretamente o array
+                return $allTransactions
+                    ->sortByDesc(fn($item) => $item['created_at_timestamp'] ?? 0)
+                    ->take($limit)
+                    ->values()
                     ->map(function ($item) {
-                        return [
-                            'id' => $item->id,
-                            'type' => 'deposit',
-                            'user' => $item->user ? [
-                                'id' => $item->user->id,
-                                'name' => $item->user->name,
-                                'username' => $item->user->username,
-                            ] : null,
-                            'amount' => $item->amount,
-                            'taxa' => $item->taxa_cash_in,
-                            'status' => $item->status,
-                            'date' => $item->date,
-                            'created_at' => $item->created_at,
-                        ];
-                    });
-            }
-
-            // Buscar saques
-            if (!$type || $type === 'withdraw') {
-                $withdraws = SolicitacoesCashOut::with('user:id,user_id,name,username')
-                    ->when($status, fn($q) => $q->where('status', $status))
-                    ->orderBy('created_at', 'desc')
-                    ->limit($limit)
-                    ->get()
-                    ->map(function ($item) {
-                        return [
-                            'id' => $item->id,
-                            'type' => 'withdraw',
-                            'user' => $item->user ? [
-                                'id' => $item->user->id,
-                                'name' => $item->user->name,
-                                'username' => $item->user->username,
-                            ] : null,
-                            'amount' => $item->amount,
-                            'taxa' => $item->taxa_cash_out,
-                            'status' => $item->status,
-                            'date' => $item->date,
-                            'created_at' => $item->created_at,
-                        ];
-                    });
-            }
-
-            // CORREÇÃO: Mesclar e ordenar usando Collection (mais eficiente que usort)
-            $transactions = $deposits
-                ->merge($withdraws)
-                ->sortByDesc('created_at')
-                ->take($limit)
-                ->values()
-                ->toArray();
+                        // Remover created_at_timestamp antes de retornar
+                        unset($item['created_at_timestamp']);
+                        return $item;
+                    })
+                    ->toArray();
+            });
 
             return $this->successResponse(['transactions' => $transactions]);
 
         } catch (\Exception $e) {
             Log::error('Erro ao obter transações recentes', [
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'filters' => [
+                    'type' => $request->input('type'),
+                    'status' => $request->input('status'),
+                    'limit' => $request->input('limit'),
+                ],
             ]);
             
             return $this->errorResponse('Erro ao obter transações', 500);
@@ -1261,6 +1323,76 @@ class AdminDashboardController extends Controller
             
             return $this->errorResponse('Erro ao salvar configurações de afiliados.', 500);
         }
+    }
+    
+    // ========== Métodos Privados (Helpers) ==========
+    
+    /**
+     * @param mixed $item Modelo Eloquent (Solicitacoes ou SolicitacoesCashOut)
+     * @param string $type 'deposit' ou 'withdraw'
+     * @return array
+     */
+    private function formatTransaction($item, string $type): array
+    {
+        // Extrair dados do usuário
+        $userData = null;
+        if ($item->user && is_object($item->user)) {
+            $userData = [
+                'id' => $item->user->id ?? null,
+                'name' => $item->user->name ?? null,
+                'username' => $item->user->username ?? null,
+            ];
+        }
+        
+        // Determinar campo de taxa baseado no tipo
+        $taxaField = $type === 'deposit' ? 'taxa_cash_in' : 'taxa_cash_out';
+        
+        return [
+            'id' => $item->id,
+            'type' => $type,
+            'user' => $userData,
+            'amount' => $item->amount ?? 0,
+            'taxa' => $item->$taxaField ?? 0,
+            'status' => $item->status ?? null,
+            'date' => $item->date ?? null,
+            'created_at' => $item->created_at ? $item->created_at->toIso8601String() : null,
+            'created_at_timestamp' => $item->created_at ? $item->created_at->timestamp : 0,
+        ];
+    }
+    
+    /**
+     * VALIDAÇÃO: Validar e sanitizar filtros de transações
+     * 
+     * @param Request $request
+     * @return array
+     */
+    private function validateTransactionFilters(Request $request): array
+    {
+        // Validar e sanitizar limit
+        $limit = (int) $request->input('limit', 50);
+        $limit = max(self::MIN_TRANSACTIONS_LIMIT, min($limit, self::MAX_TRANSACTIONS_LIMIT));
+        
+        // Validar type (deve ser 'deposit', 'withdraw' ou null)
+        $type = $request->input('type');
+        if ($type && !in_array($type, ['deposit', 'withdraw'], true)) {
+            $type = null; // Invalidar se não for um dos valores permitidos
+        }
+        
+        // Validar status (sanitizar string)
+        $status = $request->input('status');
+        if ($status) {
+            $status = trim((string) $status);
+            // Limitar tamanho para evitar SQL injection
+            if (strlen($status) > 50) {
+                $status = null;
+            }
+        }
+        
+        return [
+            'type' => $type,
+            'status' => $status ?: null,
+            'limit' => $limit,
+        ];
     }
 }
 
