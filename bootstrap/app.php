@@ -46,6 +46,11 @@ return Application::configure(basePath: dirname(__DIR__))
             \App\Http\Middleware\SecurityMiddleware::class,
         ]);
         
+        // Middleware para logar queries lentas (monitoramento de performance)
+        $middleware->append([
+            \App\Http\Middleware\LogSlowQueries::class,
+        ]);
+        
         // Aplicar middleware de otimização de assets globalmente (primeira execução)
         $middleware->prepend([
             \App\Http\Middleware\AssetOptimizerMiddleware::class,
