@@ -46,6 +46,16 @@ class CacheKeyService
     }
     
     /**
+     * Cache key para transações recentes do admin
+     */
+    public static function adminRecentTransactions(?string $type, ?string $status, int $limit): string
+    {
+        $typeKey = $type ?? 'all';
+        $statusKey = $status ?? 'all';
+        return "admin:transactions:recent:{$typeKey}:{$statusKey}:{$limit}";
+    }
+    
+    /**
      * Cache key para XDPag config
      */
     public static function xdpagConfig(): string

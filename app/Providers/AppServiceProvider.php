@@ -5,8 +5,10 @@ namespace App\Providers;
 use Illuminate\Support\ServiceProvider;
 use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
+use App\Models\User;
 use App\Observers\SolicitacoesObserver;
 use App\Observers\SolicitacoesCashOutObserver;
+use App\Observers\UserObserver;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -23,5 +25,6 @@ class AppServiceProvider extends ServiceProvider
         // Registrar Observers para monitorar mudanças de status
         Solicitacoes::observe(SolicitacoesObserver::class);
         SolicitacoesCashOut::observe(SolicitacoesCashOutObserver::class);
+        User::observe(UserObserver::class);
     }
 }
