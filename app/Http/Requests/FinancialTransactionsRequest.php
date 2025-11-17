@@ -26,6 +26,7 @@ class FinancialTransactionsRequest extends FormRequest
             'page' => 'sometimes|integer|min:1',
             'limit' => 'sometimes|integer|min:1|max:100',
             'status' => 'sometimes|string|in:PAID_OUT,COMPLETED,PENDING,WAITING_FOR_APPROVAL,CANCELLED,REJECTED',
+            'meio' => 'sometimes|string|in:pix,credit_card,debit_card',
             'tipo' => 'sometimes|string|in:deposito,saque',
             'busca' => 'sometimes|string|max:100',
             'data_inicio' => 'sometimes|date_format:Y-m-d',

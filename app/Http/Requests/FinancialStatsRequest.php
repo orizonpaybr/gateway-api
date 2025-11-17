@@ -23,7 +23,7 @@ class FinancialStatsRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'periodo' => 'sometimes|string|in:hoje,mes,7d,30d',
+            'periodo' => 'sometimes|string|in:hoje,mes,7d,30d,total',
         ];
     }
 
@@ -33,7 +33,7 @@ class FinancialStatsRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'periodo.in' => 'Período deve ser: hoje, mes, 7d ou 30d',
+            'periodo.in' => 'Período deve ser: hoje, mes, 7d, 30d ou total',
         ];
     }
 }
