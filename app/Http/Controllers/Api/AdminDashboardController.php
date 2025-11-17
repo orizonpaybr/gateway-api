@@ -21,7 +21,6 @@ use Carbon\Carbon;
  * - Cache Redis para performance
  * - Query optimization com índices
  * - Service Layer Pattern
- * - DRY (Don't Repeat Yourself)
  * - Clean Code
  * - Escalabilidade e Manutenibilidade
  */
