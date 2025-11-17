@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\{FinancialTransactionsRequest, FinancialStatsRequest};
+use App\Http\Requests\{FinancialTransactionsRequest, FinancialStatsRequest, UpdateDepositStatusRequest};
 use App\Services\FinancialService;
 use Illuminate\Http\{Request, JsonResponse};
 use Illuminate\Support\Facades\Log;
@@ -227,6 +227,49 @@ class FinancialController extends Controller
             ]);
 
             return $this->errorResponse('Erro ao buscar estatísticas', 500);
+        }
+    }
+
+    /**
+     * Atualizar status de depósito
+     * 
+     * @param UpdateDepositStatusRequest $request
+     * @param int $id ID do depósito
+     * @return JsonResponse
+     */
+    public function updateDepositStatus(UpdateDepositStatusRequest $request, int $id): JsonResponse
+    {
+        try {
+            $validated = $request->validated();
+            $newStatus = $validated['status'];
+
+            // Obter usuário autenticado (middleware ensure.admin garante que existe)
+            $user = $request->user() ?? $request->user_auth;
+            $updatedBy = $user ? ($user->id ?? $user->user_id ?? 'system') : 'system';
+
+            $deposit = $this->financialService->updateDepositStatus($id, $newStatus);
+
+            Log::info('Status de depósito atualizado', [
+                'deposit_id' => $id,
+                'new_status' => $newStatus,
+                'updated_by' => $updatedBy,
+            ]);
+
+            return $this->successResponse([
+                'deposit' => $deposit,
+                'message' => 'Status atualizado com sucesso',
+            ]);
+        } catch (\Exception $e) {
+            $statusCode = $e->getCode() >= 400 && $e->getCode() < 600 ? $e->getCode() : 500;
+
+            Log::error('Erro ao atualizar status de depósito', [
+                'error' => $e->getMessage(),
+                'deposit_id' => $id,
+                'new_status' => $request->input('status'),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return $this->errorResponse($e->getMessage(), $statusCode);
         }
     }
 

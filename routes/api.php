@@ -223,6 +223,7 @@ Route::middleware(['verify.jwt'])->group(function () {
         Route::get('admin/financial/wallets/stats', [App\Http\Controllers\Api\FinancialController::class, 'getWalletsStats']);
         Route::get('admin/financial/deposits', [App\Http\Controllers\Api\FinancialController::class, 'getDeposits']);
         Route::get('admin/financial/deposits/stats', [App\Http\Controllers\Api\FinancialController::class, 'getDepositsStats']);
+        Route::put('admin/financial/deposits/{id}/status', [App\Http\Controllers\Api\FinancialController::class, 'updateDepositStatus']);
         Route::get('admin/financial/withdrawals', [App\Http\Controllers\Api\FinancialController::class, 'getWithdrawals']);
         Route::get('admin/financial/withdrawals/stats', [App\Http\Controllers\Api\FinancialController::class, 'getWithdrawalsStats']);
     });
