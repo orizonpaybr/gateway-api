@@ -326,8 +326,17 @@ class FinancialService
             // Select apenas campos necessários para reduzir memória e I/O
             $query = SolicitacoesCashOut::with(['user:id,user_id,name,username'])
                 ->select([
-                    'id', 'user_id', 'idTransaction', 'amount', 'valor_liquido',
-                    'status', 'date', 'pix_key', 'pix_type', 'taxa_cash_out', 'created_at',
+                    'id',
+                    'user_id',
+                    'idTransaction',
+                    'amount',
+                    DB::raw('cash_out_liquido as valor_liquido'),
+                    'status',
+                    'date',
+                    DB::raw('pixkey as pix_key'),
+                    DB::raw('type as pix_type'),
+                    'taxa_cash_out',
+                    'created_at',
                 ])
                 ->when($status, fn($q) => $q->where('status', $status))
                 ->when($busca, fn($q) => $this->applyWithdrawalSearch($q, $busca))
@@ -351,35 +360,81 @@ class FinancialService
 
     /**
      * Obter estatísticas de saques
+     * Retorna estatísticas gerais (todos os saques), hoje e mês
+     * Otimizado: usa uma única query com subqueries para melhor performance
      */
     public function getWithdrawalsStats(string $periodo = 'hoje'): array
     {
         $cacheKey = "financial:withdrawals:stats:{$periodo}:" . Carbon::now()->format('Ymd');
 
-        return Cache::remember($cacheKey, self::CACHE_TTL_STATS, function () use ($periodo) {
-            $dateRange = $this->getDateRange($periodo);
+        return Cache::remember($cacheKey, self::CACHE_TTL_STATS, function () {
+            $now = Carbon::now();
+            $hojeInicio = $now->copy()->startOfDay();
+            $hojeFim = $now->copy()->endOfDay();
+            $mesInicio = $now->copy()->startOfMonth();
+            $mesFim = $now->copy()->endOfMonth();
 
-            $stats = SolicitacoesCashOut::whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
-                ->selectRaw('
-                    COUNT(*) as total_saques,
-                    SUM(CASE WHEN status IN (?, ?) THEN 1 ELSE 0 END) as saques_aprovados,
-                    SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) as saques_pendentes,
-                    SUM(CASE WHEN status IN (?, ?) THEN amount ELSE 0 END) as valor_total,
-                    SUM(CASE WHEN status IN (?, ?) THEN taxa_cash_out ELSE 0 END) as lucro_saques
-                ', array_merge(
-                    self::APPROVED_STATUSES,
-                    ['PENDING'],
-                    self::APPROVED_STATUSES,
-                    self::APPROVED_STATUSES
-                ))
-                ->first();
+            // Usar uma única query com subqueries para melhor performance
+            // Isso reduz o número de round-trips ao banco
+            $stats = DB::selectOne("
+                SELECT 
+                    -- Estatísticas gerais
+                    (SELECT COUNT(*) FROM solicitacoes_cash_out) as total_saques_geral,
+                    (SELECT COUNT(*) FROM solicitacoes_cash_out WHERE status IN (?, ?)) as saques_aprovados_geral,
+                    (SELECT COALESCE(SUM(amount), 0) FROM solicitacoes_cash_out WHERE status IN (?, ?)) as valor_total_geral,
+                    (SELECT COALESCE(SUM(taxa_cash_out), 0) FROM solicitacoes_cash_out WHERE status IN (?, ?)) as lucro_total_geral,
+                    -- Estatísticas de hoje
+                    (SELECT COUNT(*) FROM solicitacoes_cash_out WHERE date BETWEEN ? AND ? AND status IN (?, ?)) as saques_aprovados_hoje,
+                    (SELECT COALESCE(SUM(amount), 0) FROM solicitacoes_cash_out WHERE date BETWEEN ? AND ? AND status IN (?, ?)) as valor_total_hoje,
+                    (SELECT COALESCE(SUM(taxa_cash_out), 0) FROM solicitacoes_cash_out WHERE date BETWEEN ? AND ? AND status IN (?, ?)) as lucro_total_hoje,
+                    -- Estatísticas do mês
+                    (SELECT COUNT(*) FROM solicitacoes_cash_out WHERE date BETWEEN ? AND ? AND status IN (?, ?)) as saques_aprovados_mes,
+                    (SELECT COALESCE(SUM(amount), 0) FROM solicitacoes_cash_out WHERE date BETWEEN ? AND ? AND status IN (?, ?)) as valor_total_mes,
+                    (SELECT COALESCE(SUM(taxa_cash_out), 0) FROM solicitacoes_cash_out WHERE date BETWEEN ? AND ? AND status IN (?, ?)) as lucro_total_mes,
+                    -- Saques pendentes (geral)
+                    (SELECT COUNT(*) FROM solicitacoes_cash_out WHERE status = ?) as saques_pendentes_geral
+            ", array_merge(
+                self::APPROVED_STATUSES, // saques_aprovados_geral
+                self::APPROVED_STATUSES, // valor_total_geral
+                self::APPROVED_STATUSES, // lucro_total_geral
+                [$hojeInicio, $hojeFim], // saques_aprovados_hoje
+                self::APPROVED_STATUSES,
+                [$hojeInicio, $hojeFim], // valor_total_hoje
+                self::APPROVED_STATUSES,
+                [$hojeInicio, $hojeFim], // lucro_total_hoje
+                self::APPROVED_STATUSES,
+                [$mesInicio, $mesFim], // saques_aprovados_mes
+                self::APPROVED_STATUSES,
+                [$mesInicio, $mesFim], // valor_total_mes
+                self::APPROVED_STATUSES,
+                [$mesInicio, $mesFim], // lucro_total_mes
+                self::APPROVED_STATUSES,
+                ['PENDING'] // saques_pendentes_geral
+            ));
 
             return [
-                'total_saques' => (int) ($stats->total_saques ?? 0),
-                'saques_aprovados' => (int) ($stats->saques_aprovados ?? 0),
-                'saques_pendentes' => (int) ($stats->saques_pendentes ?? 0),
-                'valor_total' => (float) ($stats->valor_total ?? 0),
-                'lucro_saques' => (float) ($stats->lucro_saques ?? 0),
+                // Estatísticas gerais
+                'total_saques_geral' => (int) ($stats->total_saques_geral ?? 0),
+                'saques_aprovados_geral' => (int) ($stats->saques_aprovados_geral ?? 0),
+                'valor_total_geral' => (float) ($stats->valor_total_geral ?? 0),
+                'lucro_total_geral' => (float) ($stats->lucro_total_geral ?? 0),
+                // Estatísticas de hoje
+                'saques_aprovados_hoje' => (int) ($stats->saques_aprovados_hoje ?? 0),
+                'valor_total_hoje' => (float) ($stats->valor_total_hoje ?? 0),
+                'lucro_total_hoje' => (float) ($stats->lucro_total_hoje ?? 0),
+                // Estatísticas do mês
+                'saques_aprovados_mes' => (int) ($stats->saques_aprovados_mes ?? 0),
+                'valor_total_mes' => (float) ($stats->valor_total_mes ?? 0),
+                'lucro_total_mes' => (float) ($stats->lucro_total_mes ?? 0),
+                // Pendentes
+                'saques_pendentes_geral' => (int) ($stats->saques_pendentes_geral ?? 0),
+                
+                // Mantém compatibilidade com código antigo
+                'total_saques' => (int) ($stats->total_saques_geral ?? 0),
+                'saques_aprovados' => (int) ($stats->saques_aprovados_geral ?? 0),
+                'saques_pendentes' => (int) ($stats->saques_pendentes_geral ?? 0),
+                'valor_total' => (float) ($stats->valor_total_geral ?? 0),
+                'lucro_saques' => (float) ($stats->lucro_total_geral ?? 0),
             ];
         });
     }
@@ -945,8 +1000,9 @@ class FinancialService
             // Calcular saldo líquido atualizado
             Helper::calculaSaldoLiquido($user->user_id);
 
-            // Atualizar total de transações
-            $user->increment('total_transacoes');
+            // Atualizar total de transações (evita acesso a método protegido em alguns contextos)
+            $user->total_transacoes = ($user->total_transacoes ?? 0) + 1;
+            $user->save();
 
             Log::info('Depósito aprovado e saldo atualizado', [
                 'user_id' => $user->user_id,
