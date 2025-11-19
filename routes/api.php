@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\Adquirentes\XDPagController;
 use Illuminate\Support\Facades\Artisan;
 use App\Http\Controllers\Api\PixInfracoesController;
 use App\Http\Controllers\Api\PixKeyController;
+use App\Http\Controllers\Api\AdminTransactionsController;
 
 /* AUTHENTICATION ROUTES */
 Route::options('auth/login', function () {
@@ -226,6 +227,7 @@ Route::middleware(['verify.jwt'])->group(function () {
         Route::put('admin/financial/deposits/{id}/status', [App\Http\Controllers\Api\FinancialController::class, 'updateDepositStatus']);
         Route::get('admin/financial/withdrawals', [App\Http\Controllers\Api\FinancialController::class, 'getWithdrawals']);
         Route::get('admin/financial/withdrawals/stats', [App\Http\Controllers\Api\FinancialController::class, 'getWithdrawalsStats']);
+        Route::post('admin/manual-transactions/deposits', [AdminTransactionsController::class, 'storeDeposit']);
     });
     
     // Transações Otimizadas

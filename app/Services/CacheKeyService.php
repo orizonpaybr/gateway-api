@@ -146,5 +146,30 @@ class CacheKeyService
             ]);
         }
     }
+    
+    /**
+     * Limpa o cache das transações recentes do dashboard admin
+     */
+    public static function forgetAdminRecentTransactions(?string $type = null, ?string $status = null, ?int $limit = null): void
+    {
+        try {
+            $types = $type !== null ? [$type] : ['deposit', 'withdraw', null];
+            $statuses = $status !== null ? [$status] : [null, 'PAID_OUT', 'PENDING', 'COMPLETED', 'CANCELLED', 'REJECTED'];
+            $limits = $limit !== null ? [$limit] : [8, 10, 20, 50, 100];
+            
+            foreach ($types as $typeOption) {
+                foreach ($statuses as $statusOption) {
+                    foreach ($limits as $limitOption) {
+                        $cacheKey = self::adminRecentTransactions($typeOption, $statusOption, $limitOption);
+                        Cache::forget($cacheKey);
+                    }
+                }
+            }
+        } catch (\Exception $e) {
+            Log::warning('Erro ao limpar cache de transações recentes do admin', [
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
 }
 
