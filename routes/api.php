@@ -228,6 +228,7 @@ Route::middleware(['verify.jwt'])->group(function () {
         Route::get('admin/financial/withdrawals', [App\Http\Controllers\Api\FinancialController::class, 'getWithdrawals']);
         Route::get('admin/financial/withdrawals/stats', [App\Http\Controllers\Api\FinancialController::class, 'getWithdrawalsStats']);
         Route::post('admin/manual-transactions/deposits', [AdminTransactionsController::class, 'storeDeposit']);
+        Route::post('admin/manual-transactions/withdrawal', [AdminTransactionsController::class, 'storeWithdrawal']);
     });
     
     // Transações Otimizadas

@@ -4,15 +4,11 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreManualDepositRequest;
-use App\Models\App;
-use App\Models\Solicitacoes;
-use App\Models\User;
-use App\Services\{FinancialService, CacheKeyService};
-use Carbon\Carbon;
+use App\Http\Requests\Admin\StoreManualWithdrawalRequest;
+use App\Services\{AdminTransactionService, FinancialService, CacheKeyService};
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 
 /**
  * Controller para gerenciar transações manuais do admin
@@ -22,16 +18,20 @@ use Illuminate\Support\Str;
 class AdminTransactionsController extends Controller
 {
     /**
-     * Serviço financeiro injetado via container
+     * Serviços injetados via container
      */
     private FinancialService $financialService;
+    private AdminTransactionService $transactionService;
     
     /**
      * Constructor com injeção de dependência
      */
-    public function __construct(FinancialService $financialService)
-    {
+    public function __construct(
+        FinancialService $financialService,
+        AdminTransactionService $transactionService
+    ) {
         $this->financialService = $financialService;
+        $this->transactionService = $transactionService;
     }
     
     /**
@@ -44,21 +44,14 @@ class AdminTransactionsController extends Controller
     {
         $validated = $request->validated();
 
-        $user = User::where('user_id', $validated['user_id'])->first();
-
+        $user = $this->transactionService->findUser($validated['user_id']);
         if (!$user) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Usuário não encontrado.',
-            ], 404);
+            return $this->errorResponse('Usuário não encontrado.', 404);
         }
 
-        $settings = App::first();
+        $settings = $this->transactionService->getAppSettings();
         if (!$settings) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Configurações da aplicação não foram encontradas.',
-            ], 500);
+            return $this->errorResponse('Configurações da aplicação não foram encontradas.', 500);
         }
 
         $amount = (float) $validated['amount'];
@@ -71,31 +64,16 @@ class AdminTransactionsController extends Controller
             $depositoLiquido = $taxaCalculada['deposito_liquido'];
             $taxaCashIn = $taxaCalculada['taxa_cash_in'];
 
-            $idTransaction = str_replace('-', '', (string) Str::uuid());
-            $now = Carbon::now();
+            $idTransaction = $this->transactionService->generateTransactionId();
 
-            $deposit = Solicitacoes::create([
-                'user_id' => $user->user_id,
-                'externalreference' => env('APP_NAME') . '_' . $idTransaction,
-                'amount' => $amount,
-                'client_name' => $user->name,
-                'client_document' => $user->cpf_cnpj,
-                'client_email' => $user->email,
-                'date' => $now->format('Y-m-d H:i:s'),
-                'status' => 'PAID_OUT',
-                'idTransaction' => $idTransaction,
-                'deposito_liquido' => $depositoLiquido,
-                'qrcode_pix' => '',
-                'paymentcode' => '',
-                'paymentCodeBase64' => '',
-                'adquirente_ref' => env('APP_NAME'),
-                'taxa_cash_in' => $taxaCashIn,
-                'taxa_pix_cash_in_adquirente' => 0,
-                'taxa_pix_cash_in_valor_fixo' => 0,
-                'client_telefone' => $user->telefone,
-                'executor_ordem' => env('APP_NAME'),
-                'descricao_transacao' => $description,
-            ]);
+            $deposit = $this->transactionService->createDepositRecord(
+                $user,
+                $amount,
+                $depositoLiquido,
+                $taxaCashIn,
+                $description,
+                $idTransaction
+            );
 
             \App\Helpers\Helper::incrementAmount($user, $depositoLiquido, 'saldo');
             \App\Helpers\Helper::calculaSaldoLiquido($user->user_id);
@@ -109,36 +87,106 @@ class AdminTransactionsController extends Controller
                 'success' => true,
                 'message' => 'Depósito manual criado com sucesso.',
                 'data' => [
-                    'deposit' => [
-                        'id' => $deposit->id,
-                        'transaction_id' => $deposit->idTransaction,
-                        'amount' => $deposit->amount,
-                        'valor_liquido' => $deposit->deposito_liquido,
-                        'taxa' => $deposit->amount - $deposit->deposito_liquido,
-                        'status' => $deposit->status,
-                        'descricao' => $deposit->descricao_transacao,
-                        'created_at' => $deposit->created_at?->toIso8601String(),
-                        'user' => [
-                            'id' => $user->id,
-                            'user_id' => $user->user_id,
-                            'name' => $user->name,
-                            'username' => $user->username,
-                        ],
-                    ],
+                    'deposit' => $this->formatDepositResponse($deposit, $user),
                 ],
             ], 201);
         } catch (\Throwable $exception) {
             DB::rollBack();
 
             Log::error('Erro ao criar depósito manual', [
+                'user_id' => $validated['user_id'],
+                'amount' => $amount,
                 'message' => $exception->getMessage(),
                 'trace' => $exception->getTraceAsString(),
             ]);
 
+            return $this->errorResponse('Não foi possível criar o depósito manual.', 500);
+        }
+    }
+    
+    /**
+     * Criar saque manual
+     * 
+     * @param StoreManualWithdrawalRequest $request
+     * @return JsonResponse
+     */
+    public function storeWithdrawal(StoreManualWithdrawalRequest $request): JsonResponse
+    {
+        $validated = $request->validated();
+
+        $user = $this->transactionService->findUser($validated['user_id']);
+        if (!$user) {
+            return $this->errorResponse('Usuário não encontrado.', 404);
+        }
+
+        $settings = $this->transactionService->getAppSettings();
+        if (!$settings) {
+            return $this->errorResponse('Configurações da aplicação não foram encontradas.', 500);
+        }
+
+        $amount = (float) $validated['amount'];
+        $description = $validated['description'] ?? 'MANUAL';
+
+        // Calcular taxa de saque
+        $taxaCalculada = \App\Helpers\TaxaSaqueHelper::calcularTaxaSaque($amount, $settings, $user, true, false);
+        $saqueLiquido = $taxaCalculada['saque_liquido'];
+        $taxaCashOut = $taxaCalculada['taxa_cash_out'];
+        $valorTotalDescontar = $taxaCalculada['valor_total_descontar'];
+
+        // Verificar se o usuário tem saldo suficiente
+        if (!$this->transactionService->hasSufficientBalance($user, $valorTotalDescontar)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Não foi possível criar o depósito manual.',
-            ], 500);
+                'message' => 'Saldo insuficiente para realizar o saque.',
+                'data' => [
+                    'saldo_disponivel' => $user->saldo,
+                    'valor_necessario' => $valorTotalDescontar,
+                    'valor_saque' => $amount,
+                    'taxa' => $taxaCashOut,
+                ],
+            ], 400);
+        }
+
+        DB::beginTransaction();
+
+        try {
+            $idTransaction = $this->transactionService->generateTransactionId();
+
+            $withdrawal = $this->transactionService->createWithdrawalRecord(
+                $user,
+                $amount,
+                $saqueLiquido,
+                $taxaCashOut,
+                $description,
+                $idTransaction
+            );
+
+            \App\Helpers\Helper::decrementAmount($user, $valorTotalDescontar, 'saldo');
+            \App\Helpers\Helper::calculaSaldoLiquido($user->user_id);
+
+            DB::commit();
+
+            // Limpar caches relacionados (fail-safe)
+            $this->clearRelatedCachesWithdrawal();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Saque manual criado com sucesso.',
+                'data' => [
+                    'withdrawal' => $this->formatWithdrawalResponse($withdrawal, $user, $valorTotalDescontar),
+                ],
+            ], 201);
+        } catch (\Throwable $exception) {
+            DB::rollBack();
+
+            Log::error('Erro ao criar saque manual', [
+                'user_id' => $validated['user_id'],
+                'amount' => $amount,
+                'message' => $exception->getMessage(),
+                'trace' => $exception->getTraceAsString(),
+            ]);
+
+            return $this->errorResponse('Não foi possível criar o saque manual.', 500);
         }
     }
     
@@ -165,6 +213,102 @@ class AdminTransactionsController extends Controller
                 'error' => $exception->getMessage(),
             ]);
         }
+    }
+    
+    /**
+     * Limpar caches relacionados após criar saque
+     * Fail-safe: não interrompe a operação se cache falhar
+     * 
+     * @return void
+     */
+    private function clearRelatedCachesWithdrawal(): void
+    {
+        try {
+            $this->financialService->invalidateWithdrawalsCache();
+        } catch (\Throwable $exception) {
+            Log::warning('Falha ao limpar cache financeiro após saque manual', [
+                'error' => $exception->getMessage(),
+            ]);
+        }
+        
+        try {
+            CacheKeyService::forgetAdminRecentTransactions();
+        } catch (\Throwable $exception) {
+            Log::warning('Falha ao limpar cache de transações recentes do admin', [
+                'error' => $exception->getMessage(),
+            ]);
+        }
+    }
+    
+    /**
+     * Formatar resposta de depósito
+     * 
+     * @param \App\Models\Solicitacoes $deposit
+     * @param \App\Models\User $user
+     * @return array
+     */
+    private function formatDepositResponse($deposit, $user): array
+    {
+        return [
+            'id' => $deposit->id,
+            'transaction_id' => $deposit->idTransaction,
+            'amount' => $deposit->amount,
+            'valor_liquido' => $deposit->deposito_liquido,
+            'taxa' => $deposit->amount - $deposit->deposito_liquido,
+            'status' => $deposit->status,
+            'descricao' => $deposit->descricao_transacao,
+            'created_at' => $deposit->created_at?->toIso8601String(),
+            'user' => [
+                'id' => $user->id,
+                'user_id' => $user->user_id,
+                'name' => $user->name,
+                'username' => $user->username,
+            ],
+        ];
+    }
+    
+    /**
+     * Formatar resposta de saque
+     * 
+     * @param \App\Models\SolicitacoesCashOut $withdrawal
+     * @param \App\Models\User $user
+     * @param float $valorTotalDescontado
+     * @return array
+     */
+    private function formatWithdrawalResponse($withdrawal, $user, float $valorTotalDescontado): array
+    {
+        return [
+            'id' => $withdrawal->id,
+            'transaction_id' => $withdrawal->idTransaction,
+            'amount' => $withdrawal->amount,
+            'valor_liquido' => $withdrawal->cash_out_liquido,
+            'taxa' => $withdrawal->taxa_cash_out,
+            'valor_total_descontado' => $valorTotalDescontado,
+            'status' => $withdrawal->status,
+            'descricao' => $withdrawal->descricao_transacao,
+            'created_at' => $withdrawal->created_at?->toIso8601String(),
+            'user' => [
+                'id' => $user->id,
+                'user_id' => $user->user_id,
+                'name' => $user->name,
+                'username' => $user->username,
+            ],
+        ];
+    }
+    
+    /**
+     * Resposta de erro padronizada
+     * 
+     * @param string $message
+     * @param int $statusCode
+     * @return JsonResponse
+     */
+    private function errorResponse(string $message, int $statusCode): JsonResponse
+    {
+        return response()->json([
+            'success' => false,
+            'message' => $message,
+        ], $statusCode);
     }
 }
 
