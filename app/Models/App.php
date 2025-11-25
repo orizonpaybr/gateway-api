@@ -9,11 +9,7 @@ class App extends Model
     protected $table = "app";
 
     protected $fillable = [
-        'gateway_name',
-        'gateway_logo',
-        'gateway_favicon',
         'gateway_banner_home',
-        'gateway_color',
         'numero_users',
         'faturamento_total',
         'total_transacoes',
@@ -35,8 +31,6 @@ class App extends Model
         'limite_saque_automatico',
         'deposito_minimo',
         'saque_minimo',
-        'contato',
-        'cnpj',
         'niveis_ativo',
         "gerente_active",
         "gerente_percentage",
@@ -95,5 +89,84 @@ class App extends Model
         'relatorio_saidas_mostrar_status' => 'boolean',
         'relatorio_saidas_mostrar_data' => 'boolean',
         'relatorio_saidas_mostrar_taxa' => 'boolean',
+        // Casts de valores numéricos
+        'taxa_cash_in_padrao' => 'decimal:2',
+        'taxa_cash_out_padrao' => 'decimal:2',
+        'taxa_fixa_padrao' => 'decimal:2',
+        'taxa_fixa_padrao_cash_out' => 'decimal:2',
+        'taxa_fixa_pix' => 'decimal:2',
+        'deposito_minimo' => 'decimal:2',
+        'saque_minimo' => 'decimal:2',
+        'limite_saque_mensal' => 'decimal:2',
+        'taxa_flexivel_valor_minimo' => 'decimal:2',
+        'taxa_flexivel_fixa_baixo' => 'decimal:2',
+        'taxa_flexivel_percentual_alto' => 'decimal:2',
     ];
+
+    /**
+     * Verificar se IP está na whitelist global
+     */
+    public function isIpWhitelisted(string $ip): bool
+    {
+        $globalIps = $this->global_ips ?? [];
+        return in_array($ip, $globalIps);
+    }
+
+    /**
+     * Adicionar IP à whitelist global
+     */
+    public function addGlobalIp(string $ip): void
+    {
+        $globalIps = $this->global_ips ?? [];
+        if (!in_array($ip, $globalIps)) {
+            $globalIps[] = $ip;
+            $this->global_ips = $globalIps;
+            $this->save();
+        }
+    }
+
+    /**
+     * Remover IP da whitelist global
+     */
+    public function removeGlobalIp(string $ip): void
+    {
+        $globalIps = $this->global_ips ?? [];
+        $this->global_ips = array_values(array_filter($globalIps, fn($item) => $item !== $ip));
+        $this->save();
+    }
+
+    /**
+     * Verificar se sistema de taxas flexível está ativo
+     */
+    public function isFlexibleTaxActive(): bool
+    {
+        return (bool) $this->taxa_flexivel_ativa;
+    }
+
+    /**
+     * Obter taxa de depósito aplicável (considerando taxas flexíveis)
+     */
+    public function getDepositTax(float $amount): float
+    {
+        if ($this->isFlexibleTaxActive() && $amount >= $this->taxa_flexivel_valor_minimo) {
+            // Taxa flexível para valores altos
+            return ($amount * $this->taxa_flexivel_percentual_alto) / 100;
+        }
+        
+        // Taxa padrão
+        $percentualTax = ($amount * $this->taxa_cash_in_padrao) / 100;
+        return max($percentualTax, $this->taxa_fixa_padrao ?? 0);
+    }
+
+    /**
+     * Obter taxa de saque PIX aplicável
+     */
+    public function getWithdrawalTax(float $amount): float
+    {
+        $percentualTax = ($amount * $this->taxa_cash_out_padrao) / 100;
+        $minTax = $this->taxa_fixa_pix ?? 0;
+        $fixedTax = $this->taxa_fixa_padrao_cash_out ?? 0;
+        
+        return max($percentualTax, $minTax) + $fixedTax;
+    }
 }

@@ -229,6 +229,10 @@ Route::middleware(['verify.jwt'])->group(function () {
         Route::get('admin/financial/withdrawals/stats', [App\Http\Controllers\Api\FinancialController::class, 'getWithdrawalsStats']);
         Route::post('admin/manual-transactions/deposits', [AdminTransactionsController::class, 'storeDeposit']);
         Route::post('admin/manual-transactions/withdrawal', [AdminTransactionsController::class, 'storeWithdrawal']);
+        
+        // Rotas de configurações do gateway (Admin)
+        Route::get('admin/settings', [App\Http\Controllers\Api\GatewaySettingsController::class, 'getSettings']);
+        Route::put('admin/settings', [App\Http\Controllers\Api\GatewaySettingsController::class, 'updateSettings']);
     });
     
     // Transações Otimizadas

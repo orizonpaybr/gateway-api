@@ -26,7 +26,7 @@ class SegurancaController extends Controller
             return back()->with('success', 'Porcentagem alterada com sucesso.');
         }
 
-        $data = $request->except(['_token', '_method', 'gateway_logo', 'gateway_favicon']);
+        $data = $request->except(['_token', '_method']);
         $payload = [];
 
         foreach ($data as $key => $value) {
@@ -35,11 +35,7 @@ class SegurancaController extends Controller
                 $ips = array_filter(array_map('trim', explode(',', $value)));
                 $payload[$key] = $ips; // Deixar o Eloquent fazer a codificação JSON automaticamente
             } else {
-                $payload[$key] = (
-                    $key === 'gateway_name' ||
-                    $key === 'cnpj' ||
-                    $key === 'gateway_color'
-                ) ? $value : (float) $value;
+                $payload[$key] = (float) $value;
             }
         }
 
@@ -80,28 +76,6 @@ class SegurancaController extends Controller
         $payload["relatorio_saidas_mostrar_status"] = $request->has('relatorio_saidas_mostrar_status');
         $payload["relatorio_saidas_mostrar_data"] = $request->has('relatorio_saidas_mostrar_data');
         $payload["relatorio_saidas_mostrar_taxa"] = $request->has('relatorio_saidas_mostrar_taxa');
-
-        $imageFields = ['gateway_logo', 'gateway_favicon'];
-
-        foreach ($imageFields as $field) {
-            if ($request->hasFile($field)) {
-                $file = $request->file($field);
-                $filename = uniqid() . '.' . $file->getClientOriginalExtension();
-
-                // Caminho: public/uploads
-                $destination = public_path('uploads');
-                if (!file_exists($destination)) {
-                    mkdir($destination, 0775, true);
-                }
-
-                $file->move($destination, $filename);
-
-                // Caminho acessível via navegador
-                $payload[$field] = '/uploads/' . $filename;
-            } else {
-                unset($payload[$field]); // Corrigido: $payload, não $data
-            }
-        }
 
         // Atualiza as configurações
         $setting = App::first();
