@@ -233,6 +233,13 @@ Route::middleware(['verify.jwt'])->group(function () {
         // Rotas de configurações do gateway (Admin)
         Route::get('admin/settings', [App\Http\Controllers\Api\GatewaySettingsController::class, 'getSettings']);
         Route::put('admin/settings', [App\Http\Controllers\Api\GatewaySettingsController::class, 'updateSettings']);
+        
+        // Rotas de gerenciamento de níveis de gamificação (Admin)
+        // Observação: o painel atual permite apenas listar e editar níveis existentes.
+        Route::get('admin/levels', [App\Http\Controllers\Api\AdminLevelsController::class, 'index']);
+        Route::get('admin/levels/{id}', [App\Http\Controllers\Api\AdminLevelsController::class, 'show'])->where('id', '[0-9]+');
+        Route::put('admin/levels/{id}', [App\Http\Controllers\Api\AdminLevelsController::class, 'update'])->where('id', '[0-9]+');
+        Route::post('admin/levels/toggle-active', [App\Http\Controllers\Api\AdminLevelsController::class, 'toggleActive']);
     });
     
     // Transações Otimizadas
