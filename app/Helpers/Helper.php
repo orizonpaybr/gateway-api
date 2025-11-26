@@ -8,12 +8,9 @@ use App\Models\SolicitacoesCashOut;
 use App\Models\User;
 use App\Models\App;
 use App\Models\CheckoutBuild;
-use App\Models\Nivel;
-use App\Models\Transactions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 
 class Helper
 {
@@ -346,43 +343,20 @@ class Helper
         return $settings;
     }
 
+    /**
+     * @deprecated Use GamificationService::getNiveis() instead
+     */
     public static function getNiveis()
     {
-        return Nivel::get();
+        return app(\App\Services\GamificationService::class)->getNiveis();
     }
 
+    /**
+     * @deprecated Use GamificationService::meuNivel() instead
+     */
     public static function meuNivel($user)
     {
-        // Soma total dos depósitos pagos do usuário
-        $depositos = Solicitacoes::where('status', 'PAID_OUT')
-            ->where("user_id", $user->user_id)
-            ->sum('amount');
-
-        // Pega todos os níveis ordenados pelo mínimo
-        $niveis = self::getNiveis()->sortBy('minimo')->values();
-
-        $nivelAtual = null;
-        $proximoNivel = null;
-
-        foreach ($niveis as $index => $nivel) {
-            if ($depositos >= $nivel->minimo && $depositos <= $nivel->maximo) {
-                $nivelAtual = $nivel;
-                $proximoNivel = $niveis->get($index + 1);
-                break;
-            }
-
-            // Caso o usuário esteja acima de todos os níveis, assume o último como atual
-            if ($index === $niveis->count() - 1 && $depositos > $nivel->maximo) {
-                $nivelAtual = $nivel;
-                $proximoNivel = null;
-            }
-        }
-
-        return [
-            'total_depositos' => $depositos,
-            'nivel_atual' => $nivelAtual,
-            'proximo_nivel' => $proximoNivel
-        ];
+        return app(\App\Services\GamificationService::class)->meuNivel($user);
     }
 
 

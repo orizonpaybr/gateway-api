@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
-use App\Models\Transactions;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Http;
@@ -1678,9 +1677,7 @@ class UserController extends Controller
                     'summary_cards' => [
                         'total_deposited' => 'R$ ' . number_format($gamificationData['total_depositos'], 2, ',', '.'),
                         'current_level' => $currentLevel ? $currentLevel->nome : null,
-                        'next_goal' => $nextLevel ? 
-                            'R$ ' . number_format($currentLevel->maximo - $gamificationData['total_depositos'], 0, ',', '.') : 
-                            'Concluído!'
+                        'next_goal' => $this->calculateNextGoal($currentLevel, $nextLevel, $gamificationData['total_depositos'])
                     ]
                 ]
             ];
@@ -1705,6 +1702,22 @@ class UserController extends Controller
                 'message' => 'Erro interno do servidor'
             ], 500)->header('Access-Control-Allow-Origin', '*');
         }
+    }
+
+    /**
+     * Calcula a próxima meta de forma correta
+     * 
+     * @deprecated Use GamificationService::calculateNextGoal() instead
+     * 
+     * @param object|null $currentLevel
+     * @param object|null $nextLevel
+     * @param float $totalDeposited
+     * @return string
+     */
+    private function calculateNextGoal($currentLevel, $nextLevel, $totalDeposited): string
+    {
+        return app(\App\Services\GamificationService::class)
+            ->calculateNextGoal($currentLevel, $nextLevel, $totalDeposited);
     }
 
     /**
