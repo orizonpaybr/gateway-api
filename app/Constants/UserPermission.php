@@ -10,7 +10,6 @@ class UserPermission
     public const CLIENT = 1;
     public const MANAGER = 2;
     public const ADMIN = 3;
-    public const SELLER = 5;
     
     /**
      * Obter texto da permissão
@@ -21,7 +20,6 @@ class UserPermission
             self::CLIENT => 'CLIENTE',
             self::MANAGER => 'GERENTE',
             self::ADMIN => 'ADMIN',
-            self::SELLER => 'VENDEDOR',
             default => 'CLIENTE',
         };
     }
@@ -31,7 +29,7 @@ class UserPermission
      */
     public static function getValidPermissions(): array
     {
-        return [self::CLIENT, self::MANAGER, self::ADMIN, self::SELLER];
+        return [self::CLIENT, self::MANAGER, self::ADMIN];
     }
     
     /**
