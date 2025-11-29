@@ -5,42 +5,38 @@ namespace App\Http\Controllers\Gerencia;
 use App\Http\Controllers\Controller;
 use App\Models\App;
 use App\Models\GerenteApoio;
-use App\Models\Solicitacoes;
 use App\Models\Transactions;
 use Illuminate\Http\Request;
 use App\Models\User;
 use App\Models\UsersKey;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Str;
+use Illuminate\Support\Facades\{DB, Mail, Hash, Auth};
 
 class ClientesController extends Controller
 {
     public function index(Request $request)
     {
-        if (auth()->user()->permission != 5) {
+        if (Auth::user()->permission != \App\Constants\UserPermission::MANAGER) {
             return redirect()->to('/dashboard');
         }
         // Cadastrados hoje
-        $usersHoje = User::where('gerente_id', auth()->id())->whereDate('created_at', Carbon::today())->count();
+        $usersHoje = User::where('gerente_id', Auth::id())->whereDate('created_at', Carbon::today())->count();
 
         // Cadastrados na semana
-        $usersSemana = User::where('gerente_id', auth()->id())->whereBetween('created_at', [
+        $usersSemana = User::where('gerente_id', Auth::id())->whereBetween('created_at', [
             Carbon::now()->startOfWeek(),
             Carbon::now()->endOfWeek(),
         ])->count();
 
         // Cadastrados no mês
-        $usersMes = User::where('gerente_id', auth()->id())->whereBetween('created_at', [
+        $usersMes = User::where('gerente_id', Auth::id())->whereBetween('created_at', [
             Carbon::now()->startOfMonth(),
             Carbon::now()->endOfMonth(),
         ])->count();
 
-        $users = User::where('gerente_id', auth()->id())->get();
+        $users = User::where('gerente_id', Auth::id())->get();
 
-        $comissoes = Transactions::where('gerente_id', auth()->user()->user_id)->sum('comission_value');
+        $comissoes = Transactions::where('gerente_id', Auth::user()->user_id)->sum('comission_value');
 
         $usersTotal = $users->count();
         return view('gerencia.index', compact(
@@ -56,7 +52,7 @@ class ClientesController extends Controller
     public function relatorio(Request $request)
     {
         $query = DB::table('transactions')
-            ->where('gerente_id', auth()->user()->id);
+            ->where('gerente_id', Auth::id());
 
         // Filtro de busca
         if ($request->filled('buscar')) {
@@ -106,7 +102,7 @@ class ClientesController extends Controller
 
     public function material(Request $request)
     {
-        if (auth()->user()->permission != 5) {
+        if (Auth::user()->permission != \App\Constants\UserPermission::MANAGER) {
             return redirect()->to('/dashboard');
         }
 
@@ -221,11 +217,11 @@ class ClientesController extends Controller
         $secret = $request->input('secret');
 
         if ($user->email != $email) {
-            $validation = $request->validate([
-                'email' => ['unique:users,email'],
-            ]);
-
-            if (!$validation) {
+            try {
+                $request->validate([
+                    'email' => ['unique:users,email,' . $id],
+                ]);
+            } catch (\Illuminate\Validation\ValidationException $e) {
                 return redirect()->back()->with('error', "Email já cadastrado na base!");
             }
         }
@@ -239,8 +235,7 @@ class ClientesController extends Controller
             $payl['password'] = Hash::make($request->input('password'));
         }
 
-        $user = User::where('id', $id)->first();
-        if($user) {
+        if ($user) {
             $user->update($payl);
 
             $userkey = UsersKey::where('user_id', $user->user_id)->first();

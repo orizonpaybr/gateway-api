@@ -10,9 +10,7 @@ use Carbon\Carbon;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\Rules;
+use Illuminate\Support\Facades\{Auth, Hash, Log};
 use Illuminate\View\View;
 use Illuminate\Support\Str;
 
@@ -72,14 +70,14 @@ class RegisteredUserController extends Controller
 
         $code_ref = uniqid();
 
-        $gerenteComMenosClientes = User::where('permission', 5)
+        $gerenteComMenosClientes = User::where('permission', \App\Constants\UserPermission::MANAGER)
             ->withCount('clientes') // Usando relacionamento clientes()
             ->orderBy('clientes_count', 'asc')
             ->first();
         //dd($gerenteComMenosClientes);
         if (isset($indicador_ref) && !is_null($indicador_ref)) {
             $indicador = User::where('code_ref', $indicador_ref)->first();
-            if ($indicador->permission == 5) {
+            if ($indicador && $indicador->permission == \App\Constants\UserPermission::MANAGER) {
                 $gerenteComMenosClientes = $indicador;
             }
         }
@@ -126,7 +124,7 @@ class RegisteredUserController extends Controller
                     'affiliate_percentage' => $affiliateUser->affiliate_percentage
                 ]);
                 
-                \Log::info('[REGISTRO AFFILIATE] Usuário registrado via affiliate', [
+                Log::info('[REGISTRO AFFILIATE] Usuário registrado via affiliate', [
                     'novo_usuario_id' => $user->id,
                     'affiliate_id' => $affiliateUser->id,
                     'affiliate_code' => $affiliateCode,
@@ -149,13 +147,13 @@ class RegisteredUserController extends Controller
                     'data_fim' => null,
                 ]);
                 
-                \Log::info('[REGISTRO AUTOMATICO] Split interno criado para novo usuário', [
+                Log::info('[REGISTRO AUTOMATICO] Split interno criado para novo usuário', [
                     'novo_usuario_id' => $user->id,
                     'gerente_id' => $gerenteComMenosClientes->id,
                     'gerente_percentage' => $gerenteComMenosClientes->gerente_percentage
                 ]);
             } catch (\Exception $e) {
-                \Log::error('[REGISTRO AUTOMATICO] Erro ao criar split interno', [
+                Log::error('[REGISTRO AUTOMATICO] Erro ao criar split interno', [
                     'erro' => $e->getMessage(),
                     'novo_usuario_id' => $user->id,
                     'gerente_id' => $gerenteComMenosClientes->id ?? null
@@ -177,13 +175,13 @@ class RegisteredUserController extends Controller
                     'data_fim' => null,
                 ]);
                 
-                \Log::info('[REGISTRO AFFILIATE] Split interno automático criado', [
+                Log::info('[REGISTRO AFFILIATE] Split interno automático criado', [
                     'novo_usuario_id' => $user->id,
                     'affiliate_id' => $affiliateUser->id,
                     'affiliate_percentage' => $affiliateUser->affiliate_percentage
                 ]);
             } catch (\Exception $e) {
-                \Log::error('[REGISTRO AFFILIATE] Erro ao criar split interno', [
+                Log::error('[REGISTRO AFFILIATE] Erro ao criar split interno', [
                     'erro' => $e->getMessage(),
                     'novo_usuario_id' => $user->id,
                     'affiliate_id' => $affiliateUser->id ?? null

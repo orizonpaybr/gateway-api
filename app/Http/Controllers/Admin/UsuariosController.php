@@ -9,7 +9,7 @@ use App\Models\User;
 use App\Models\UsersKey;
 use App\Models\Adquirente;
 use Carbon\Carbon;
-use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\{Hash, Log, Auth};
 
 class UsuariosController extends Controller
 {
@@ -36,7 +36,7 @@ class UsuariosController extends Controller
         }
 
         $users = $users->get(); // executa a query e pega os resultados
-        $gerentes = User::where('permission', 5)->get();
+        $gerentes = User::where('permission', \App\Constants\UserPermission::MANAGER)->get();
         $adquirentes = Adquirente::all();
         return view('admin.usuarios', compact('users', 'gerentes', 'adquirentes'));
     }
@@ -100,8 +100,8 @@ class UsuariosController extends Controller
             return redirect()->back()->with('error', "Usuário não encontrado!");
         }
 
-        $user->delete($id);
-        return redirect()->route('admin.usuarios')->with('error', "Usuário removido com sucesso!");
+        $user->delete();
+        return redirect()->route('admin.usuarios')->with('success', "Usuário removido com sucesso!");
     }
 
     public function edit($id, Request $request)
@@ -118,7 +118,7 @@ class UsuariosController extends Controller
         $data_nascimento = $request->input('data_nascimento');
 
         // Debug: Log dos dados recebidos
-        \Log::info('Dados recebidos na edição:', [
+        Log::info('Dados recebidos na edição:', [
             'cpf_cnpj' => $cpf_cnpj,
             'telefone' => $telefone,
             'data_nascimento' => $data_nascimento,
@@ -142,9 +142,9 @@ class UsuariosController extends Controller
                 $validation = $request->validate([
                     'cpf_cnpj' => ['unique:users,cpf_cnpj,' . $id],
                 ]);
-                \Log::info('Validação CPF/CNPJ passou:', ['cpf_cnpj' => $cpf_cnpj]);
+                Log::info('Validação CPF/CNPJ passou:', ['cpf_cnpj' => $cpf_cnpj]);
             } catch (\Illuminate\Validation\ValidationException $e) {
-                \Log::error('Erro na validação CPF/CNPJ:', [
+                Log::error('Erro na validação CPF/CNPJ:', [
                     'cpf_cnpj' => $cpf_cnpj,
                     'errors' => $e->errors()
                 ]);
@@ -158,9 +158,9 @@ class UsuariosController extends Controller
                 $validation = $request->validate([
                     'email' => ['unique:users,email,' . $id],
                 ]);
-                \Log::info('Validação email passou:', ['email' => $email]);
+                Log::info('Validação email passou:', ['email' => $email]);
             } catch (\Illuminate\Validation\ValidationException $e) {
-                \Log::error('Erro na validação email:', [
+                Log::error('Erro na validação email:', [
                     'email' => $email,
                     'errors' => $e->errors()
                 ]);
@@ -211,9 +211,9 @@ class UsuariosController extends Controller
         }
 
         if ($request->filled('gerente_percentage')) {
-            $valorFormatado = $request->input('gerente_percentage'); // ex: "1.234,56"
-            $valorParaBanco = number_format($valorFormatado, 2); // "1234.56"
-            $payl['gerente_percentage'] = (float) $valorParaBanco;
+            $valorFormatado = $request->input('gerente_percentage');
+            $valorLimpo = str_replace(['.', ','], ['', '.'], $valorFormatado);
+            $payl['gerente_percentage'] = (float) $valorLimpo;
         } else {
             $payl['gerente_percentage'] = 0.00;
         }
@@ -244,13 +244,13 @@ class UsuariosController extends Controller
                 }
             }
             
-            \Log::info('[ADMIN EDIT] Configurações de afiliado processadas', [
+            Log::info('[ADMIN EDIT] Configurações de afiliado processadas', [
                 'user_id' => $id,
                 'is_affiliate' => $payl['is_affiliate'],
                 'affiliate_percentage' => $payl['affiliate_percentage'] ?? 0
             ]);
         } else {
-            \Log::info('[ADMIN EDIT] Campos de afiliado não presentes no request - mantendo configuração atual', [
+            Log::info('[ADMIN EDIT] Campos de afiliado não presentes no request - mantendo configuração atual', [
                 'user_id' => $id
             ]);
         }
@@ -278,7 +278,7 @@ class UsuariosController extends Controller
         }
 
         // Debug: Log final do payload antes da atualização
-        \Log::info('Payload final antes da atualização:', $payl);
+        Log::info('Payload final antes da atualização:', $payl);
         
         User::where('id', $id)->update($payl);
 
@@ -341,11 +341,11 @@ class UsuariosController extends Controller
                 ->where('usuario_pagador_id', $userId)
                 ->where('usuario_beneficiario_id', $gerenteId)
                 ->where('porcentagem_split', $gerentePercentage)
-                ->ativo()
+                ->ativos()
                 ->first();
 
             if ($splitExistente) {
-                \Log::info('[AUTO SPLIT GERENTE] Split já existe para este usuário/gerente', [
+                Log::info('[AUTO SPLIT GERENTE] Split já existe para este usuário/gerente', [
                     'user_id' => $userId,
                     'gerente_id' => $gerenteId,
                     'split_id' => $splitExistente->id,
@@ -361,21 +361,21 @@ class UsuariosController extends Controller
                 'porcentagem_split' => $gerentePercentage,
                 'tipo_taxa' => \App\Models\SplitInterno::TAXA_DEPOSITO,
                 'ativo' => true,
-                'criado_por_admin_id' => auth()->id() ?? 1,
+                'criado_por_admin_id' => Auth::id() ?? 1,
                 'data_inicio' => now(),
                 'data_fim' => null,
             ]);
 
-            \Log::info('[AUTO SPLIT GERENTE] Split automático criado', [
+            Log::info('[AUTO SPLIT GERENTE] Split automático criado', [
                 'split_id' => $novoSplit->id,
                 'user_id' => $userId,
                 'gerente_id' => $gerenteId,
                 'gerente_percentage' => $gerentePercentage,
-                'criado_por' => auth()->id()
+                'criado_por' => Auth::id()
             ]);
 
         } catch (\Exception $e) {
-            \Log::error('[AUTO SPLIT GERENTE] Erro ao criar split automático', [
+            Log::error('[AUTO SPLIT GERENTE] Erro ao criar split automático', [
                 'user_id' => $userId,
                 'gerente_id' => $gerenteId,
                 'error' => $e->getMessage()
@@ -423,11 +423,11 @@ class UsuariosController extends Controller
                     'affiliate_link' => $user->affiliate_link
                 ]);
 
-                \Log::info('[ADMIN AFILIADOS] Affiliate configurado pelo admin', [
+                Log::info('[ADMIN AFILIADOS] Affiliate configurado pelo admin', [
                     'user_id' => $user->id,
                     'affiliate_percentage' => $affiliatePercentage,
                     'affiliate_code' => $user->affiliate_code,
-                    'admin_id' => auth()->id()
+                    'admin_id' => Auth::id()
                 ]);
             } else {
                 // Desativar affiliate
@@ -436,9 +436,9 @@ class UsuariosController extends Controller
                     'affiliate_percentage' => 0
                 ]);
 
-                \Log::info('[ADMIN AFILIADOS] Affiliate desativado pelo admin', [
+                Log::info('[ADMIN AFILIADOS] Affiliate desativado pelo admin', [
                     'user_id' => $user->id,
-                    'admin_id' => auth()->id()
+                    'admin_id' => Auth::id()
                 ]);
             }
             
@@ -448,7 +448,7 @@ class UsuariosController extends Controller
             ]);
             
         } catch (\Exception $e) {
-            \Log::error('[ADMIN AFILIADOS] Erro ao salvar configurações de afiliados', [
+            Log::error('[ADMIN AFILIADOS] Erro ao salvar configurações de afiliados', [
                 'user_id' => $id,
                 'error' => $e->getMessage()
             ]);
@@ -479,15 +479,15 @@ class UsuariosController extends Controller
                 'affiliate_link' => $user->affiliate_link
             ]);
 
-            \Log::info('[ADMIN AFFILIATE] Affiliate configurado pelo admin', [
+            Log::info('[ADMIN AFFILIATE] Affiliate configurado pelo admin', [
                 'user_id' => $user->id,
                 'affiliate_percentage' => $affiliatePercentage,
                 'affiliate_code' => $user->affiliate_code,
-                'admin_id' => auth()->id()
+                'admin_id' => Auth::id()
             ]);
 
         } catch (\Exception $e) {
-            \Log::error('[ADMIN AFFILIATE] Erro ao configurar affiliate', [
+            Log::error('[ADMIN AFFILIATE] Erro ao configurar affiliate', [
                 'user_id' => $user->id,
                 'error' => $e->getMessage()
             ]);
