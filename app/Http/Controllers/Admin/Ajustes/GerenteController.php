@@ -20,7 +20,7 @@ class GerenteController extends Controller
             abort(500, 'As configurações do aplicativo não foram encontradas. Execute as migrações e a configuração inicial.');
         }
 
-        $gerentes = User::where('permission', 5)->get();
+        $gerentes = User::where('permission', \App\Constants\UserPermission::MANAGER)->get();
         return view("admin.ajustes.gerentes", compact('setting', 'gerentes'));
     }
 
