@@ -3,7 +3,7 @@
 namespace App\Services;
 
 use Carbon\Carbon;
-use Illuminate\Support\Facades\{Cache, Log};
+use Illuminate\Support\Facades\{Cache, Log, Redis};
 
 /**
  * Service para centralizar cache keys
@@ -69,6 +69,32 @@ class CacheKeyService
     public static function totalWalletsBalance(): string
     {
         return 'total:wallets:balance';
+    }
+    
+    /**
+     * Cache key para lista de gerentes
+     */
+    public static function managersList(array $filters = []): string
+    {
+        $hash = md5(json_encode($filters));
+        return "admin:managers:list:{$hash}";
+    }
+    
+    /**
+     * Cache key para estatísticas de gerentes
+     */
+    public static function managersStats(): string
+    {
+        return 'admin:managers:stats';
+    }
+    
+    /**
+     * Cache key para clientes de um gerente
+     */
+    public static function managerClients(int $managerId, array $filters = []): string
+    {
+        $hash = md5(json_encode($filters));
+        return "admin:manager:{$managerId}:clients:{$hash}";
     }
     
     /**
@@ -169,6 +195,58 @@ class CacheKeyService
             Log::warning('Erro ao limpar cache de transações recentes do admin', [
                 'error' => $e->getMessage()
             ]);
+        }
+    }
+    
+    /**
+     * Limpar cache de gerentes
+     * 
+     * Limpa tanto o cache de estatísticas quanto todas as listas de gerentes
+     * Como o cache de listas usa hash baseado em filtros, precisamos invalidar
+     * usando um padrão ou limpar manualmente.
+     */
+    public static function forgetManagers(): void
+    {
+        try {
+            // Limpar cache de estatísticas
+            Cache::forget(self::managersStats());
+            
+            // Limpar cache de listas de gerentes usando Redis diretamente
+            if (config('cache.default') === 'redis') {
+                try {
+                    // Obter a conexão Redis usada pelo cache (mesmo padrão do CacheMetricsService)
+                    $cacheConnection = config('cache.stores.redis.connection', 'cache');
+                    $redis = Redis::connection($cacheConnection);
+                    
+                    // Aplicar prefixo do cache se existir
+                    $prefix = config('cache.prefix', '');
+                    $pattern = !empty($prefix) ? $prefix . 'admin:managers:list:*' : 'admin:managers:list:*';
+                    
+                    $keys = $redis->keys($pattern);
+                    if (!empty($keys) && is_array($keys)) {
+                        // Usar array_chunk para evitar problemas com muitas chaves
+                        $chunks = array_chunk($keys, 100);
+                        foreach ($chunks as $chunk) {
+                            $redis->del($chunk);
+                        }
+                        Log::info('Cache de listas de gerentes limpo via Redis', [
+                            'keys_removed' => count($keys)
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    Log::warning('Erro ao limpar cache de listas de gerentes via Redis', [
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            } else {
+                // Se não for Redis, tentar limpar usando flush se disponível
+                // ou deixar o TTL expirar (2 minutos)
+                Log::info('Cache de gerentes invalidado (não-Redis, TTL expirará em 2 minutos)');
+            }
+            
+            Log::info('Cache de gerentes invalidado');
+        } catch (\Exception $e) {
+            Log::warning('Erro ao limpar cache de gerentes', ['error' => $e->getMessage()]);
         }
     }
 }

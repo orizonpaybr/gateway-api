@@ -96,28 +96,33 @@ class AdminUserService
         DB::beginTransaction();
         
         try {
+            // Gerar username automaticamente se não fornecido
+            $username = $data['username'] ?? $this->generateUniqueUsername($data['email'] ?? $data['name']);
+            
             // Gerar dados padrão
             $userData = [
-                'username' => $data['username'],
-                'user_id' => $data['username'],
+                'username' => $username,
+                'user_id' => $username,
+                'cliente_id' => $username,
                 'name' => $data['name'],
                 'email' => $data['email'],
                 'password' => Hash::make($data['password']),
                 'telefone' => $data['telefone'] ?? null,
                 'cpf_cnpj' => $data['cpf_cnpj'] ?? null,
                 'saldo' => $data['saldo'] ?? 0,
-                'data_cadastro' => Carbon::now()->format('d/m/Y H:i'),
-                'status' => $data['status'] ?? UserStatus::PENDING,
+                'data_cadastro' => Carbon::now('America/Sao_Paulo')->format('Y-m-d H:i:s'),
+                'status' => $data['status'] ?? UserStatus::ACTIVE,
                 'permission' => $data['permission'] ?? UserPermission::CLIENT,
                 'code_ref' => $this->generateUniqueRefCode(),
                 'avatar' => "/uploads/avatars/avatar_default.jpg",
             ];
             
-            // Campos opcionais
+            // Campos opcionais (permission e status podem ser sobrescritos se fornecidos)
             $optionalFields = [
                 'cpf', 'data_nascimento', 'nome_fantasia', 'razao_social', 
                 'cep', 'rua', 'estado', 'cidade', 'bairro', 'numero_residencia', 'complemento',
-                'media_faturamento', 'indicador_ref', 'gerente_id'
+                'media_faturamento', 'indicador_ref', 'gerente_id', 'gerente_percentage',
+                'permission', 'status'
             ];
             
             foreach ($optionalFields as $field) {
@@ -135,6 +140,11 @@ class AdminUserService
             // Limpar cache relacionado
             CacheKeyService::forgetUsersStats();
             CacheKeyService::forgetDashboardStats();
+            
+            // Se for gerente, limpar cache de gerentes
+            if (isset($data['permission']) && $data['permission'] == UserPermission::MANAGER) {
+                CacheKeyService::forgetManagers();
+            }
             
             DB::commit();
             
@@ -175,11 +185,11 @@ class AdminUserService
             
             // Campos que podem ser atualizados
             $allowedFields = [
-                'name', 'email', 'telefone', 'cpf_cnpj', 'cpf', 'data_nascimento',
+                'name', 'email', 'telefone', 'cpf', 'data_nascimento',
                 'nome_fantasia', 'razao_social', 'status', 'permission', 'saldo',
                 'cep', 'rua', 'estado', 'cidade', 'bairro', 'numero_residencia', 'complemento',
                 'media_faturamento', 'taxa_cash_in', 'taxa_cash_out', 
-                'taxa_cash_in_fixa', 'taxa_cash_out_fixa', 'gerente_id',
+                'taxa_cash_in_fixa', 'taxa_cash_out_fixa', 'gerente_id', 'gerente_percentage',
                 'taxas_personalizadas_ativas', 'taxa_percentual_deposito', 'taxa_fixa_deposito',
                 'valor_minimo_deposito', 'taxa_percentual_pix', 'taxa_minima_pix', 'taxa_fixa_pix',
                 'valor_minimo_saque', 'limite_mensal_pf',
@@ -197,7 +207,7 @@ class AdminUserService
             
             $updateData = [];
             // Campos que devem ser convertidos de string vazia para null
-            $nullableFields = ['telefone', 'data_nascimento', 'cpf_cnpj', 'cpf', 'cep', 'rua', 'estado', 'cidade', 'bairro', 'numero_residencia', 'complemento', 'observacoes_taxas'];
+            $nullableFields = ['telefone', 'data_nascimento', 'cpf', 'cep', 'rua', 'estado', 'cidade', 'bairro', 'numero_residencia', 'complemento', 'observacoes_taxas'];
             
             foreach ($allowedFields as $field) {
                 if (array_key_exists($field, $data)) {
@@ -211,11 +221,7 @@ class AdminUserService
                     }
                 }
             }
-            
-            // Atualizar senha se fornecida
-            if (!empty($data['password'])) {
-                $updateData['password'] = Hash::make($data['password']);
-            }
+        
             
             $user->update($updateData);
             
@@ -223,6 +229,11 @@ class AdminUserService
             CacheKeyService::forgetUser($userId);
             CacheKeyService::forgetUsersStats();
             CacheKeyService::forgetDashboardStats();
+            
+            // Se for gerente, limpar cache de gerentes
+            if ($user->permission == UserPermission::MANAGER) {
+                CacheKeyService::forgetManagers();
+            }
             
             DB::commit();
             
@@ -276,6 +287,11 @@ class AdminUserService
             CacheKeyService::forgetUser($userId);
             CacheKeyService::forgetUsersStats();
             CacheKeyService::forgetDashboardStats();
+            
+            // Se era gerente, limpar cache de gerentes
+            if ($user->permission == UserPermission::MANAGER) {
+                CacheKeyService::forgetManagers();
+            }
             
             DB::commit();
             
@@ -537,6 +553,39 @@ class AdminUserService
         } while (User::where('code_ref', $code)->exists());
         
         return $code;
+    }
+
+    /**
+     * Gerar username único baseado em email ou nome
+     *
+     * @param string $base
+     * @return string
+     */
+    private function generateUniqueUsername(string $base): string
+    {
+        // Extrair parte antes do @ se for email
+        if (strpos($base, '@') !== false) {
+            $base = explode('@', $base)[0];
+        }
+        
+        // Limpar e normalizar
+        $base = Str::slug(Str::lower($base), '');
+        $base = preg_replace('/[^a-z0-9]/', '', $base);
+        
+        // Se base estiver vazia ou muito curta, usar prefixo
+        if (strlen($base) < 3) {
+            $base = 'user' . Str::random(4);
+        }
+        
+        // Garantir unicidade
+        $username = $base;
+        $counter = 1;
+        while (User::where('username', $username)->exists()) {
+            $username = $base . $counter;
+            $counter++;
+        }
+        
+        return $username;
     }
     
     /**
