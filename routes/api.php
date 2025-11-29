@@ -186,7 +186,8 @@ Route::middleware(['verify.jwt'])->group(function () {
     
     // Dashboard Administrativo (apenas para admins - permission == 3)
     // MELHORIA: Usar middleware para evitar código duplicado
-    Route::middleware(['ensure.admin'])->group(function () {
+    // IMPORTANTE: verify.jwt deve vir antes de ensure.admin para autenticar o usuário
+    Route::middleware(['verify.jwt', 'ensure.admin'])->group(function () {
         Route::get('admin/dashboard/stats', [App\Http\Controllers\Api\AdminDashboardController::class, 'getDashboardStats']);
         Route::get('admin/dashboard/users', [App\Http\Controllers\Api\AdminDashboardController::class, 'getUsers']);
         Route::get('admin/dashboard/users-stats', [App\Http\Controllers\Api\AdminDashboardController::class, 'getUserStats']);
