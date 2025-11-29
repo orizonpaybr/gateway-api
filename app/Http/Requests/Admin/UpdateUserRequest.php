@@ -20,8 +20,31 @@ class UpdateUserRequest extends FormRequest
      */
     public function authorize(): bool
     {
+        // Obter usuário da mesma forma que o middleware ensure.admin
+        $user = $this->user() ?? $this->input('user_auth');
+        
+        // Se não há usuário, retornar false (o middleware já deve ter bloqueado)
+        if (!$user) {
+            return false;
+        }
+        
         // Apenas admins podem atualizar usuários
-        return $this->user() && $this->user()->permission == UserPermission::ADMIN;
+        return $user->permission == UserPermission::ADMIN;
+    }
+
+    /**
+     * Handle a failed authorization attempt.
+     * 
+     * Retorna JSON ao invés de redirecionar para APIs
+     */
+    protected function failedAuthorization()
+    {
+        throw new \Illuminate\Http\Exceptions\HttpResponseException(
+            response()->json([
+                'success' => false,
+                'message' => 'Acesso negado. Apenas administradores podem realizar esta ação.'
+            ], 403)->header('Access-Control-Allow-Origin', '*')
+        );
     }
 
     /**
@@ -36,9 +59,7 @@ class UpdateUserRequest extends FormRequest
         return array_merge([
             'name' => 'sometimes|required|string|min:3|max:255',
             'email' => $this->emailRules($userId),
-            'password' => 'nullable|string|min:6|max:100',
             'telefone' => 'nullable|string|min:10|max:20',
-            'cpf_cnpj' => $this->cpfCnpjRules($userId),
             'cpf' => 'nullable|string|size:11',
             'data_nascimento' => 'nullable|date|before:today',
             'saldo' => 'nullable|numeric|min:0',
@@ -47,6 +68,7 @@ class UpdateUserRequest extends FormRequest
             
             // Relacionamentos
             'gerente_id' => 'nullable|integer|exists:users,id',
+            'gerente_percentage' => 'nullable|numeric|min:0|max:100',
         ], $this->addressRules(), $this->businessRules(), $this->customFeesRules(), $this->flexibleSystemRules());
     }
 
@@ -60,9 +82,7 @@ class UpdateUserRequest extends FormRequest
         return [
             'email.email' => 'Digite um email válido',
             'email.unique' => 'Este email já está cadastrado',
-            'password.min' => 'A senha deve ter no mínimo 6 caracteres',
             'name.required' => 'O nome é obrigatório',
-            'cpf_cnpj.unique' => 'Este CPF/CNPJ já está cadastrado',
             'status.in' => 'Status inválido',
             'permission.in' => 'Permissão inválida',
             'taxa_percentual_deposito.max' => 'A taxa percentual não pode ser maior que 100%',

@@ -17,11 +17,37 @@ class StoreUserRequest extends FormRequest
     
     /**
      * Determine if the user is authorized to make this request.
+     * 
+     * Nota: O middleware ensure.admin já verifica a permissão,
+     * mas mantemos esta verificação como camada adicional de segurança.
      */
     public function authorize(): bool
     {
+        // Obter usuário da mesma forma que o middleware ensure.admin
+        $user = $this->user() ?? $this->input('user_auth');
+        
+        // Se não há usuário, retornar false (o middleware já deve ter bloqueado)
+        if (!$user) {
+            return false;
+        }
+        
         // Apenas admins podem criar usuários
-        return $this->user() && $this->user()->permission == UserPermission::ADMIN;
+        return $user->permission == UserPermission::ADMIN;
+    }
+
+    /**
+     * Handle a failed authorization attempt.
+     * 
+     * Retorna JSON ao invés de redirecionar para APIs
+     */
+    protected function failedAuthorization()
+    {
+        throw new \Illuminate\Http\Exceptions\HttpResponseException(
+            response()->json([
+                'success' => false,
+                'message' => 'Acesso negado. Apenas administradores podem realizar esta ação.'
+            ], 403)->header('Access-Control-Allow-Origin', '*')
+        );
     }
 
     /**
@@ -33,7 +59,7 @@ class StoreUserRequest extends FormRequest
     {
         return array_merge([
             'username' => [
-                'required',
+                'nullable',
                 'string',
                 'min:3',
                 'max:50',
@@ -54,6 +80,7 @@ class StoreUserRequest extends FormRequest
             // Relacionamentos
             'indicador_ref' => 'nullable|string|exists:users,code_ref',
             'gerente_id' => 'nullable|integer|exists:users,id',
+            'gerente_percentage' => 'nullable|numeric|min:0|max:100',
         ], $this->addressRules(), $this->businessRules());
     }
 

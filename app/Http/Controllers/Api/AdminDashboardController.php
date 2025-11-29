@@ -101,6 +101,7 @@ class AdminDashboardController extends Controller
             // Verificação de admin feita pelo middleware 'ensure.admin'
             $status = $request->input('status');
             $search = $request->input('search');
+            $gerenteId = $request->input('gerente_id');
             $perPage = $request->input('per_page', 20);
             $orderBy = $request->input('order_by', 'created_at');
             $orderDirection = $request->input('order_direction', 'desc');
@@ -110,6 +111,10 @@ class AdminDashboardController extends Controller
             // Filtros
             if ($status !== null) {
                 $query->where('status', $status);
+            }
+
+            if ($gerenteId !== null) {
+                $query->where('gerente_id', $gerenteId);
             }
 
             if ($search) {
@@ -737,39 +742,80 @@ class AdminDashboardController extends Controller
     
     /**
      * Listar gerentes (permission = 2)
+     * 
+     * Implementa:
+     * - Cache Redis para performance
+     * - Validação de entrada
+     * - Query otimizada com índices
+     * - Paginação
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
      */
     public function listManagers(Request $request)
     {
         try {
-            // Verificação de admin feita pelo middleware 'ensure.admin'
-            // MELHORIA: Adicionar paginação e busca
-            $perPage = $request->input('per_page', 50);
-            $search = $request->input('search');
+            // Validar e sanitizar inputs
+            $perPage = max(1, min((int) $request->input('per_page', 50), 100));
+            $page = max(1, (int) $request->input('page', 1));
+            $search = trim($request->input('search', ''));
             
-            $query = User::where('permission', UserPermission::MANAGER)
-                ->where('status', UserStatus::ACTIVE);
-            
-            if ($search) {
-                $query->where(function($q) use ($search) {
-                    $q->where('name', 'like', "%{$search}%")
-                      ->orWhere('email', 'like', "%{$search}%");
-                });
-            }
-            
-            $managers = $query->orderBy('name')
-                ->paginate($perPage, ['id', 'name', 'username', 'email']);
-            
-            return $this->successResponse([
-                'managers' => $managers->items(),
-                'pagination' => [
-                    'current_page' => $managers->currentPage(),
-                    'per_page' => $managers->perPage(),
-                    'total' => $managers->total(),
-                    'last_page' => $managers->lastPage(),
-                ]
+            // Gerar cache key
+            $cacheKey = CacheKeyService::managersList([
+                'per_page' => $perPage,
+                'page' => $page,
+                'search' => $search,
             ]);
+            
+            // Usar cache com TTL de 2 minutos
+            $result = Cache::remember($cacheKey, 120, function () use ($perPage, $page, $search) {
+                // Query otimizada: usar índice em permission
+                $query = User::where('permission', UserPermission::MANAGER);
+                
+                // Aplicar filtro de busca
+                if (!empty($search)) {
+                    $query->where(function($q) use ($search) {
+                        $searchTerm = "%{$search}%";
+                        $q->where('name', 'like', $searchTerm)
+                          ->orWhere('email', 'like', $searchTerm)
+                          ->orWhere('username', 'like', $searchTerm)
+                          ->orWhere('cpf_cnpj', 'like', $searchTerm);
+                    });
+                }
+                
+                // Ordenar por nome (usar índice se disponível)
+                $managers = $query->orderBy('name', 'asc')
+                    ->paginate($perPage, [
+                        'id', 
+                        'name', 
+                        'username', 
+                        'email', 
+                        'cpf_cnpj', 
+                        'telefone', 
+                        'status', 
+                        'permission',
+                        'gerente_percentage',
+                        'created_at'
+                    ], 'page', $page);
+                
+                return [
+                    'managers' => $managers->items(),
+                    'pagination' => [
+                        'current_page' => $managers->currentPage(),
+                        'per_page' => $managers->perPage(),
+                        'total' => $managers->total(),
+                        'last_page' => $managers->lastPage(),
+                    ]
+                ];
+            });
+            
+            return $this->successResponse($result);
+            
         } catch (\Exception $e) {
-            Log::error('Erro ao listar gerentes', ['error' => $e->getMessage()]);
+            Log::error('Erro ao listar gerentes', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
             return $this->errorResponse('Erro ao listar gerentes', 500);
         }
     }
