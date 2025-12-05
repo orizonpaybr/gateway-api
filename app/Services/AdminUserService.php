@@ -105,6 +105,7 @@ class AdminUserService
                 'user_id' => $username,
                 'cliente_id' => $username,
                 'name' => $data['name'],
+                'gender' => $data['gender'] ?? null,
                 'email' => $data['email'],
                 'password' => Hash::make($data['password']),
                 'telefone' => $data['telefone'] ?? null,
@@ -119,7 +120,7 @@ class AdminUserService
             
             // Campos opcionais (permission e status podem ser sobrescritos se fornecidos)
             $optionalFields = [
-                'cpf', 'data_nascimento', 'nome_fantasia', 'razao_social', 
+                'gender', 'cpf', 'data_nascimento', 'nome_fantasia', 'razao_social', 
                 'cep', 'rua', 'estado', 'cidade', 'bairro', 'numero_residencia', 'complemento',
                 'media_faturamento', 'indicador_ref', 'gerente_id', 'gerente_percentage',
                 'permission', 'status'

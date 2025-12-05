@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\RegisterUserRequest;
 use App\Models\User;
 use App\Models\UsersKey;
 use App\Constants\UserStatus;
@@ -151,6 +152,7 @@ class AuthController extends Controller
                         'username' => $user->username,
                         'email' => $user->email ?? '',
                         'name' => $user->name ?? $user->username,
+                        'gender' => $user->gender ?? null,
                         'permission' => $user->permission ?? null,
                         'status' => $user->status ?? null,
                     ],
@@ -281,6 +283,7 @@ class AuthController extends Controller
                         'username' => $user->username,
                         'email' => $user->email ?? '',
                         'name' => $user->name ?? $user->username,
+                        'gender' => $user->gender ?? null,
                         'permission' => $user->permission ?? null,
                         'status' => $user->status ?? null,
                     ],
@@ -387,50 +390,10 @@ class AuthController extends Controller
     /**
      * Registro de novo usuário via API
      */
-    public function register(Request $request)
+    public function register(RegisterUserRequest $request)
     {
         try {
-            // Validar dados de entrada
-            $validator = Validator::make($request->all(), [
-                'username' => 'required|string|regex:/^[\pL\pN\s\'\-]+$/u|unique:users,username',
-                'name' => 'required|string|max:255|regex:/^[\pL\s\'\-]+$/u',
-                'email' => 'required|string|lowercase|email|max:255|unique:users,email',
-                'telefone' => 'required|string|unique:users,telefone',
-                'cpf_cnpj' => 'required|string|unique:users,cpf_cnpj',
-                'password' => [
-                    'required',
-                    'min:8',
-                    'regex:/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&+#^~`|\\/:";\'<>,.=\-_\[\]{}()])[A-Za-z\d@$!%*?&+#^~`|\\/:";\'<>,.=\-_\[\]{}()]+$/',
-                ],
-                'documentoFrente' => 'nullable|file|mimes:jpeg,jpg,png,pdf|max:5120',
-                'documentoVerso' => 'nullable|file|mimes:jpeg,jpg,png,pdf|max:5120',
-                'selfieDocumento' => 'nullable|file|mimes:jpeg,jpg,png,pdf|max:5120',
-            ], [
-                'username.regex' => 'O campo nome de usuário aceita apenas letras, números, espaços, apóstrofos e hífens.',
-                'name.regex' => 'O nome deve conter apenas letras, espaços, apóstrofos e hífens.',
-                'password.regex' => 'A senha deve conter pelo menos uma letra minúscula, uma letra maiúscula, um número e um caractere especial.',
-                'username.unique' => 'Este nome de usuário já está em uso.',
-                'email.unique' => 'Este email já está em uso.',
-                'telefone.unique' => 'Este telefone já está em uso.',
-                'cpf_cnpj.unique' => 'Este CPF/CNPJ já está em uso.',
-                'cpf_cnpj.required' => 'O CPF/CNPJ é obrigatório.',
-                'documentoFrente.mimes' => 'O documento deve ser uma imagem (JPEG, JPG, PNG) ou PDF.',
-                'documentoFrente.max' => 'O documento não pode exceder 5MB.',
-                'documentoVerso.mimes' => 'O documento deve ser uma imagem (JPEG, JPG, PNG) ou PDF.',
-                'documentoVerso.max' => 'O documento não pode exceder 5MB.',
-                'selfieDocumento.mimes' => 'A selfie deve ser uma imagem (JPEG, JPG, PNG) ou PDF.',
-                'selfieDocumento.max' => 'A selfie não pode exceder 5MB.',
-            ]);
 
-            if ($validator->fails()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Dados inválidos',
-                    'errors' => $validator->errors()
-                ], 400)->header('Access-Control-Allow-Origin', '*')
-                  ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
-                  ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-            }
 
             $senhaHash = Hash::make($request->password);
 
@@ -498,6 +461,7 @@ class AuthController extends Controller
                 'username' => $request->username,
                 'user_id' => $request->username,
                 'name' => $request->name,
+                'gender' => $request->gender,
                 'email' => $request->email,
                 'password' => $senhaHash,
                 'telefone' => $request->telefone,
@@ -623,6 +587,7 @@ class AuthController extends Controller
                         'username' => $user->username,
                         'email' => $user->email,
                         'name' => $user->name,
+                        'gender' => $user->gender,
                         'status' => $user->status,
                         'status_text' => 'Pendente de Aprovação'
                     ],

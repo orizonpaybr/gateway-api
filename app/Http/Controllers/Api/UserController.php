@@ -14,6 +14,22 @@ use Illuminate\Support\Facades\Cache;
 
 class UserController extends Controller
 {
+    private const CACHE_PREFIX_PROFILE = 'user_profile_';
+    private const CACHE_PREFIX_BALANCE = 'user_balance_';
+    private const CACHE_TTL = 300;
+
+    /**
+     * Limpar cache do usuário de forma centralizada
+     * 
+     * @param string $username
+     * @return void
+     */
+    private function clearUserCache(string $username): void
+    {
+        Cache::forget(self::CACHE_PREFIX_PROFILE . $username);
+        Cache::forget(self::CACHE_PREFIX_BALANCE . $username);
+    }
+
     /**
      * Obter saldo do usuário
      */
@@ -1850,9 +1866,8 @@ class UserController extends Controller
             // Invalidar todas as sessões do usuário no Redis (força logout em todos os dispositivos)
             $this->invalidateAllUserSessions($user->id);
 
-            // Invalidar cache do usuário
-            Cache::forget("user_balance_{$user->username}");
-            Cache::forget("user_profile_{$user->username}");
+            // Invalidar cache do usuário de forma centralizada
+            $this->clearUserCache($user->username);
 
             // 🎯 Limpar rate limit após sucesso (reset para próxima hora)
             Cache::forget($rateLimitKey);
@@ -1946,8 +1961,8 @@ class UserController extends Controller
             }
 
             // Cache Redis para dados do perfil (TTL: 5 minutos)
-            $cacheKey = "user_profile_{$user->username}";
-            $profileData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 300, function() use ($user) {
+            $cacheKey = self::CACHE_PREFIX_PROFILE . $user->username;
+            $profileData = \Illuminate\Support\Facades\Cache::remember($cacheKey, self::CACHE_TTL, function() use ($user) {
                 // Calcular informações derivadas (tipo PF/PJ e status legível)
                 $doc = preg_replace('/\D/', '', (string) ($user->cpf_cnpj ?? ''));
                 $tipoPessoa = ($doc && strlen($doc) > 11) ? 'PJ' : 'PF';
@@ -1959,6 +1974,7 @@ class UserController extends Controller
                     'username' => $user->username,
                     'email' => $user->email ?? '',
                     'name' => $user->name ?? $user->username,
+                    'gender' => $user->gender ?? null,
                     // Campo de permissão necessário para exibir recursos de administrador no frontend
                     'permission' => $user->permission ?? null,
                     'phone' => $user->telefone ?? '',

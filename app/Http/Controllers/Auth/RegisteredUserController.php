@@ -37,6 +37,7 @@ class RegisteredUserController extends Controller
             'name' => ['required', 'string', 'max:255', 'regex:/^[\pL\s\'\-]+$/u'],
             'email' => ['required', 'string', 'lowercase', 'email', 'max:255', 'unique:users,email'],
             'telefone' => ['required', 'string', 'unique:users,telefone'],
+            'gender' => ['required', 'string', 'in:male,female'],
             'password' => [
                 'required',
                 'min:8',
@@ -88,6 +89,7 @@ class RegisteredUserController extends Controller
             'username' => $request->username,
             'user_id' => $request->username,
             'name' => $request->name,
+            'gender' => $request->gender,
             'email' => $request->email,
             'password' => $senhaHash,
             'telefone' => $request->telefone,
