@@ -154,6 +154,9 @@ class TaxasController extends Controller
             
             $user->save();
             
+            // Invalidar cache do perfil do usuário para refletir novas taxas
+            \Illuminate\Support\Facades\Cache::forget('user_profile_' . $user->username);
+            
             DB::commit();
             
             Log::info('Taxas personalizadas salvas com sucesso', [
@@ -200,6 +203,9 @@ class TaxasController extends Controller
             
             $user->taxas_personalizadas_ativas = false;
             $user->save();
+            
+            // Invalidar cache do perfil do usuário para refletir mudança para taxas globais
+            \Illuminate\Support\Facades\Cache::forget('user_profile_' . $user->username);
             
             Log::info('Taxas personalizadas desativadas', [
                 'user_id' => $userId,
