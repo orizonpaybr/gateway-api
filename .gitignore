@@ -47,3 +47,12 @@ Thumbs.db
 # Uploaded files
 /public/uploads/
 /storage/app/public/uploads/
+
+# Temporary test setup files
+/artisan-test-setup.php
+/comment_modify_migrations.php
+/fix_all_migrations.php
+
+# Temporary documentation files
+/ANALISE_QUALIDADE_SOFTWARE.md
+/COMO_RODAR_TESTES.md
