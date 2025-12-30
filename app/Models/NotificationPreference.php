@@ -14,7 +14,6 @@ class NotificationPreference extends Model
 
     protected $fillable = [
         'user_id',
-        'push_enabled',
         'notify_transactions',
         'notify_deposits',
         'notify_withdrawals',
@@ -23,7 +22,6 @@ class NotificationPreference extends Model
     ];
 
     protected $casts = [
-        'push_enabled' => 'boolean',
         'notify_transactions' => 'boolean',
         'notify_deposits' => 'boolean',
         'notify_withdrawals' => 'boolean',
@@ -53,7 +51,6 @@ class NotificationPreference extends Model
         $preferences = self::firstOrCreate(
             ['user_id' => $userId],
             [
-                'push_enabled' => true,
                 'notify_transactions' => true,
                 'notify_deposits' => true,
                 'notify_withdrawals' => true,
@@ -61,10 +58,6 @@ class NotificationPreference extends Model
                 'notify_system' => true,
             ]
         );
-        
-        if (!$preferences->push_enabled) {
-            return false;
-        }
 
         return match($type) {
             'transaction', 'transactions' => $preferences->notify_transactions,

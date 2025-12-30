@@ -14,7 +14,6 @@ class NotificationPreferenceService
      * Valores padrão para novas preferências
      */
     private const DEFAULT_PREFERENCES = [
-        'push_enabled' => true,
         'notify_transactions' => true,
         'notify_deposits' => true,
         'notify_withdrawals' => true,
@@ -93,11 +92,6 @@ class NotificationPreferenceService
     {
         $preferences = $this->getUserPreferences($userId);
 
-        // Se push está desabilitado, não notificar
-        if (!($preferences['push_enabled'] ?? true)) {
-            return false;
-        }
-
         // Verificar preferência por tipo
         return match($type) {
             'transaction', 'transactions' => $preferences['notify_transactions'] ?? true,
@@ -139,7 +133,11 @@ class NotificationPreferenceService
     public function disableAllNotifications(string $userId): NotificationPreference
     {
         return $this->updatePreferences($userId, [
-            'push_enabled' => false,
+            'notify_transactions' => false,
+            'notify_deposits' => false,
+            'notify_withdrawals' => false,
+            'notify_security' => false,
+            'notify_system' => false,
         ]);
     }
 
@@ -164,10 +162,11 @@ class NotificationPreferenceService
         try {
             return [
                 'total_users' => NotificationPreference::count(),
-                'push_enabled' => NotificationPreference::where('push_enabled', true)->count(),
-                'push_disabled' => NotificationPreference::where('push_enabled', false)->count(),
+                'notify_transactions' => NotificationPreference::where('notify_transactions', true)->count(),
                 'notify_deposits' => NotificationPreference::where('notify_deposits', true)->count(),
                 'notify_withdrawals' => NotificationPreference::where('notify_withdrawals', true)->count(),
+                'notify_security' => NotificationPreference::where('notify_security', true)->count(),
+                'notify_system' => NotificationPreference::where('notify_system', true)->count(),
             ];
         } catch (\Exception $e) {
             Log::error('Erro ao obter estatísticas de preferências', [

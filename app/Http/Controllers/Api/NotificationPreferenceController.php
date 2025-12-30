@@ -92,7 +92,6 @@ class NotificationPreferenceController extends Controller
             }
 
             $validator = Validator::make($request->all(), [
-                'push_enabled' => 'nullable|boolean',
                 'notify_transactions' => 'nullable|boolean',
                 'notify_deposits' => 'nullable|boolean',
                 'notify_withdrawals' => 'nullable|boolean',
@@ -146,7 +145,6 @@ class NotificationPreferenceController extends Controller
             }
 
             $validTypes = [
-                'push_enabled',
                 'notify_transactions',
                 'notify_deposits',
                 'notify_withdrawals',
@@ -268,16 +266,21 @@ class NotificationPreferenceController extends Controller
 
     /**
      * Validar autenticação do usuário
+     * Tenta JWT primeiro, depois token/secret no body (compatibilidade)
      * 
      * @param Request $request
      * @return \App\Models\User|null
      */
     private function validateUser(Request $request): ?\App\Models\User
     {
-        $user = $this->getUserFromRequest($request);
+        // Tentar JWT primeiro (padrão para rotas protegidas)
+        $user = $request->user() ?? $request->user_auth;
+        
+        // Fallback: token/secret no body (compatibilidade)
         if (!$user) {
-            return null;
+            $user = $this->getUserFromRequest($request);
         }
+        
         return $user;
     }
 }

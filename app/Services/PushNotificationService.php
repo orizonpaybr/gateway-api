@@ -54,79 +54,39 @@ class PushNotificationService
     }
 
     /**
-     * Enviar notificação push para um usuário
+     * Criar notificação local no gateway (sem push para dispositivos)
      */
     public function sendToUser($userId, $title, $body, $data = [], $type = 'transaction')
     {
         try {
-            Log::info('[PUSH] sendToUser chamado', [
+            Log::info('[NOTIFICATION] Criando notificação local', [
                 'user_id' => $userId,
                 'title' => $title,
                 'body' => $body,
                 'type' => $type
             ]);
-            
-            // Buscar tokens ativos do usuário
-            $tokens = PushToken::getActiveTokensForUser($userId);
-            
-            Log::info('[PUSH] Tokens encontrados', [
-                'user_id' => $userId,
-                'tokens_count' => $tokens->count(),
-                'tokens' => $tokens->pluck('token')->map(function($token) {
-                    return substr($token, 0, 30) . '...';
-                })->toArray()
-            ]);
-            
-            if ($tokens->isEmpty()) {
-                Log::warning('[PUSH] Usuário não possui tokens de push ativos', ['user_id' => $userId]);
-                return false;
-            }
 
-            // Criar registro de notificação
+            // Criar registro de notificação no banco de dados
             $notification = Notification::create([
                 'user_id' => $userId,
                 'type' => $type,
                 'title' => $title,
                 'body' => $body,
                 'data' => $data,
-                'push_sent' => false,
-                'local_sent' => false
+                'push_sent' => false, // Não enviamos push para dispositivos
+                'local_sent' => true, // Notificação criada localmente no gateway
+                'sent_at' => now()
             ]);
 
-            // Preparar dados da notificação
-            $notificationData = [
-                'type' => $type,
-                'notification_id' => $notification->id,
-                'timestamp' => now()->toISOString(),
-                ...$data
-            ];
-
-            // Enviar para cada token
-            $successCount = 0;
-            foreach ($tokens as $token) {
-                if ($this->sendToToken($token->token, $title, $body, $notificationData)) {
-                    $successCount++;
-                    $token->markAsUsed();
-                }
-            }
-
-            // Atualizar status da notificação
-            $notification->update([
-                'push_sent' => $successCount > 0,
-                'sent_at' => $successCount > 0 ? now() : null
-            ]);
-
-            Log::info('Notificação push enviada', [
+            Log::info('Notificação local criada com sucesso', [
                 'user_id' => $userId,
-                'tokens_count' => $tokens->count(),
-                'success_count' => $successCount,
                 'notification_id' => $notification->id
             ]);
 
-            return $successCount > 0;
+            return true;
 
         } catch (\Exception $e) {
-            Log::error('Erro ao enviar notificação push', [
+            Log::error('Erro ao criar notificação local', [
                 'user_id' => $userId,
                 'error' => $e->getMessage()
             ]);
