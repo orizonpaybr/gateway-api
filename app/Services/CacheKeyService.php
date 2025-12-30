@@ -98,6 +98,23 @@ class CacheKeyService
     }
     
     /**
+     * Cache key para lista de adquirentes
+     */
+    public static function acquirersList(array $filters = []): string
+    {
+        $hash = md5(json_encode($filters));
+        return "admin:acquirers:list:{$hash}";
+    }
+    
+    /**
+     * Cache key para estatísticas de adquirentes
+     */
+    public static function acquirersStats(): string
+    {
+        return 'admin:acquirers:stats';
+    }
+    
+    /**
      * Limpar cache de usuário específico
      * Usa Cache facade (padronizado - usa Redis se configurado)
      */
