@@ -46,23 +46,20 @@ class PixInfracoesController extends Controller
             );
 
             $payload = Cache::remember($cacheKey, 120, function () use ($user, $page, $limit, $busca, $dataInicio, $dataFim) {
-                $query = DB::table('solicitacoes')
-                    ->where('user_id', $user->username)
-                    ->whereIn('status', ['MEDIATION', 'CHARGEBACK', 'DISPUTE']);
+                $query = DB::table('pix_infracoes')
+                    ->where('user_id', $user->username);
 
+                // Aplicar filtro de data (usar data_criacao ou created_at como fallback)
                 if ($dataInicio) {
-                    $query->whereDate('created_at', '>=', $dataInicio);
+                    $query->whereRaw('DATE(COALESCE(data_criacao, created_at)) >= ?', [$dataInicio]);
                 }
                 if ($dataFim) {
-                    $query->whereDate('created_at', '<=', $dataFim);
+                    $query->whereRaw('DATE(COALESCE(data_criacao, created_at)) <= ?', [$dataFim]);
                 }
+                
+                // Busca apenas por end_to_end
                 if ($busca !== '') {
-                    $query->where(function ($q) use ($busca) {
-                        $q->where('transaction_id', 'like', "%{$busca}%")
-                          ->orWhere('descricao', 'like', "%{$busca}%")
-                          ->orWhere('descricao_normalizada', 'like', "%{$busca}%")
-                          ->orWhere('codigo_autenticacao', 'like', "%{$busca}%");
-                    });
+                    $query->where('end_to_end', 'like', "%{$busca}%");
                 }
 
                 // Contar total
@@ -73,21 +70,40 @@ class PixInfracoesController extends Controller
                 // keyset pagination (cursor) opcional
                 $cursor = request()->get('cursor');
                 if ($cursor) {
-                    $query->where('created_at', '<', Carbon::parse($cursor));
+                    $query->whereRaw('COALESCE(data_criacao, created_at) < ?', [Carbon::parse($cursor)]);
                     $offset = 0; // com cursor, não usamos offset
                 }
 
-                $rows = $query->orderByDesc('created_at')->limit($limit)->get();
+                // Ordenar por data_criacao ou created_at (decrescente)
+                $query->orderByDesc(DB::raw('COALESCE(data_criacao, created_at)'));
+                
+                if ($offset > 0) {
+                    $query->offset($offset);
+                }
+                
+                $rows = $query->limit($limit)->get();
 
                 $data = $rows->map(function ($r) {
-                    $created = Carbon::parse($r->created_at);
+                    // Usar data_criacao se existir, senão usar created_at
+                    $dataCriacao = $r->data_criacao 
+                        ? Carbon::parse($r->data_criacao) 
+                        : Carbon::parse($r->created_at);
+                    
+                    // Usar data_limite se existir, senão calcular (7 dias após criação)
+                    $dataLimite = $r->data_limite 
+                        ? Carbon::parse($r->data_limite) 
+                        : $dataCriacao->copy()->addDays(7);
+                    
+                    // Mapear status para legível
+                    $statusLegivel = $this->getStatusLegivel($r->status);
+                    
                     return [
                         'id' => (int) ($r->id ?? 0),
-                        'status' => (string) ($r->status_legivel ?? $r->status ?? 'PENDING'),
-                        'data_criacao' => $created->toDateString(),
-                        'data_limite' => $created->copy()->addDays(7)->toDateString(),
-                        'valor' => (float) ($r->amount ?? 0),
-                        'end_to_end' => (string) ($r->codigo_autenticacao ?? $r->transaction_id ?? ''),
+                        'status' => $statusLegivel,
+                        'data_criacao' => $dataCriacao->toDateString(),
+                        'data_limite' => $dataLimite->toDateString(),
+                        'valor' => (float) ($r->valor ?? 0),
+                        'end_to_end' => (string) ($r->end_to_end ?? $r->transaction_id ?? ''),
                         'tipo' => (string) ($r->tipo ?? 'pix'),
                         'descricao' => (string) ($r->descricao ?? ''),
                     ];
@@ -101,7 +117,9 @@ class PixInfracoesController extends Controller
                     'total' => $total,
                     'from' => $total > 0 ? $offset + 1 : 0,
                     'to' => min($offset + $limit, $total),
-                    'next_cursor' => count($rows) === $limit ? (string) (end($rows)->created_at) : null,
+                    'next_cursor' => count($rows) === $limit && !empty($rows) 
+                        ? (string) (end($rows)->data_criacao ?? end($rows)->created_at) 
+                        : null,
                 ];
             });
 
@@ -138,34 +156,58 @@ class PixInfracoesController extends Controller
             $cacheKey = "pix_infracao_detail:{$user->username}:{$id}";
             
             $data = Cache::remember($cacheKey, 300, function () use ($user, $id) {
-                $row = DB::table('solicitacoes')
-                ->where('user_id', $user->username)
-                ->where('id', $id)
-                ->whereIn('status', ['MEDIATION', 'CHARGEBACK', 'DISPUTE'])
-                ->first();
+                $row = DB::table('pix_infracoes')
+                    ->where('user_id', $user->username)
+                    ->where('id', $id)
+                    ->first();
 
                 if (!$row) {
                     return null; // Retorna null se não encontrar
                 }
 
-                $created = Carbon::parse($row->created_at);
+                // Usar data_criacao se existir, senão usar created_at
+                $dataCriacao = $row->data_criacao 
+                    ? Carbon::parse($row->data_criacao) 
+                    : Carbon::parse($row->created_at);
+                
+                // Usar data_limite se existir, senão calcular (7 dias após criação)
+                $dataLimite = $row->data_limite 
+                    ? Carbon::parse($row->data_limite) 
+                    : $dataCriacao->copy()->addDays(7);
+                
+                // Mapear status para legível
+                $statusLegivel = $this->getStatusLegivel($row->status);
+                
+                // Buscar transação relacionada se houver transaction_id
+                $transacaoRelacionada = null;
+                if ($row->transaction_id) {
+                    $transacao = DB::table('solicitacoes')
+                        ->where('idTransaction', $row->transaction_id)
+                        ->orWhere('externalreference', $row->transaction_id)
+                        ->first();
+                    
+                    if ($transacao) {
+                        $transacaoRelacionada = [
+                            'id' => (int) ($transacao->id ?? 0),
+                            'transaction_id' => (string) ($transacao->idTransaction ?? $transacao->externalreference ?? ''),
+                            'valor' => (float) ($transacao->amount ?? 0),
+                            'data' => Carbon::parse($transacao->date ?? $transacao->created_at)->toIso8601String(),
+                        ];
+                    }
+                }
+                
                 return [
                     'id' => (int) ($row->id ?? 0),
-                    'status' => (string) ($row->status_legivel ?? $row->status ?? 'PENDING'),
-                    'data_criacao' => $created->toIso8601String(),
-                    'data_limite' => $created->copy()->addDays(7)->toIso8601String(),
-                    'valor' => (float) ($row->amount ?? 0),
-                    'end_to_end' => (string) ($row->codigo_autenticacao ?? $row->transaction_id ?? ''),
+                    'status' => $statusLegivel,
+                    'data_criacao' => $dataCriacao->toIso8601String(),
+                    'data_limite' => $dataLimite->toIso8601String(),
+                    'valor' => (float) ($row->valor ?? 0),
+                    'end_to_end' => (string) ($row->end_to_end ?? $row->transaction_id ?? ''),
                     'tipo' => (string) ($row->tipo ?? 'pix'),
                     'descricao' => (string) ($row->descricao ?? ''),
                     'detalhes' => (string) ($row->detalhes ?? ''),
-                    'transacao_relacionada' => $row->transaction_id ? [
-                        'id' => (int) ($row->id ?? 0),
-                        'transaction_id' => (string) $row->transaction_id,
-                        'valor' => (float) ($row->amount ?? 0),
-                        'data' => $created->toIso8601String(),
-                    ] : null,
-                    'created_at' => $created->toIso8601String(),
+                    'transacao_relacionada' => $transacaoRelacionada,
+                    'created_at' => Carbon::parse($row->created_at)->toIso8601String(),
                     'updated_at' => Carbon::parse($row->updated_at)->toIso8601String(),
                 ];
             });
@@ -191,6 +233,24 @@ class PixInfracoesController extends Controller
                 'message' => 'Erro interno do servidor'
             ], 500)->header('Access-Control-Allow-Origin', '*');
         }
+    }
+
+    /**
+     * Mapear status para legível
+     */
+    private function getStatusLegivel(string $status): string
+    {
+        $statusMap = [
+            'PENDENTE' => 'Pendente',
+            'EM_ANALISE' => 'Em Análise',
+            'RESOLVIDA' => 'Resolvida',
+            'CANCELADA' => 'Cancelada',
+            'CHARGEBACK' => 'Chargeback',
+            'MEDIATION' => 'Mediação',
+            'DISPUTE' => 'Disputa',
+        ];
+
+        return $statusMap[strtoupper($status)] ?? ucfirst(strtolower($status));
     }
 }
 
