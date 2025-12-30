@@ -201,19 +201,9 @@ class UserController extends Controller
                 $saquesQuery->where('status', $status);
             }
 
-            // Aplicar filtro de busca se fornecido (busca por ID ou nome)
-            if ($busca) {
-                $depositosQuery->where(function($query) use ($busca) {
-                    $query->where('idTransaction', 'like', "%{$busca}%")
-                          ->orWhere('externalreference', 'like', "%{$busca}%")
-                          ->orWhere('client_name', 'like', "%{$busca}%");
-                });
-                
-                $saquesQuery->where(function($query) use ($busca) {
-                    $query->where('idTransaction', 'like', "%{$busca}%")
-                          ->orWhere('externalreference', 'like', "%{$busca}%")
-                          ->orWhere('beneficiaryname', 'like', "%{$busca}%");
-                });
+            // Aplicar filtro de busca se fornecido
+            if ($busca && trim($busca) !== '') {
+                $this->applyPendingTransactionsSearchFilter($depositosQuery, $saquesQuery, trim($busca));
             }
 
             // Unir as queries baseado no filtro de tipo
@@ -245,6 +235,7 @@ class UserController extends Controller
                 return [
                     'id' => (int) $transaction->id,
                     'transaction_id' => $transaction->idTransaction ?? $transaction->externalreference ?? 'N/A',
+                    'externalreference' => $transaction->externalreference ?? null,
                     'tipo' => $transaction->tipo ?? 'deposito',
                     'amount' => (float) ($transaction->amount ?? 0),
                     'valor_liquido' => (float) ($transaction->valor_liquido ?? 0),
@@ -808,11 +799,28 @@ class UserController extends Controller
             $limit = min((int) $request->get('limit', 20), 100); // Máximo 100 por página
             
             // Parâmetros de filtro
-            $periodo = $request->get('periodo', 'hoje');
+            $periodo = $request->get('periodo'); // null se não enviado (significa "Todos")
             $dataInicio = $request->get('data_inicio');
             $dataFim = $request->get('data_fim');
             $busca = trim($request->get('busca', ''));
             $tipo = $request->get('tipo'); // 'entrada', 'saida', ou null (todos)
+
+            // Determinar se deve aplicar filtro de data
+            $hasDateFilter = !empty($periodo) || !empty($dataInicio) || !empty($dataFim);
+            
+            // Se não há período nem datas específicas, buscar todas as transações (sem filtro de data)
+            if (!$hasDateFilter) {
+                $periodo = null;
+                $dataInicio = null;
+                $dataFim = null;
+            } else {
+                // Se há período mas não há datas específicas, calcular datas do período
+                if (!empty($periodo) && empty($dataInicio) && empty($dataFim)) {
+                    $dates = $this->calculateInteractiveDateRange($periodo);
+                    $dataInicio = $dates['inicio']->format('Y-m-d H:i:s');
+                    $dataFim = $dates['fim']->format('Y-m-d H:i:s');
+                }
+            }
 
             // Cache Redis para extrato (TTL: 3 minutos)
             $cacheKey = sprintf(
@@ -820,54 +828,110 @@ class UserController extends Controller
                 $user->username,
                 $page,
                 $limit,
-                $periodo,
+                $periodo ?: 'all',
                 $dataInicio ?: 'null',
                 $dataFim ?: 'null',
                 md5($busca ?: ''),
                 $tipo ?: 'all'
             );
 
-            $extratoData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 180, function() use ($user, $page, $limit, $periodo, $dataInicio, $dataFim, $busca, $tipo) {
-                
-                // Calcular datas baseado no período
-                $dates = $this->calculateInteractiveDateRange($periodo);
+            $extratoData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 180, function() use ($user, $page, $limit, $periodo, $dataInicio, $dataFim, $busca, $tipo, $hasDateFilter) {
                 
                 // Buscar dados de entradas (depósitos) - apenas COMPLETED e PAID_OUT
                 $entradasQuery = \App\Models\Solicitacoes::where('user_id', $user->username)
-                    ->whereBetween('date', [$dates['inicio'], $dates['fim']])
                     ->whereIn('status', ['PAID_OUT', 'COMPLETED']);
+                
+                // Aplicar filtro de data apenas se houver período ou datas específicas
+                if ($hasDateFilter && $dataInicio && $dataFim) {
+                    $entradasQuery->whereBetween('date', [$dataInicio, $dataFim]);
+                }
 
                 // Aplicar filtro de busca se fornecido
                 if ($busca) {
                     $entradasQuery->where(function($query) use ($busca) {
                         $query->where('transaction_id', 'like', "%{$busca}%")
                               ->orWhere('nome_cliente', 'like', "%{$busca}%")
-                              ->orWhere('documento', 'like', "%{$busca}%");
+                              ->orWhere('documento', 'like', "%{$busca}%")
+                              ->orWhere('descricao_transacao', 'like', "%{$busca}%")
+                              ->orWhere('descricao', 'like', "%{$busca}%");
+                        
+                        // Buscar por valor - tentar diferentes interpretações do número
+                        $valorBusca = preg_replace('/[^0-9,.]/', '', $busca);
+                        $valorBusca = str_replace(',', '.', $valorBusca);
+                        
+                        if (is_numeric($valorBusca) && $valorBusca > 0) {
+                            $valorNumerico = (float) $valorBusca;
+                            
+                            // Se o número não tem ponto decimal e é grande, tentar diferentes posições
+                            if (strpos($busca, '.') === false && strpos($busca, ',') === false && $valorNumerico >= 100) {
+                                // Tentar com 2 casas decimais (mais comum para valores monetários)
+                                $valorComDecimais = $valorNumerico / 100;
+                                $query->orWhere(function($q) use ($valorComDecimais, $valorNumerico) {
+                                    // Buscar valor exato ou com 2 casas decimais
+                                    $q->whereBetween('amount', [$valorComDecimais * 0.999, $valorComDecimais * 1.001])
+                                      ->orWhereBetween('deposito_liquido', [$valorComDecimais * 0.999, $valorComDecimais * 1.001])
+                                      // Também tentar valor sem decimais (para valores inteiros)
+                                      ->orWhereBetween('amount', [$valorNumerico * 0.999, $valorNumerico * 1.001])
+                                      ->orWhereBetween('deposito_liquido', [$valorNumerico * 0.999, $valorNumerico * 1.001]);
+                                });
+                            } else {
+                                // Valor com ponto decimal ou valor pequeno - busca normal
+                                $query->orWhere(function($q) use ($valorNumerico) {
+                                    $q->whereBetween('amount', [$valorNumerico * 0.999, $valorNumerico * 1.001])
+                                      ->orWhereBetween('deposito_liquido', [$valorNumerico * 0.999, $valorNumerico * 1.001]);
+                                });
+                            }
+                        }
                     });
                 }
 
                 // Buscar dados de saídas (saques) - apenas COMPLETED e PAID_OUT
                 $saidasQuery = \App\Models\SolicitacoesCashOut::where('user_id', $user->username)
-                    ->whereBetween('date', [$dates['inicio'], $dates['fim']])
                     ->whereIn('status', ['PAID_OUT', 'COMPLETED']);
+                
+                // Aplicar filtro de data apenas se houver período ou datas específicas
+                if ($hasDateFilter && $dataInicio && $dataFim) {
+                    $saidasQuery->whereBetween('date', [$dataInicio, $dataFim]);
+                }
 
                 // Aplicar filtro de busca se fornecido
                 if ($busca) {
                     $saidasQuery->where(function($query) use ($busca) {
                         $query->where('transaction_id', 'like', "%{$busca}%")
                               ->orWhere('nome_cliente', 'like', "%{$busca}%")
-                              ->orWhere('documento', 'like', "%{$busca}%");
+                              ->orWhere('documento', 'like', "%{$busca}%")
+                              ->orWhere('descricao_transacao', 'like', "%{$busca}%")
+                              ->orWhere('descricao', 'like', "%{$busca}%");
+                        
+                        // Buscar por valor - tentar diferentes interpretações do número
+                        $valorBusca = preg_replace('/[^0-9,.]/', '', $busca);
+                        $valorBusca = str_replace(',', '.', $valorBusca);
+                        
+                        if (is_numeric($valorBusca) && $valorBusca > 0) {
+                            $valorNumerico = (float) $valorBusca;
+                            
+                            // Se o número não tem ponto decimal e é grande, tentar diferentes posições
+                            if (strpos($busca, '.') === false && strpos($busca, ',') === false && $valorNumerico >= 100) {
+                                // Tentar com 2 casas decimais (mais comum para valores monetários)
+                                $valorComDecimais = $valorNumerico / 100;
+                                $query->orWhere(function($q) use ($valorComDecimais, $valorNumerico) {
+                                    // Buscar valor exato ou com 2 casas decimais
+                                    $q->whereBetween('amount', [$valorComDecimais * 0.999, $valorComDecimais * 1.001])
+                                      ->orWhereBetween('cash_out_liquido', [$valorComDecimais * 0.999, $valorComDecimais * 1.001])
+                                      // Também tentar valor sem decimais (para valores inteiros)
+                                      ->orWhereBetween('amount', [$valorNumerico * 0.999, $valorNumerico * 1.001])
+                                      ->orWhereBetween('cash_out_liquido', [$valorNumerico * 0.999, $valorNumerico * 1.001]);
+                                });
+                            } else {
+                                // Valor com ponto decimal ou valor pequeno - busca normal
+                                $query->orWhere(function($q) use ($valorNumerico) {
+                                    $q->whereBetween('amount', [$valorNumerico * 0.999, $valorNumerico * 1.001])
+                                      ->orWhereBetween('cash_out_liquido', [$valorNumerico * 0.999, $valorNumerico * 1.001]);
+                                });
+                            }
+                        }
                     });
                 }
-
-                // Calcular totais
-                $totalEntradas = $entradasQuery->sum('amount');
-                $totalEntradasLiquidas = $entradasQuery->sum('deposito_liquido');
-                $totalTaxasEntradas = $entradasQuery->sum('taxa_cash_in');
-
-                $totalSaidas = $saidasQuery->sum('amount');
-                $totalSaidasLiquidas = $saidasQuery->sum('cash_out_liquido');
-                $totalTaxasSaidas = $saidasQuery->sum('taxa_cash_out');
 
                 // Buscar transações para o extrato
                 $transacoesEntradas = $entradasQuery->orderBy('date', 'desc')->get();
@@ -880,9 +944,8 @@ class UserController extends Controller
                 foreach ($transacoesEntradas as $entrada) {
                     $extrato->push([
                         'id' => $entrada->id,
-                        'transaction_id' => $entrada->transaction_id,
+                        'transaction_id' => $entrada->idTransaction ?? $entrada->externalreference ?? 'N/A',
                         'tipo' => 'entrada',
-                        'descricao' => $entrada->descricao ?: 'Depósito',
                         'valor' => (float) $entrada->amount,
                         'valor_liquido' => (float) $entrada->deposito_liquido,
                         'taxa' => (float) $entrada->taxa_cash_in,
@@ -890,9 +953,9 @@ class UserController extends Controller
                         'status_legivel' => $this->getStatusLegivel($entrada->status),
                         'data' => $entrada->date,
                         'created_at' => $entrada->created_at,
-                        'nome_cliente' => $entrada->nome_cliente,
-                        'documento' => $entrada->documento,
-                        'adquirente' => $entrada->adquirente,
+                        'nome_cliente' => $entrada->client_name ?? 'Cliente',
+                        'documento' => $entrada->client_document ?? '00000000000',
+                        'adquirente' => $entrada->adquirente_ref ?? 'Sistema',
                         'end_to_end' => $entrada->end_to_end ?? null,
                     ]);
                 }
@@ -901,9 +964,8 @@ class UserController extends Controller
                 foreach ($transacoesSaidas as $saida) {
                     $extrato->push([
                         'id' => $saida->id,
-                        'transaction_id' => $saida->transaction_id,
+                        'transaction_id' => $saida->idTransaction ?? $saida->externalreference ?? 'N/A',
                         'tipo' => 'saida',
-                        'descricao' => $saida->descricao ?: 'Saque',
                         'valor' => (float) $saida->amount,
                         'valor_liquido' => (float) $saida->cash_out_liquido,
                         'taxa' => (float) $saida->taxa_cash_out,
@@ -911,14 +973,24 @@ class UserController extends Controller
                         'status_legivel' => $this->getStatusLegivel($saida->status),
                         'data' => $saida->date,
                         'created_at' => $saida->created_at,
-                        'nome_cliente' => $saida->nome_cliente,
-                        'documento' => $saida->documento,
-                        'adquirente' => $saida->adquirente,
+                        'nome_cliente' => $saida->beneficiaryname ?? 'Cliente',
+                        'documento' => $saida->beneficiarydocument ?? '00000000000',
+                        'adquirente' => $saida->executor_ordem ?? 'Sistema',
                         'end_to_end' => $saida->end_to_end ?? null,
                     ]);
                 }
 
-                // Aplicar filtro de tipo se especificado
+                // Calcular totais baseados em TODAS as transações filtradas (ANTES de aplicar filtro de tipo)
+                // Isso garante que os totais sempre reflitam todas as transações do período, independente do filtro de tipo
+                $totalEntradas = $extrato->where('tipo', 'entrada')->sum('valor_liquido');
+                $totalEntradasLiquidas = $totalEntradas;
+                $totalTaxasEntradas = $extrato->where('tipo', 'entrada')->sum('taxa');
+
+                $totalSaidas = $extrato->where('tipo', 'saida')->sum('valor_liquido');
+                $totalSaidasLiquidas = $totalSaidas;
+                $totalTaxasSaidas = $extrato->where('tipo', 'saida')->sum('taxa');
+
+                // Aplicar filtro de tipo se especificado (após calcular totais)
                 if ($tipo === 'entrada') {
                     $extrato = $extrato->where('tipo', 'entrada');
                 } elseif ($tipo === 'saida') {
@@ -943,18 +1015,18 @@ class UserController extends Controller
                     'from' => $offset + 1,
                     'to' => min($offset + $limit, $totalItems),
                     'resumo' => [
-                        'total_entradas' => $totalEntradas,
+                        'total_entradas' => $extrato->where('tipo', 'entrada')->sum('valor'),
                         'total_entradas_liquidas' => $totalEntradasLiquidas,
                         'total_taxas_entradas' => $totalTaxasEntradas,
-                        'total_saidas' => $totalSaidas,
+                        'total_saidas' => $extrato->where('tipo', 'saida')->sum('valor'),
                         'total_saidas_liquidas' => $totalSaidasLiquidas,
                         'total_taxas_saidas' => $totalTaxasSaidas,
                         'saldo_atual' => $user->saldo ?? 0,
                         'saldo_periodo' => $totalEntradasLiquidas - $totalSaidasLiquidas,
                     ],
-                    'periodo' => $periodo,
-                    'data_inicio' => $dates['inicio']->format('Y-m-d'),
-                    'data_fim' => $dates['fim']->format('Y-m-d'),
+                    'periodo' => $periodo ?: 'all',
+                    'data_inicio' => $dataInicio ? (is_string($dataInicio) ? substr($dataInicio, 0, 10) : (\Carbon\Carbon::parse($dataInicio)->format('Y-m-d'))) : null,
+                    'data_fim' => $dataFim ? (is_string($dataFim) ? substr($dataFim, 0, 10) : (\Carbon\Carbon::parse($dataFim)->format('Y-m-d'))) : null,
                 ];
             });
 
@@ -1287,9 +1359,7 @@ class UserController extends Controller
                     ->whereBetween('date', [$startOfMonth, $endOfMonth])
                     ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
                     ->sum('amount');
-                $splitsMes = \App\Models\SplitInternoExecutado::whereHas('splitInterno', function($query) use ($user) {
-                        $query->where('usuario_beneficiario_id', $user->id);
-                    })
+                $splitsMes = \App\Models\SplitInternoExecutado::where('usuario_beneficiario_id', $user->id)
                     ->whereBetween('created_at', [$startOfMonth, $endOfMonth])
                     ->where('status', 'processado')
                     ->sum('valor_split');
@@ -1967,7 +2037,11 @@ class UserController extends Controller
                 $doc = preg_replace('/\D/', '', (string) ($user->cpf_cnpj ?? ''));
                 $tipoPessoa = ($doc && strlen($doc) > 11) ? 'PJ' : 'PF';
                 $tipoPessoaLegivel = $tipoPessoa === 'PJ' ? 'Pessoa Jurídica' : 'Pessoa Física';
-                $statusAtual = $user->status == 1 ? 'Aprovado' : 'Pendente';
+                // Usar UserStatusHelper para obter o status correto (distinguir Pendente de Inativo)
+                $statusAtual = \App\Helpers\UserStatusHelper::getStatusText($user);
+
+                // Obter taxas (personalizadas ou globais)
+                $taxes = $this->getUserTaxes($user);
 
                 return [
                     'id' => $user->username,
@@ -1979,7 +2053,8 @@ class UserController extends Controller
                     'permission' => $user->permission ?? null,
                     'phone' => $user->telefone ?? '',
                     'cnpj' => $user->cpf_cnpj ?? '',
-                    'status' => $user->status == 1 ? 'active' : 'inactive',
+                    'status' => $user->status == 1 ? 'active' : ($user->status == 5 ? 'pending' : 'inactive'),
+                    'status_numeric' => $user->status,
                     'balance' => $user->saldo ?? 0,
                     'agency' => $user->agency ?? '',
                     'status_text' => $statusAtual,
@@ -1994,6 +2069,7 @@ class UserController extends Controller
                         'telefone_principal' => $user->telefone ?? null,
                         'email_principal' => $user->email ?? null,
                     ],
+                    'taxes' => $taxes,
                 ];
             });
 
@@ -2142,5 +2218,257 @@ class UserController extends Controller
                 'message' => 'Erro interno do servidor'
             ], 500)->header('Access-Control-Allow-Origin', '*');
         }
+    }
+
+    /**
+     * Aplicar filtro de busca para transações pendentes
+     * Busca por: descrição e valor
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $depositosQuery
+     * @param \Illuminate\Database\Eloquent\Builder $saquesQuery
+     * @param string $busca
+     * @return void
+     */
+    private function applyPendingTransactionsSearchFilter($depositosQuery, $saquesQuery, string $busca): void
+    {
+        $buscaLower = strtolower(trim($busca));
+        $searchPattern = '%' . $buscaLower . '%';
+
+        // Aplicar busca em depósitos
+        $depositosQuery->where(function($query) use ($searchPattern, $busca) {
+            // Buscar por descrição (case-insensitive)
+            $query->whereRaw('LOWER(CAST(descricao_transacao AS CHAR CHARACTER SET utf8mb4)) LIKE ?', [$searchPattern])
+                  ->orWhereRaw('LOWER(CAST(descricao AS CHAR CHARACTER SET utf8mb4)) LIKE ?', [$searchPattern]);
+
+            // Buscar por valor
+            $this->applyValueSearch($query, $busca, ['amount', 'deposito_liquido']);
+        });
+
+        // Aplicar busca em saques
+        $saquesQuery->where(function($query) use ($searchPattern, $busca) {
+            // Buscar por descrição (case-insensitive)
+            $query->whereRaw('LOWER(CAST(descricao_transacao AS CHAR CHARACTER SET utf8mb4)) LIKE ?', [$searchPattern])
+                  ->orWhereRaw('LOWER(CAST(descricao AS CHAR CHARACTER SET utf8mb4)) LIKE ?', [$searchPattern]);
+
+            // Buscar por valor
+            $this->applyValueSearch($query, $busca, ['amount', 'cash_out_liquido']);
+        });
+    }
+
+    /**
+     * Aplicar busca por valor numérico com diferentes interpretações
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @param string $busca
+     * @param array $fields Campos numéricos para buscar
+     * @return void
+     */
+    private function applyValueSearch($query, string $busca, array $fields): void
+    {
+        $valorBusca = preg_replace('/[^0-9,.]/', '', $busca);
+        $valorBusca = str_replace(',', '.', $valorBusca);
+
+        if (!is_numeric($valorBusca) || $valorBusca <= 0) {
+            return;
+        }
+
+        $valorNumerico = (float) $valorBusca;
+        $hasDecimalSeparator = strpos($busca, '.') !== false || strpos($busca, ',') !== false;
+
+        $query->orWhere(function($q) use ($valorNumerico, $fields, $hasDecimalSeparator) {
+            // Se não tem separador decimal e é um número grande, tentar interpretar como centavos
+            if (!$hasDecimalSeparator && $valorNumerico >= 100) {
+                $valorComDecimais = $valorNumerico / 100;
+                foreach ($fields as $field) {
+                    $q->orWhereBetween($field, [$valorComDecimais * 0.999, $valorComDecimais * 1.001])
+                      ->orWhereBetween($field, [$valorNumerico * 0.999, $valorNumerico * 1.001]);
+                }
+            } else {
+                // Busca normal com margem de erro de 0.1%
+                foreach ($fields as $field) {
+                    $q->orWhereBetween($field, [$valorNumerico * 0.999, $valorNumerico * 1.001]);
+                }
+            }
+        });
+    }
+
+    /**
+     * Obter taxas do usuário (personalizadas ou globais)
+     * Prioriza taxas personalizadas se ativas, caso contrário usa taxas globais
+     *
+     * @param \App\Models\User $user
+     * @return array
+     */
+    private function getUserTaxes($user): array
+    {
+        $setting = \App\Models\App::first();
+        
+        if (!$setting) {
+            // Retornar valores padrão se não houver configurações
+            return $this->getDefaultTaxesStructure();
+        }
+
+        // Verificar se usuário tem taxas personalizadas ativas
+        $hasPersonalizedTaxes = $user->taxas_personalizadas_ativas ?? false;
+
+        // Taxas de Depósito (Cash In)
+        $depositTaxes = $this->getDepositTaxes($user, $setting, $hasPersonalizedTaxes);
+
+        // Taxas de Saque (Cash Out)
+        $withdrawTaxes = $this->getWithdrawTaxes($user, $setting, $hasPersonalizedTaxes);
+
+        // Taxas de Afiliado (sempre globais)
+        $affiliateTaxes = $this->getAffiliateTaxes($setting);
+
+        return [
+            'deposit' => $depositTaxes,
+            'withdraw' => $withdrawTaxes,
+            'affiliate' => $affiliateTaxes,
+        ];
+    }
+
+    /**
+     * Obter taxas de depósito (personalizadas ou globais)
+     *
+     * @param \App\Models\User $user
+     * @param \App\Models\App $setting
+     * @param bool $hasPersonalizedTaxes
+     * @return array
+     */
+    private function getDepositTaxes($user, $setting, bool $hasPersonalizedTaxes): array
+    {
+        if ($hasPersonalizedTaxes) {
+            // Taxas personalizadas do usuário
+            $percent = (float) ($user->taxa_percentual_deposito ?? $setting->taxa_cash_in_padrao ?? 0);
+            $fixed = (float) ($user->taxa_fixa_deposito ?? 0);
+            
+            // Verificar se sistema flexível está ativo para o usuário
+            $isFlexibleActive = $user->sistema_flexivel_ativo ?? false;
+            
+            if ($isFlexibleActive) {
+                return [
+                    'fixed' => (float) ($user->taxa_fixa_baixos ?? $setting->taxa_flexivel_fixa_baixo ?? 0),
+                    'percent' => 0, // Não aplicável em sistema flexível
+                    'after_limit_fixed' => (float) ($user->taxa_fixa_deposito ?? 0),
+                    'after_limit_percent' => (float) ($user->taxa_percentual_altos ?? $setting->taxa_flexivel_percentual_alto ?? 0),
+                ];
+            }
+            
+            return [
+                'fixed' => $fixed,
+                'percent' => $percent,
+                'after_limit_fixed' => 0,
+                'after_limit_percent' => 0,
+            ];
+        }
+
+        // Taxas globais do sistema
+        $isFlexibleActive = $setting->taxa_flexivel_ativa ?? false;
+        
+        if ($isFlexibleActive) {
+            return [
+                'fixed' => (float) ($setting->taxa_flexivel_fixa_baixo ?? 0),
+                'percent' => 0, // Não aplicável em sistema flexível
+                'after_limit_fixed' => (float) ($setting->taxa_fixa_padrao ?? 0),
+                'after_limit_percent' => (float) ($setting->taxa_flexivel_percentual_alto ?? 0),
+            ];
+        }
+
+        return [
+            'fixed' => (float) ($setting->taxa_fixa_padrao ?? 0),
+            'percent' => (float) ($setting->taxa_cash_in_padrao ?? 0),
+            'after_limit_fixed' => 0,
+            'after_limit_percent' => 0,
+        ];
+    }
+
+    /**
+     * Obter taxas de saque (personalizadas ou globais)
+     *
+     * @param \App\Models\User $user
+     * @param \App\Models\App $setting
+     * @param bool $hasPersonalizedTaxes
+     * @return array
+     */
+    private function getWithdrawTaxes($user, $setting, bool $hasPersonalizedTaxes): array
+    {
+        if ($hasPersonalizedTaxes) {
+            // Taxas personalizadas do usuário
+            $dashboardPercent = (float) ($user->taxa_percentual_pix ?? $setting->taxa_cash_out_padrao ?? 0);
+            $dashboardFixed = (float) ($user->taxa_fixa_pix ?? 0);
+            $apiPercent = (float) ($user->taxa_saque_api ?? $setting->taxa_saque_api_padrao ?? $setting->taxa_cash_out_padrao ?? 0);
+            $apiFixed = (float) ($user->taxa_fixa_pix ?? 0);
+        } else {
+            // Taxas globais do sistema
+            $dashboardPercent = (float) ($setting->taxa_cash_out_padrao ?? 0);
+            $dashboardFixed = (float) ($setting->taxa_fixa_pix ?? 0);
+            $apiPercent = (float) ($setting->taxa_saque_api_padrao ?? $setting->taxa_cash_out_padrao ?? 0);
+            $apiFixed = (float) ($setting->taxa_fixa_pix ?? 0);
+        }
+
+        return [
+            'dashboard' => [
+                'fixed' => $dashboardFixed,
+                'percent' => $dashboardPercent,
+                'after_limit_fixed' => 0, // Não há sistema de limite para saques
+                'after_limit_percent' => 0,
+            ],
+            'api' => [
+                'fixed' => $apiFixed,
+                'percent' => $apiPercent,
+                'after_limit_fixed' => 0, // Não há sistema de limite para saques
+                'after_limit_percent' => 0,
+            ],
+        ];
+    }
+
+    /**
+     * Obter taxas de afiliado (sempre globais)
+     *
+     * @param \App\Models\App $setting
+     * @return array
+     */
+    private function getAffiliateTaxes($setting): array
+    {
+        // Taxas de afiliado são sempre globais (gerente_percentage)
+        return [
+            'fixed' => 0,
+            'percent' => (float) ($setting->gerente_percentage ?? 0),
+        ];
+    }
+
+    /**
+     * Retornar estrutura padrão de taxas quando não há configurações
+     *
+     * @return array
+     */
+    private function getDefaultTaxesStructure(): array
+    {
+        return [
+            'deposit' => [
+                'fixed' => 0,
+                'percent' => 0,
+                'after_limit_fixed' => 0,
+                'after_limit_percent' => 0,
+            ],
+            'withdraw' => [
+                'dashboard' => [
+                    'fixed' => 0,
+                    'percent' => 0,
+                    'after_limit_fixed' => 0,
+                    'after_limit_percent' => 0,
+                ],
+                'api' => [
+                    'fixed' => 0,
+                    'percent' => 0,
+                    'after_limit_fixed' => 0,
+                    'after_limit_percent' => 0,
+                ],
+            ],
+            'affiliate' => [
+                'fixed' => 0,
+                'percent' => 0,
+            ],
+        ];
     }
 }
