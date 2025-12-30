@@ -78,23 +78,12 @@ class VerifyJWT
                 'timestamp' => now()
             ]);
 
-            // Verificar status do usuário apenas para endpoints que precisam de aprovação
-            // Permitir 2FA mesmo para usuários pendentes
-            $currentPath = $request->path();
-            $allowedPathsForPending = ['api/2fa/status', 'api/2fa/enable', 'api/2fa/verify', 'api/2fa/disable'];
-            
-            $isAllowedForPending = false;
-            foreach ($allowedPathsForPending as $path) {
-                if (str_contains($currentPath, $path)) {
-                    $isAllowedForPending = true;
-                    break;
-                }
-            }
-            
-            if($user->status != 1 && !$isAllowedForPending){
+            // Bloquear apenas usuários inativos (status = 0) ou banidos
+            // Usuários pendentes (status = 5) podem acessar todas as APIs
+            if ($user->status == 0 || ($user->banido ?? false)) {
                 return Response::json([
-                    'status' => "pending_approval",
-                    'message' => 'Usuário com conta pendente de aprovação.'
+                    'success' => false,
+                    'message' => 'Conta inativa ou bloqueada. Entre em contato com o suporte.'
                 ], 403)->header('Access-Control-Allow-Origin', '*');
             }
 

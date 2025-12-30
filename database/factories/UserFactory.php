@@ -27,6 +27,7 @@ class UserFactory extends Factory
         
         return [
             'name' => fake()->name(),
+            'gender' => fake()->randomElement(['male', 'female']),
             'email' => fake()->unique()->safeEmail(),
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
@@ -35,6 +36,9 @@ class UserFactory extends Factory
             'cliente_id' => Str::uuid()->toString(), // Campo obrigatório da tabela users
             'saldo' => 0, // Campo obrigatório
             'status' => 1, // Campo obrigatório
+            'permission' => \App\Constants\UserPermission::CLIENT,
+            'code_ref' => uniqid(),
+            'avatar' => '/uploads/avatars/avatar_default.jpg',
         ];
     }
 
