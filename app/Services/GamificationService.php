@@ -97,13 +97,14 @@ class GamificationService
     
     /**
      * Calcula total de depósitos pagos do usuário (pode ser movido para UserRepository)
+     * Considera tanto PAID_OUT (automático) quanto COMPLETED (manual/final)
      * 
      * @param string $userId
      * @return float
      */
     private function getTotalDepositos(string $userId): float
     {
-        return (float) Solicitacoes::where('status', 'PAID_OUT')
+        return (float) Solicitacoes::whereIn('status', ['PAID_OUT', 'COMPLETED'])
             ->where('user_id', $userId)
             ->sum('amount');
     }

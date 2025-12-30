@@ -16,11 +16,35 @@ class GatewaySettingsService
 
     /**
      * Obter configurações com cache
+     * Cria registro padrão se não existir
      */
-    public function getSettings(): ?App
+    public function getSettings(): App
     {
         return Cache::remember(self::CACHE_KEY, self::CACHE_TTL, function () {
-            return App::first();
+            // Buscar configuração existente
+            $settings = App::first();
+            
+            // Se não existir, criar registro padrão
+            if (!$settings) {
+                $settings = App::create([
+                    'taxa_cash_in_padrao' => 5.00,
+                    'taxa_fixa_padrao' => 1.00,
+                    'deposito_minimo' => 5.00,
+                    'taxa_cash_out_padrao' => 5.00,
+                    'taxa_fixa_pix' => 1.00,
+                    'taxa_fixa_padrao_cash_out' => 0.00,
+                    'saque_minimo' => 5.00,
+                    'limite_saque_mensal' => 50000.00,
+                    'taxa_saque_api_padrao' => 5.00,
+                    'taxa_saque_cripto_padrao' => 7.00,
+                    'taxa_flexivel_ativa' => false,
+                    'taxa_flexivel_valor_minimo' => 15.00,
+                    'taxa_flexivel_fixa_baixo' => 4.99,
+                    'taxa_flexivel_percentual_alto' => 5.00,
+                ]);
+            }
+            
+            return $settings;
         });
     }
 
@@ -29,7 +53,11 @@ class GatewaySettingsService
      */
     public function updateSettings(array $data): App
     {
-        $settings = App::firstOrNew(['id' => 1]);
+        // Buscar primeiro registro ou criar novo
+        $settings = App::first();
+        if (!$settings) {
+            $settings = new App();
+        }
         
         // Mapear campos usando método helper
         $this->mapFieldsToModel($settings, $data);
