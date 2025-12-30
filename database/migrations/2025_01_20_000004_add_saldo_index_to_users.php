@@ -43,23 +43,45 @@ return new class extends Migration
     }
 
     /**
-     * Verifica se índice já existe
+     * Verifica se índice já existe (compatível com MySQL e SQLite)
      */
     private function indexExists(string $table, string $index): bool
     {
         $connection = Schema::getConnection();
-        $databaseName = $connection->getDatabaseName();
+        $driverName = $connection->getDriverName();
         
-        $result = $connection->select(
-            "SELECT COUNT(*) as count 
-             FROM information_schema.statistics 
-             WHERE table_schema = ? 
-             AND table_name = ? 
-             AND index_name = ?",
-            [$databaseName, $table, $index]
-        );
+        // Para MySQL/MariaDB
+        if (in_array($driverName, ['mysql', 'mariadb'])) {
+            $databaseName = $connection->getDatabaseName();
+            $result = $connection->select(
+                "SELECT COUNT(*) as count 
+                 FROM information_schema.statistics 
+                 WHERE table_schema = ? 
+                 AND table_name = ? 
+                 AND index_name = ?",
+                [$databaseName, $table, $index]
+            );
+            return $result[0]->count > 0;
+        }
         
-        return $result[0]->count > 0;
+        // Para SQLite
+        if ($driverName === 'sqlite') {
+            $indexes = $connection->select("PRAGMA index_list({$table})");
+            foreach ($indexes as $idx) {
+                if ($idx->name === $index) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        
+        // Fallback: tentar criar e capturar erro
+        try {
+            $connection->statement("SHOW INDEX FROM {$table} WHERE Key_name = '{$index}'");
+            return true;
+        } catch (\Exception $e) {
+            return false;
+        }
     }
 };
 

@@ -4,7 +4,6 @@ namespace App\Traits;
 
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use App\Helpers\SecureHttp;
 use App\Models\Solicitacoes;
@@ -12,8 +11,8 @@ use App\Models\SolicitacoesCashOut;
 use App\Models\App;
 use App\Models\User;
 use App\Models\Cashtime;
-use Faker\Factory as FakerFactory;
 use App\Helpers\Helper;
+use App\Helpers\TaxaFlexivelHelper;
 
 trait CashtimeTrait
 {
@@ -436,7 +435,7 @@ trait CashtimeTrait
                         'valor_bruto' => $request->amount,
                         'valor_descontado' => $cashout_liquido,
                         'taxa_cash_out' => $taxa_cash_out,
-                        'external_id' => $externalId,
+                        'external_id' => $idTransaction,
                         'operacao' => 'generateTransactionPaymentManual'
                     ]
                 );

@@ -4,14 +4,11 @@ namespace App\Traits;
 
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
 use App\Models\App;
-use App\Models\User;
 use App\Models\Pagarme;
-use Faker\Factory as FakerFactory;
 use App\Helpers\Helper;
 
 trait PagarMeTrait
@@ -481,11 +478,12 @@ trait PagarMeTrait
                 "client_ip"         => $client_ip
             ];
 
+            $access_secret = base64_encode(self::$secret . ":");
             $response = Http::withHeaders([
                 'Content-Type' => 'application/json',
                 'Accept' => 'application/json',
-                'Authorization' => 'Bearer ' . self::$accessToken,
-            ])->post(self::$urlPixOut, $payload);
+                'Authorization' => 'Basic ' . $access_secret,
+            ])->post(self::$urlCashOut, $payload);
 
             if ($response->successful()) {
                 $responseData = $response->json();

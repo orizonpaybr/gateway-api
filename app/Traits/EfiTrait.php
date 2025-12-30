@@ -12,7 +12,6 @@ use App\Models\SolicitacoesCashOut;
 use App\Models\App;
 use App\Models\User;
 use App\Models\Efi;
-use Faker\Factory as FakerFactory;
 use App\Helpers\Helper;
 use App\Models\CheckoutBuild;
 use App\Models\CheckoutOrders;
@@ -99,7 +98,7 @@ trait EfiTrait
         }
 
         // Se a resposta não for bem-sucedida ou não contiver o token, registrar o erro.
-        \Log::error('Falha na autenticação com a API Efí.', [
+        Log::error('Falha na autenticação com a API Efí.', [
             'status' => $response->status(),
             'response' => $response->json() ?? $response->body()
         ]);
@@ -144,7 +143,7 @@ trait EfiTrait
 
     public static function requestDepositEfi($request)
     {
-        \Log::info('🔍 EfiTrait::requestDepositEfi - INÍCIO', [
+        Log::info('🔍 EfiTrait::requestDepositEfi - INÍCIO', [
             'checkout_id' => $request->checkout_id ?? null,
             'metodo' => $request->metodo ?? null,
             'amount' => $request->amount,
@@ -172,7 +171,7 @@ trait EfiTrait
                 $checkout = \App\Models\CheckoutBuild::where('id', $request->checkout_id)->first();
                 if ($checkout) {
                     $user = \App\Models\User::where('id', $checkout->user_id)->first();
-                    \Log::info('🔍 EfiTrait: Usuário obtido via checkout', [
+                    Log::info('🔍 EfiTrait: Usuário obtido via checkout', [
                         'checkout_id' => $request->checkout_id,
                         'user_id' => $user ? $user->id : 'não encontrado'
                     ]);
@@ -608,7 +607,7 @@ trait EfiTrait
                 ])
                 ->put(self::$baseUrl . '/v3/gn/pix/' . $internal_id, $payload);
 
-            \Log::debug('RESPOSTA LIBERAR SAQUE: ' . json_encode($response->json()));
+            Log::debug('RESPOSTA LIBERAR SAQUE: ' . json_encode($response->json()));
             if ($response->successful()) {
                 $responseData = $response->json();
                 $pixcashout = [
@@ -679,7 +678,7 @@ trait EfiTrait
         $request['metadata']['custom_id'] = $external_id;
 
         unset($request['user'], $request['token'], $request['secret']);
-        \Log::debug('[+][EFI][REQUESTBILLET][PAYLOAD]: ' . json_encode($request));
+        Log::debug('[+][EFI][REQUESTBILLET][PAYLOAD]: ' . json_encode($request));
         $response = Http::withHeaders([
             'Authorization' => "Bearer $access_token",
             'Content-Type' => "application/json",
@@ -689,7 +688,7 @@ trait EfiTrait
             ->post(self::$baseUrl . "/v1/charge/one-step", $request);
 
 
-        \Log::debug('[+][EFI][REQUESTBILLET][RESPONSE][BODY]: ' . $response->body());
+        Log::debug('[+][EFI][REQUESTBILLET][RESPONSE][BODY]: ' . $response->body());
 
         if ($response->successful()) {
 
@@ -721,7 +720,7 @@ trait EfiTrait
             $deposito_liquido = $deposito_liquido - $taxafixa;
             $taxa_cash_in = $taxa_cash_in + $taxafixa;
 
-            \Log::debug("[+][EFI][REQUESTCARD][TAXA E VALORES]: [amount: $amount, liquido: $deposito_liquido, taxas: $taxa_cash_in]");
+            Log::debug("[+][EFI][REQUESTCARD][TAXA E VALORES]: [amount: $amount, liquido: $deposito_liquido, taxas: $taxa_cash_in]");
             $date = Carbon::now();
 
             $days_availability = $efi->billet_days_availability;
@@ -757,7 +756,7 @@ trait EfiTrait
                 "days_availability"             => $days_availability
             ];
 
-            \Log::debug('[+][EFI][REQUESTBILLET][SOLICITACAO DATA]: ' . json_encode($cashin));
+            Log::debug('[+][EFI][REQUESTBILLET][SOLICITACAO DATA]: ' . json_encode($cashin));
             Solicitacoes::create($cashin);
 
             $ip = $request->header('X-Forwarded-For') ?
@@ -807,7 +806,7 @@ trait EfiTrait
             ->post(self::$baseUrl . "/v1/charge/one-step", $request);
 
 
-        \Log::debug('[+][EFI][REQUESTCARD][RESPONSE][BODY]: ' . $response->body());
+        Log::debug('[+][EFI][REQUESTCARD][RESPONSE][BODY]: ' . $response->body());
 
         // dd($response->json());
         if ($response->successful()) {
@@ -834,7 +833,7 @@ trait EfiTrait
                 $deposito_liquido = $deposito_liquido - $taxafixa;
                 $taxa_cash_in = $taxa_cash_in + $taxafixa;
 
-                \Log::debug("[+][EFI][REQUESTCARD][TAXA E VALORES]: [amount: $amount, liquido: $deposito_liquido, taxas: $taxa_cash_in]");
+                Log::debug("[+][EFI][REQUESTCARD][TAXA E VALORES]: [amount: $amount, liquido: $deposito_liquido, taxas: $taxa_cash_in]");
                 $date = Carbon::now();
 
                 $days_availability = $efi->card_days_availability;
@@ -869,7 +868,7 @@ trait EfiTrait
                     "days_availability"             => $days_availability
                 ];
 
-                \Log::debug('[+][EFI][REQUESTCARD][SOLICITACAO DATA]: ' . json_encode($cashin));
+                Log::debug('[+][EFI][REQUESTCARD][SOLICITACAO DATA]: ' . json_encode($cashin));
                 Solicitacoes::create($cashin);
 
                 $ip = $request->header('X-Forwarded-For') ?
@@ -903,7 +902,7 @@ trait EfiTrait
 
         $access_token = self::generateAccessToken();
         $endpoint = self::$baseUrl . "/v1/notification/" . $notification;
-        \Log::debug("ENDPOINT DE NOTIFICACAO: $endpoint");
+        Log::debug("ENDPOINT DE NOTIFICACAO: $endpoint");
 
         $setting = Efi::first();
         if (!$setting) {
@@ -919,7 +918,7 @@ trait EfiTrait
             $responseData = $response->json();
             $atts = $responseData['data'];
             $last_att = $atts[count($atts) - 1];
-            \Log::debug("[+][EFI][WEBHOOK][LASTATT]:" . json_encode($last_att));
+            Log::debug("[+][EFI][WEBHOOK][LASTATT]:" . json_encode($last_att));
 
             $status = $last_att['status']['current'];
             $idTransaction = $last_att['custom_id'];
@@ -985,7 +984,7 @@ trait EfiTrait
                         'accept' => 'application/json'
                     ])->post($cashin->callback, $payload);
 
-                    \Log::debug("[+][EFI][WEBHOOK] Send Callback: Para $cashin->callback -> Enviando...");
+                    Log::debug("[+][EFI][WEBHOOK] Send Callback: Para $cashin->callback -> Enviando...");
                     if ($cashin->callback && $cashin->callback != 'web') {
                         $payload = [
                             "status"            => "paid",
@@ -1043,23 +1042,33 @@ trait EfiTrait
         if (self::generateCredentials()) {
             $payload = [
                 "valor" => number_format($request->amount, '2', '.', ','),
-                "chave" => $request->pixKey,
-                "tipoChave" => $request->pixKeyType,
-                "descricao" => "Saque automático - " . $request->user()->name,
-                "callbackUrl" => url("efi/callback/withdraw")
+                "pagador" => [
+                    "chave" => self::$chave_pix,
+                    "infoPagador" => "Segue o pagamento da conta"
+                ],
+                "favorecido" => [
+                    "chave" => $request->pixKey
+                ]
             ];
 
-            $response = Http::withHeaders([
-                'Content-Type' => 'application/json',
-                'Accept' => 'application/json',
-                'Authorization' => 'Bearer ' . self::$accessToken,
-            ])->post(self::$urlPixOut, $payload);
+            $internal_id = str_replace('-', '', Str::uuid()->toString());
+
+            // Fazer a requisição
+            $response = Http::withOptions([
+                'cert' => [self::$cert, ''],
+                'verify' => true
+            ])
+                ->withHeaders([
+                    'authorization' => 'Bearer ' . self::$access_token,
+                    'Content-Type' => 'application/json'
+                ])
+                ->put(self::$baseUrl . '/v3/gn/pix/' . $internal_id, $payload);
 
             if ($response->successful()) {
                 $responseData = $response->json();
                 
                 // Criar registro de saque automático
-                $idTransaction = $responseData['txid'] ?? Str::uuid()->toString();
+                $idTransaction = $responseData['idEnvio'] ?? Str::uuid()->toString();
                 $name = $request->user()->name;
                 $pixKey = $request->pixKey;
 
@@ -1085,7 +1094,7 @@ trait EfiTrait
                     "idTransaction"         => $idTransaction,
                     "taxa_cash_out"         => $taxa_cash_out,
                     "cash_out_liquido"      => $cashout_liquido,
-                    "end_to_end"            => $idTransaction,
+                    "end_to_end"            => $responseData['e2eId'] ?? $idTransaction,
                     "callback"              => env('APP_URL') . '/callback/',
                     "descricao_transacao"   => "AUTOMATICO"
                 ];
