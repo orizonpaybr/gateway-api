@@ -208,6 +208,13 @@ Route::middleware(['verify.jwt'])->group(function () {
         Route::get('admin/users-managers', [App\Http\Controllers\Api\AdminDashboardController::class, 'listManagers']);
         Route::get('admin/pix-acquirers', [App\Http\Controllers\Api\AdminDashboardController::class, 'listPixAcquirers']);
         
+        // Rotas de gerenciamento de adquirentes (Admin)
+        Route::get('admin/acquirers', [App\Http\Controllers\Api\AdminDashboardController::class, 'listAcquirers']);
+        Route::post('admin/acquirers', [App\Http\Controllers\Api\AdminDashboardController::class, 'createAcquirer']);
+        Route::put('admin/acquirers/{id}', [App\Http\Controllers\Api\AdminDashboardController::class, 'updateAcquirer'])->where('id', '[0-9]+');
+        Route::delete('admin/acquirers/{id}', [App\Http\Controllers\Api\AdminDashboardController::class, 'deleteAcquirer'])->where('id', '[0-9]+');
+        Route::post('admin/acquirers/{id}/toggle-status', [App\Http\Controllers\Api\AdminDashboardController::class, 'toggleAcquirerStatus'])->where('id', '[0-9]+');
+        
         // Rotas de gerenciamento de saques (Admin)
         // Rotas específicas devem vir antes da rota com {id} para evitar colisão ('stats' sendo interpretado como {id})
         Route::get('admin/withdrawals', [App\Http\Controllers\Api\WithdrawalController::class, 'index']);
@@ -367,3 +374,7 @@ Route::post('primepay7/webhook', [PrimePay7Controller::class, 'webhook'])->middl
 Route::post('xdpag/callback/deposit', [XDPagController::class, 'callbackDeposit'])->middleware(['validate.webhook', 'throttle:30,1']);
 Route::post('xdpag/callback/withdraw', [XDPagController::class, 'callbackWithdraw'])->middleware(['validate.webhook', 'throttle:30,1']);
 Route::post('xdpag/test', [XDPagController::class, 'testCallback'])->middleware(['validate.webhook', 'throttle:10,1']);
+
+/* PAGARM CALLBACKS */
+Route::post('pagarm/callback/deposit', [\App\Http\Controllers\Api\Adquirentes\PagArmController::class, 'callbackDeposit'])->middleware(['validate.webhook', 'throttle:30,1']);
+Route::post('pagarm/callback/withdraw', [\App\Http\Controllers\Api\Adquirentes\PagArmController::class, 'callbackWithdraw'])->middleware(['validate.webhook', 'throttle:30,1']);
