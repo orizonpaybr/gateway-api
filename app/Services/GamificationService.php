@@ -2,7 +2,7 @@
 
 namespace App\Services;
 
-use App\Models\{Nivel, Solicitacoes};
+use App\Models\{Nivel, Solicitacoes, User};
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -19,15 +19,8 @@ use Illuminate\Support\Facades\Log;
  */
 class GamificationService
 {
-    /**
-     * TTL do cache de níveis (1 hora = 3600 segundos)
-     * Níveis mudam raramente, cache pode ser mais longo
-     */
     private const NIVEIS_CACHE_TTL = 3600;
     
-    /**
-     * Chave do cache de níveis
-     */
     private const NIVEIS_CACHE_KEY = 'gamification:niveis:all';
     
     /**
@@ -104,9 +97,25 @@ class GamificationService
      */
     private function getTotalDepositos(string $userId): float
     {
-        return (float) Solicitacoes::whereIn('status', ['PAID_OUT', 'COMPLETED'])
+        // Soma dos depósitos pagos registrados
+        $depositosRegistrados = (float) Solicitacoes::whereIn('status', ['PAID_OUT', 'COMPLETED'])
             ->where('user_id', $userId)
             ->sum('amount');
+        
+        // Se há depósitos registrados, usar esse valor
+        if ($depositosRegistrados > 0) {
+            return $depositosRegistrados;
+        }
+        
+        // Fallback para desenvolvimento/seeds: usar volume_transacional
+        // que representa o total histórico de depósitos acumulados
+        $user = User::where('user_id', $userId)->first();
+        if ($user && $user->volume_transacional > 0) {
+            return (float) $user->volume_transacional;
+        }
+        
+        // Se não há nem depósitos registrados nem volume_transacional, retorna 0
+        return 0.0;
     }
     
     /**
