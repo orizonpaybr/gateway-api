@@ -23,7 +23,6 @@ Este documento descreve as otimizações implementadas no backend seguindo as me
 -   `AppSettingsHelper.php` - Convertido de `Redis::` para `Cache::`
 -   `NotificationPreferenceService.php` - Convertido de `Redis::` para `Cache::`
 -   `CacheKeyService.php` - Convertido de `Redis::` para `Cache::`
--   `UtmifyController.php` - Removido uso direto de `Redis::`
 -   `QRCodeController.php` - Ajustado para usar `Cache::getStore()` quando necessário
 
 #### **Benefícios:**

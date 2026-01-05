@@ -86,7 +86,6 @@ class DatabaseSeeder extends Seeder
         $this->command->info('  💎 Diamante: gerente2 (R$ 8.5M)');
         $this->command->info('');
         $this->command->info('🔧 CONFIGURAÇÕES:');
-        $this->command->info('  • Integração Utmfy: Configurada para gerentes');
         $this->command->info('  • Taxas personalizadas: Ativas para gerentes');
         $this->command->info('  • Webhooks: Configurados para gerentes');
         $this->command->info('  • 2FA: Aleatório (alguns ativos, outros não)');

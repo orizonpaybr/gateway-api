@@ -331,7 +331,6 @@ CREATE TABLE `checkout_build` (
   `created_at` timestamp NULL DEFAULT NULL,
   `updated_at` timestamp NULL DEFAULT NULL,
   `methods` varchar(255) NOT NULL DEFAULT '["pix"]',
-  `checkout_ads_utmfy` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `checkout_build_user_id_foreign` (`user_id`),
   CONSTRAINT `checkout_build_user_id_foreign` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`) ON DELETE SET NULL
@@ -1354,7 +1353,6 @@ CREATE TABLE `users` (
   `username` varchar(255) NOT NULL,
   `permission` int(11) NOT NULL DEFAULT 1,
   `app_token` longtext DEFAULT NULL,
-  `integracao_utmfy` varchar(255) DEFAULT NULL,
   `pin` varchar(255) DEFAULT NULL,
   `pin_active` tinyint(1) NOT NULL DEFAULT 0,
   `pin_created_at` timestamp NULL DEFAULT NULL,

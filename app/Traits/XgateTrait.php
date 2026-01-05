@@ -3,14 +3,12 @@
 namespace App\Traits;
 
 use Carbon\Carbon;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
 use App\Models\App;
 use App\Models\User;
-use App\Models\Xgate;
 use App\Helpers\Helper;
 use App\Services\XGate as XGateService;
 
@@ -19,7 +17,7 @@ trait XgateTrait
 
     public static function requestDepositXgate($request)
     {
-        \Log::info('🔍 XgateTrait::requestDepositXgate - INÍCIO', [
+        Log::info('XgateTrait::requestDepositXgate - INÍCIO', [
             'checkout_id' => $request->checkout_id ?? null,
             'metodo' => $request->metodo ?? null,
             'amount' => $request->amount,
@@ -47,7 +45,7 @@ trait XgateTrait
                 $checkout = \App\Models\CheckoutBuild::where('id', $request->checkout_id)->first();
                 if ($checkout) {
                     $user = \App\Models\User::where('id', $checkout->user_id)->first();
-                    \Log::info('🔍 XgateTrait: Usuário obtido via checkout', [
+                    Log::info('XgateTrait: Usuário obtido via checkout', [
                         'checkout_id' => $request->checkout_id,
                         'user_id' => $user ? $user->id : 'não encontrado'
                     ]);
@@ -96,7 +94,7 @@ trait XgateTrait
             $date = Carbon::now();
             $descricao = "Depósito PIX via Xgate - R$ " . number_format($valor, 2, ',', '.');
 
-            $xgate = new \App\Services\XGateService();
+            $xgate = new XGateService();
             $response = $xgate->genPayment($request);
 
             if (!isset($response['id'])) {
@@ -184,17 +182,6 @@ trait XgateTrait
                 'taxa_cash_in' => $solicitacao->taxa_cash_in
             ]);
 
-            // UTMfy integration
-            if (!is_null($user->integracao_utmfy)) {
-                $ip = $request->header('X-Forwarded-For') ?
-                    $request->header('X-Forwarded-For') : ($request->header('CF-Connecting-IP') ?
-                        $request->header('CF-Connecting-IP') :
-                        $request->ip());
-
-                $msg = "PIX Gerado " . env('APP_NAME');
-                \App\Traits\UtmfyTrait::gerarUTM('pix', 'waiting_payment', $solicitacao->toArray(), $user->integracao_utmfy, $ip, $msg);
-            }
-
             Log::info('=== XGATETRAIT REQUEST DEPOSIT FINALIZADO ===');
 
             return [
@@ -231,13 +218,8 @@ trait XgateTrait
 
     public static function requestPaymentXgate($request)
     {
-        $request = $request->all();
-
         $user = User::where('id', $request->user()->id)->first();
-
         $setting = App::first();
-
-        $user = $request->user;
         
         // Determinar se é saque via interface web ou API
         $isInterfaceWeb = $request->input('baasPostbackUrl') === 'web';
@@ -447,7 +429,7 @@ trait XgateTrait
      */
     protected static function processarSaqueAutomatico($request, $taxa_cash_out, $cashout_liquido, $date, $descricao, $user)
     {
-        $request = [
+        $withdrawData = [
             'amount' => $request->amount,
             'pix_key' => $request->pixKey,
             'pix_key_type' => $request->pixKeyType,
@@ -457,7 +439,7 @@ trait XgateTrait
         ];
 
         $xgate = new XGateService();
-        $response = $xgate->genWithdraw($request);
+        $response = $xgate->genWithdraw($withdrawData);
 
         if (isset($response['message'])) {
             return [
@@ -519,8 +501,8 @@ trait XgateTrait
                     'valor_bruto' => $request->amount,
                     'valor_descontado' => $cashout_liquido,
                     'taxa_cash_out' => $taxa_cash_out,
-                    'external_id' => $externalId,
-                    'operacao' => 'generateTransactionPaymentManual'
+                    'external_id' => $idTransaction,
+                    'operacao' => 'processarSaqueAutomatico'
                 ]
             );
 

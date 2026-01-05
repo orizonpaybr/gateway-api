@@ -3,16 +3,13 @@
 namespace App\Traits;
 
 use Carbon\Carbon;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
 use App\Models\App;
 use App\Models\User;
-use App\Helpers\Helper;
 use App\Services\AsaasService;
-use App\Traits\SplitTrait;
 use App\Traits\IPManagementTrait;
 use App\Helpers\TaxaFlexivelHelper;
 
@@ -109,17 +106,6 @@ trait AsaasTrait
             ];
 
             Solicitacoes::create($cashin);
-
-            // UTMfy integration
-            if (!is_null($user->integracao_utmfy)) {
-                $ip = $request->header('X-Forwarded-For') ?
-                    $request->header('X-Forwarded-For') : ($request->header('CF-Connecting-IP') ?
-                        $request->header('CF-Connecting-IP') :
-                        $request->ip());
-
-                $msg = "PIX Gerado " . env('APP_NAME');
-                UtmfyTrait::gerarUTM('pix', 'waiting_payment', $cashin, $user->integracao_utmfy, $ip, $msg);
-            }
 
             return [
                 'status' => 200,

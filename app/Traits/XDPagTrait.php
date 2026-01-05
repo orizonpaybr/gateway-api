@@ -10,7 +10,6 @@ use App\Services\XDPagService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
-use Illuminate\Support\Facades\App as AppFacade;
 
 trait XDPagTrait
 {
@@ -19,7 +18,7 @@ trait XDPagTrait
      */
     public static function requestDepositXDPag($request)
     {
-        \Log::info('🔍 XDPagTrait::requestDepositXDPag - INÍCIO', [
+        Log::info('XDPagTrait::requestDepositXDPag - INÍCIO', [
             'checkout_id' => $request->checkout_id ?? null,
             'metodo' => $request->metodo ?? null,
             'amount' => $request->amount,
@@ -47,7 +46,7 @@ trait XDPagTrait
                 $checkout = \App\Models\CheckoutBuild::where('id', $request->checkout_id)->first();
                 if ($checkout) {
                     $user = \App\Models\User::where('id', $checkout->user_id)->first();
-                    \Log::info('🔍 XDPagTrait: Usuário obtido via checkout', [
+                    Log::info('XDPagTrait: Usuário obtido via checkout', [
                         'checkout_id' => $request->checkout_id,
                         'user_id' => $user ? $user->id : 'não encontrado'
                     ]);
@@ -217,17 +216,6 @@ trait XDPagTrait
                 'deposito_liquido' => $solicitacao->deposito_liquido,
                 'taxa_cash_in' => $solicitacao->taxa_cash_in
             ]);
-
-            // UTMfy integration
-            if (!is_null($user->integracao_utmfy)) {
-                $ip = $request->header('X-Forwarded-For') ?
-                    $request->header('X-Forwarded-For') : ($request->header('CF-Connecting-IP') ?
-                        $request->header('CF-Connecting-IP') :
-                        $request->ip());
-
-                $msg = "PIX Gerado " . env('APP_NAME');
-                \App\Traits\UtmfyTrait::gerarUTM('pix', 'waiting_payment', $solicitacao->toArray(), $user->integracao_utmfy, $ip, $msg);
-            }
 
             Log::info('=== XDPAGTRAIT REQUEST DEPOSIT FINALIZADO ===');
 

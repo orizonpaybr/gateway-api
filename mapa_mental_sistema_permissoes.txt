@@ -34,7 +34,7 @@ Campos Principais da Tabela Users:
 - indicador_ref, whitelisted_ip, pushcut_pixpago
 - twofa_secret, twofa_enabled, twofa_enabled_at
 - code_ref, gerente_id, gerente_percentage, gerente_aprovar
-- webhook_url, webhook_endpoint, integracao_utmfy
+- webhook_url, webhook_endpoint
 - taxas_personalizadas_ativas, taxa_flexivel_ativa
 - taxa_flexivel_valor_minimo, taxa_flexivel_fixa_baixo
 - taxa_flexivel_percentual_alto, taxa_saque_api, taxa_saque_cripto
@@ -123,7 +123,7 @@ B. Rotas Autenticadas (auth + verified)
 - /financeiro - Área financeira
 - /chaves - Chaves API
 - /produtos/* - Gestão de produtos/checkout
-- /integracoes/* - Integrações (UTMFY, etc.)
+- /integracoes/* - Integrações
 
 C. Rotas de Gerência (check.auth)
 - /gerencia/clientes - Gestão de clientes

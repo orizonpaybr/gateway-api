@@ -10,12 +10,10 @@ use App\Http\Controllers\User\ChavesApiControlller;
 use App\Http\Controllers\User\CheckoutControlller;
 use App\Http\Controllers\User\FinanceiroControlller;
 use App\Http\Controllers\User\RelatoriosControlller;
-use App\Http\Controllers\Admin\Ajustes\LandingPageController;
 use App\Http\Controllers\Admin\Ajustes\NivelController;
 use App\Http\Controllers\User\OrderbumpController;
 use App\Http\Controllers\User\OrderController;
 use App\Http\Controllers\User\WebhookController;
-use App\Http\Controllers\Api\Adquirentes\PixupController;
 use App\Http\Controllers\Api\UnifiedCallbackController;
 use App\Http\Controllers\ObrigadoController;
 use Illuminate\Support\Facades\Http;
@@ -117,7 +115,6 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     Route::group(['prefix'=> 'integracoes'], function () {
         Route::get('/', [IntegracaoController::class, 'index'])->name('integracoes.home');
-        Route::post('/utmfy', [IntegracaoController::class, 'utmfy'])->name('integracoes.utmfy.edit');
     });
 
 

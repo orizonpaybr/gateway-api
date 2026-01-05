@@ -3,16 +3,13 @@
 namespace App\Traits;
 
 use Carbon\Carbon;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
 use App\Models\App;
 use App\Models\User;
-use App\Helpers\Helper;
 use App\Services\PixupService;
-use App\Traits\SplitTrait;
 use App\Traits\IPManagementTrait;
 use App\Helpers\TaxaFlexivelHelper;
 
@@ -44,7 +41,7 @@ trait PixupTrait
      */
     public static function requestDepositPixup($request)
     {
-        \Log::info('🔍 PixupTrait::requestDepositPixup - INÍCIO', [
+        Log::info('PixupTrait::requestDepositPixup - INÍCIO', [
             'checkout_id' => $request->checkout_id ?? null,
             'metodo' => $request->metodo ?? null,
             'amount' => $request->amount,
@@ -72,7 +69,7 @@ trait PixupTrait
                 $checkout = \App\Models\CheckoutBuild::where('id', $request->checkout_id)->first();
                 if ($checkout) {
                     $user = \App\Models\User::where('id', $checkout->user_id)->first();
-                    \Log::info('🔍 PixupTrait: Usuário obtido via checkout', [
+                    Log::info('PixupTrait: Usuário obtido via checkout', [
                         'checkout_id' => $request->checkout_id,
                         'user_id' => $user ? $user->id : 'não encontrado'
                     ]);
@@ -223,17 +220,6 @@ trait PixupTrait
                 'deposito_liquido' => $solicitacao->deposito_liquido,
                 'taxa_cash_in' => $solicitacao->taxa_cash_in
             ]);
-
-            // UTMfy integration
-            if (!is_null($user->integracao_utmfy)) {
-                $ip = $request->header('X-Forwarded-For') ?
-                    $request->header('X-Forwarded-For') : ($request->header('CF-Connecting-IP') ?
-                        $request->header('CF-Connecting-IP') :
-                        $request->ip());
-
-                $msg = "PIX Gerado " . env('APP_NAME');
-                UtmfyTrait::gerarUTM('pix', 'waiting_payment', $solicitacao->toArray(), $user->integracao_utmfy, $ip, $msg);
-            }
 
             Log::info('=== PIXUPTRAIT REQUEST DEPOSIT FINALIZADO ===');
 

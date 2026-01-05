@@ -8,7 +8,6 @@ use App\Models\User;
 use App\Services\WooviService;
 use App\Helpers\Helper;
 use App\Traits\IPManagementTrait;
-use App\Traits\UtmfyTrait;
 use App\Helpers\TaxaFlexivelHelper;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
@@ -41,7 +40,7 @@ trait WooviTrait
      */
     public static function requestPaymentWoovi($request)
     {
-        \Log::info('🔍 WooviTrait::requestPaymentWoovi - INÍCIO', [
+        Log::info('WooviTrait::requestPaymentWoovi - INÍCIO', [
             'checkout_id' => $request->checkout_id,
             'metodo' => $request->metodo,
             'valor_total' => $request->valor_total,
@@ -69,7 +68,7 @@ trait WooviTrait
                 $checkout = \App\Models\CheckoutBuild::where('id', $request->checkout_id)->first();
                 if ($checkout) {
                     $user = \App\Models\User::where('id', $checkout->user_id)->first();
-                    \Log::info('🔍 WooviTrait: Usuário obtido via checkout', [
+                    Log::info('WooviTrait: Usuário obtido via checkout', [
                         'checkout_id' => $request->checkout_id,
                         'user_id' => $user ? $user->id : 'não encontrado'
                     ]);
@@ -220,17 +219,6 @@ trait WooviTrait
                 'deposito_liquido' => $solicitacao->deposito_liquido,
                 'taxa_cash_in' => $solicitacao->taxa_cash_in
             ]);
-
-            // UTMfy integration
-            if (!is_null($user->integracao_utmfy)) {
-                $ip = $request->header('X-Forwarded-For') ?
-                    $request->header('X-Forwarded-For') : ($request->header('CF-Connecting-IP') ?
-                        $request->header('CF-Connecting-IP') :
-                        $request->ip());
-
-                $msg = "PIX Gerado " . env('APP_NAME');
-                UtmfyTrait::gerarUTM('pix', 'waiting_payment', $solicitacao->toArray(), $user->integracao_utmfy, $ip, $msg);
-            }
 
             Log::info('=== WOOVITRAIT REQUEST PAYMENT FINALIZADO ===');
 
@@ -584,11 +572,11 @@ trait WooviTrait
     public static function liberarSaqueManual($id)
     {
         try {
-            \Log::info('WooviTrait::liberarSaqueManual - Iniciando liberação manual', ['id' => $id]);
+            Log::info('WooviTrait::liberarSaqueManual - Iniciando liberação manual', ['id' => $id]);
 
             $cashout = \App\Models\SolicitacoesCashOut::where('id', $id)->first();
             if (!$cashout) {
-                \Log::warning('WooviTrait::liberarSaqueManual - Solicitação não encontrada', ['id' => $id]);
+                Log::warning('WooviTrait::liberarSaqueManual - Solicitação não encontrada', ['id' => $id]);
                 return back()->with('error', 'Solicitação de saque não encontrada.');
             }
 
@@ -599,10 +587,10 @@ trait WooviTrait
             ];
 
             \App\Models\SolicitacoesCashOut::where('id', $id)->update($update);
-            \Log::info('WooviTrait::liberarSaqueManual - Solicitação atualizada com sucesso', ['id' => $id, 'update' => $update]);
+            Log::info('WooviTrait::liberarSaqueManual - Solicitação atualizada com sucesso', ['id' => $id, 'update' => $update]);
             return back()->with('success', "Saque atualizado para 'PAGO' com sucesso!");
         } catch (\Exception $e) {
-            \Log::error('WooviTrait::liberarSaqueManual - Exceção', ['message' => $e->getMessage()]);
+            Log::error('WooviTrait::liberarSaqueManual - Exceção', ['message' => $e->getMessage()]);
             return back()->with('error', 'Erro ao liberar saque manual.');
         }
     }

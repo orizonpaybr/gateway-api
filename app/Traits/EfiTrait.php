@@ -13,12 +13,8 @@ use App\Models\App;
 use App\Models\User;
 use App\Models\Efi;
 use App\Helpers\Helper;
-use App\Models\CheckoutBuild;
 use App\Models\CheckoutOrders;
 use App\Models\Transactions;
-use Illuminate\Support\Facades\Request;
-use Efi\Exception\EfiException;
-use Efi\EfiPay;
 
 trait EfiTrait
 {
@@ -143,7 +139,7 @@ trait EfiTrait
 
     public static function requestDepositEfi($request)
     {
-        Log::info('🔍 EfiTrait::requestDepositEfi - INÍCIO', [
+        Log::info('EfiTrait::requestDepositEfi - INÍCIO', [
             'checkout_id' => $request->checkout_id ?? null,
             'metodo' => $request->metodo ?? null,
             'amount' => $request->amount,
@@ -171,7 +167,7 @@ trait EfiTrait
                 $checkout = \App\Models\CheckoutBuild::where('id', $request->checkout_id)->first();
                 if ($checkout) {
                     $user = \App\Models\User::where('id', $checkout->user_id)->first();
-                    Log::info('🔍 EfiTrait: Usuário obtido via checkout', [
+                    Log::info('EfiTrait: Usuário obtido via checkout', [
                         'checkout_id' => $request->checkout_id,
                         'user_id' => $user ? $user->id : 'não encontrado'
                     ]);
@@ -341,17 +337,6 @@ trait EfiTrait
                 'deposito_liquido' => $solicitacao->deposito_liquido,
                 'taxa_cash_in' => $solicitacao->taxa_cash_in
             ]);
-
-            // UTMfy integration
-            if (!is_null($user->integracao_utmfy)) {
-                $ip = $request->header('X-Forwarded-For') ?
-                    $request->header('X-Forwarded-For') : ($request->header('CF-Connecting-IP') ?
-                        $request->header('CF-Connecting-IP') :
-                        $request->ip());
-
-                $msg = "PIX Gerado " . env('APP_NAME');
-                \App\Traits\UtmfyTrait::gerarUTM('pix', 'waiting_payment', $solicitacao->toArray(), $user->integracao_utmfy, $ip, $msg);
-            }
 
             Log::info('=== EFITRAIT REQUEST DEPOSIT FINALIZADO ===');
 
@@ -759,16 +744,6 @@ trait EfiTrait
             Log::debug('[+][EFI][REQUESTBILLET][SOLICITACAO DATA]: ' . json_encode($cashin));
             Solicitacoes::create($cashin);
 
-            $ip = $request->header('X-Forwarded-For') ?
-                $request->header('X-Forwarded-For') : ($request->header('CF-Connecting-IP') ?
-                    $request->header('CF-Connecting-IP') :
-                    $request->ip());
-            $user = $request->user;
-            if (!is_null($user->integracao_utmfy)) {
-                $mensagem = "Boleto Gerado - " . env('APP_NAME');
-                UtmfyTrait::gerarUTM('boleto', 'paid', $cashin, $user->integracao_utmfy, $ip, $mensagem);
-            }
-
             return [
                 "data" => [
                     "idTransaction" => $external_id,
@@ -876,11 +851,6 @@ trait EfiTrait
                         $request->header('CF-Connecting-IP') :
                         $request->ip());
 
-                $user = $request['user'];
-                if (!is_null($user->integracao_utmfy)) {
-                    $msg = "Cartão de crédito - " . env('APP_NAME');
-                    UtmfyTrait::gerarUTM('credit_card', 'paid', $cashin, $user->integracao_utmfy, $ip, $msg);
-                }
                 return [
                     "data" => [
                         "idTransaction" => $external_id,
@@ -996,12 +966,6 @@ trait EfiTrait
                             'Content-Type' => 'application/json',
                             'accept' => 'application/json'
                         ])->post($cashin->callback, $payload);
-
-                        $ip = "127.0.0.1";
-                        if (!is_null($user->integracao_utmfy)) {
-                            $mensagem = "Boleto Pago - " . env('APP_NAME');
-                            UtmfyTrait::gerarUTM('boleto', 'paid', $cashin, $user->integracao_utmfy, $ip, $mensagem);
-                        }
 
                         $success = 'paid';
                         return response()->json(['status' => $success]);

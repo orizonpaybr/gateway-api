@@ -8,9 +8,9 @@ use App\Models\App;
 use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
-use App\Traits\UtmfyTrait;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 trait MercadoPagoTrait
@@ -112,16 +112,6 @@ trait MercadoPagoTrait
                 ];
 
                 Solicitacoes::create($cashin);
-
-                if (!is_null($user->integracao_utmfy)) {
-
-                    $ip = $request->header('X-Forwarded-For') ?
-                        $request->header('X-Forwarded-For') : ($request->header('CF-Connecting-IP') ?
-                            $request->header('CF-Connecting-IP') :
-                            $request->ip());
-                    $msg = "PIX Gerado " . env('APP_NAME');
-                    UtmfyTrait::gerarUTM('pix', 'waiting_payment', $cashin, $user->integracao_utmfy, $ip, $msg);
-                }
 
                 return [
                     "data" => [
@@ -313,7 +303,7 @@ trait MercadoPagoTrait
                 ]
             ];
         } catch (\Exception $e) {
-            \Log::error('Erro no MercadoPagoTrait::processarSaqueAutomatico: ' . $e->getMessage());
+            Log::error('Erro no MercadoPagoTrait::processarSaqueAutomatico: ' . $e->getMessage());
             return [
                 "status" => 500,
                 "data" => [

@@ -296,13 +296,6 @@ Route::middleware(['verify.jwt'])->group(function () {
     Route::get('integration/allowed-ips', [App\Http\Controllers\Api\IntegrationController::class, 'getAllowedIPs'])->middleware(['secure.cors', 'throttle:60,1']);
     Route::post('integration/allowed-ips', [App\Http\Controllers\Api\IntegrationController::class, 'addAllowedIP'])->middleware(['secure.cors', 'throttle:20,1']);
     Route::delete('integration/allowed-ips/{ip}', [App\Http\Controllers\Api\IntegrationController::class, 'removeAllowedIP'])->middleware(['secure.cors', 'throttle:20,1']);
-    
-    // Integração Utmify - Rastreamento e conversões
-    // Rate limiting: GET config (60 req/min), POST/DELETE config (10 req/min), Test (5 req/min)
-    Route::get('utmify/config', [App\Http\Controllers\Api\UtmifyController::class, 'getConfig'])->middleware(['secure.cors', 'throttle:60,1']);
-    Route::post('utmify/config', [App\Http\Controllers\Api\UtmifyController::class, 'saveConfig'])->middleware(['secure.cors', 'throttle:10,1']);
-    Route::delete('utmify/config', [App\Http\Controllers\Api\UtmifyController::class, 'deleteConfig'])->middleware(['secure.cors', 'throttle:10,1']);
-    Route::post('utmify/test', [App\Http\Controllers\Api\UtmifyController::class, 'testConnection'])->middleware(['secure.cors', 'throttle:5,1']);
 });
 
 // Rotas protegidas com token + secret (para integrações externas e APIs)

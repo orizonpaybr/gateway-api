@@ -9,7 +9,7 @@ class UserAccountDataSeeder extends Seeder
 {
     /**
      * Completar dados da conta dos usuários
-     * Incluindo integração Utmfy, taxas personalizadas, webhooks, etc.
+     * Incluindo taxas personalizadas, webhooks, etc.
      */
     public function run(): void
     {
@@ -40,11 +40,6 @@ class UserAccountDataSeeder extends Seeder
             }
             if ($schema->hasColumn('users', 'cartao_cnpj')) {
                 $updateData['cartao_cnpj'] = $isGerente ? $this->randomCNPJ() : null;
-            }
-            
-            // Integração Utmfy (apenas para gerentes)
-            if ($schema->hasColumn('users', 'integracao_utmfy') && $isGerente) {
-                $updateData['integracao_utmfy'] = 'utmfy_key_' . strtoupper(uniqid());
             }
             
             // Webhooks (apenas para gerentes)
@@ -185,17 +180,12 @@ class UserAccountDataSeeder extends Seeder
                 DB::table('users')->where('id', $user->id)->update($updateData);
             }
 
-            $utmfyStatus = isset($updateData['integracao_utmfy']) && $updateData['integracao_utmfy'] 
-                ? 'Configurado' 
-                : 'Não configurado';
-            
             $this->command->info(
                 sprintf(
-                    "✅ Dados completos para: %s (%s) | %s | Utmfy: %s",
+                    "✅ Dados completos para: %s (%s) | %s",
                     $user->name,
                     $user->username,
-                    $isGerente ? 'Gerente' : 'Usuário',
-                    $utmfyStatus
+                    $isGerente ? 'Gerente' : 'Usuário'
                 )
             );
         }

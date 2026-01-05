@@ -86,7 +86,6 @@ class User extends Authenticatable
         "gerente_aprovar",
         "webhook_url",
         "webhook_endpoint",
-        "integracao_utmfy",
         "taxas_personalizadas_ativas",
         "taxa_percentual_deposito",
         "taxa_fixa_deposito",

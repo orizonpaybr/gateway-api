@@ -2,18 +2,18 @@
 
 namespace App\Traits;
 
-use App\DTO\WitetecDTO\CustomerDTO;
-use App\DTO\WitetecDTO\DepositDTO;
-use App\DTO\WitetecDTO\Enums\DepositMethod;
-use App\DTO\WitetecDTO\ItemDTO;
 use App\Services\WitetecService;
 use Carbon\Carbon;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
 use App\Models\{App, User, Witetec, Solicitacoes, SolicitacoesCashOut};
 use App\Helpers\Helper;
-use App\DTO\ApiDepositDTO;
 use App\DTO\WitetecDTO\Enums\PixKeyType;
+use App\DTO\WitetecDTO\Enums\DepositMethod;
 use App\DTO\WitetecDTO\WithdrawDTO;
+use App\DTO\WitetecDTO\DepositDTO;
+use App\DTO\WitetecDTO\CustomerDTO;
+use App\DTO\WitetecDTO\ItemDTO;
 
 trait WitetecTrait
 {
@@ -44,7 +44,7 @@ trait WitetecTrait
 
     public static function requestDepositWitetec($request)
     {
-        \Log::info('🔍 WitetecTrait::requestDepositWitetec - INÍCIO', [
+        Log::info('WitetecTrait::requestDepositWitetec - INÍCIO', [
             'checkout_id' => $request->checkout_id ?? null,
             'metodo' => $request->metodo ?? null,
             'amount' => $request->amount,
@@ -72,7 +72,7 @@ trait WitetecTrait
                 $checkout = \App\Models\CheckoutBuild::where('id', $request->checkout_id)->first();
                 if ($checkout) {
                     $user = \App\Models\User::where('id', $checkout->user_id)->first();
-                    \Log::info('🔍 WitetecTrait: Usuário obtido via checkout', [
+                    Log::info('WitetecTrait: Usuário obtido via checkout', [
                         'checkout_id' => $request->checkout_id,
                         'user_id' => $user ? $user->id : 'não encontrado'
                     ]);
@@ -168,7 +168,7 @@ trait WitetecTrait
                 }
             }
 
-            $customer = new \App\DTOs\CustomerDTO(
+            $customer = new CustomerDTO(
                 $request->debtor_name ?? $request->name ?? $user->name,
                 $request->email ?? $user->email,
                 $request->phone ?? $request->telefone ?? $user->telefone ?? '11999999999',
@@ -176,7 +176,7 @@ trait WitetecTrait
                 $documentNumber
             );
 
-            $item = new \App\DTOs\ItemDTO(
+            $item = new ItemDTO(
                 "Produto X",
                 $valor * 100,
                 1,
@@ -184,9 +184,9 @@ trait WitetecTrait
                 uniqid("PROD_")
             );
 
-            $deposit = new \App\DTOs\DepositDTO(
+            $deposit = new DepositDTO(
                 $valor * 100,
-                \App\Enums\DepositMethod::PIX,
+                DepositMethod::PIX,
                 $customer,
                 [$item],
                 null
@@ -254,17 +254,6 @@ trait WitetecTrait
                 'deposito_liquido' => $solicitacao->deposito_liquido,
                 'taxa_cash_in' => $solicitacao->taxa_cash_in
             ]);
-
-            // UTMfy integration
-            if (!is_null($user->integracao_utmfy)) {
-                $ip = $request->header('X-Forwarded-For') ?
-                    $request->header('X-Forwarded-For') : ($request->header('CF-Connecting-IP') ?
-                        $request->header('CF-Connecting-IP') :
-                        $request->ip());
-
-                $msg = "PIX Gerado " . env('APP_NAME');
-                \App\Traits\UtmfyTrait::gerarUTM('pix', 'waiting_payment', $solicitacao->toArray(), $user->integracao_utmfy, $ip, $msg);
-            }
 
             Log::info('=== WITETECTRAIT REQUEST DEPOSIT FINALIZADO ===');
 
@@ -561,7 +550,7 @@ trait WitetecTrait
                     $pixKeyType = PixKeyType::PHONE;
                     break;
                 case 'aleatoria':
-                    $pixKeyType = PixKeyType::RANDOM;
+                    $pixKeyType = PixKeyType::EVP;
                     break;
             }
 
@@ -570,23 +559,18 @@ trait WitetecTrait
                 $pixKey = preg_replace('/[^0-9]/', '', $pixKey);
             }
 
-            $payload = [
-                'amount' => $request->amount,
-                'pix_key' => $pixKey,
-                'pix_key_type' => $pixKeyType,
-                'description' => "Saque automático - " . $request->user()->name,
-                'beneficiary_name' => $request->user()->name,
-                'beneficiary_document' => $pixKey
-            ];
+            $payload = new WithdrawDTO(
+                $cashout_liquido * 100,
+                $pixKey,
+                $pixKeyType,
+                "PIX"
+            );
 
-            $response = Http::withHeaders([
-                'Content-Type' => 'application/json',
-                'Accept' => 'application/json',
-                'Authorization' => 'Bearer ' . self::$accessToken,
-            ])->post(self::$urlPixOut, $payload);
+            $api = new WitetecService(self::$baseUrl, self::$apiKey);
+            $response = $api->withdraw($payload);
 
-            if ($response->successful()) {
-                $responseData = $response->json();
+            if ($response['status']) {
+                $responseData = $response['data'];
                 
                 // Criar registro de saque automático
                 $idTransaction = $responseData['id'] ?? Str::uuid()->toString();

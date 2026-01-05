@@ -10,7 +10,6 @@ use App\Models\SolicitacoesCashOut;
 use App\Models\Transactions;
 use App\Models\User;
 use App\Services\PushNotificationService;
-use App\Traits\UtmfyTrait;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
@@ -89,22 +88,6 @@ class XgateController extends Controller
                                     'status' => 'pago'
                                 ]);
                         }
-                    }
-
-                    if (!is_null($user->integracao_utmfy)) {
-                        $payload = [
-                            'name' => $cashin['client_name'],
-                            'email' => $cashin['client_email'],
-                            'phone' => $cashin['client_telefone'],
-                            'cpf' => $cashin['client_document'],
-                            'value' => $cashin->amount
-                        ];
-                        $ip = $request->header('X-Forwarded-For') ?
-                            $request->header('X-Forwarded-For') : ($request->header('CF-Connecting-IP') ?
-                                $request->header('CF-Connecting-IP') :
-                                $request->ip());
-                        $msg = "PIX Pago " . env('APP_NAME');
-                        UtmfyTrait::gerarUTM('PIX', 'paid', $cashin, $user->integracao_utmfy, $ip, $msg);
                     }
 
                     if ($cashin->callback && $cashin->callback != 'web') {

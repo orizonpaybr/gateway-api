@@ -16,7 +16,6 @@ use App\Models\CheckoutOrders;
 use App\Models\Transactions;
 use App\Models\Woovi;
 use App\Services\PushNotificationService;
-use App\Traits\UtmfyTrait;
 use App\Traits\SplitTrait;
 use App\Helpers\SecureLog;
 
@@ -81,12 +80,6 @@ class CallbackController extends Controller
                     ]);
                 }
             }
-
-            if (!is_null($user->integracao_utmfy)) {
-                $ip = $request->ip();
-                $msg = "PIX Pago " . env('APP_NAME');
-                UtmfyTrait::gerarUTM('PIX', 'paid', $cashin, $user->integracao_utmfy, $ip, $msg);
-            }
         }
 
         if ($cashin->callback) {
@@ -97,7 +90,7 @@ class CallbackController extends Controller
             ];
 
             Http::post($cashin->callback, $payload);
-            \Log::debug("[PIX-IN] Send Callback: Para $cashin->callback -> Enviando...");
+            Log::debug("[PIX-IN] Send Callback: Para $cashin->callback -> Enviando...");
 
             if ($cashin->callback != 'web') {
                 return response()->json(['status' => 'paid']);
@@ -116,7 +109,7 @@ class CallbackController extends Controller
 
         // Validação mais rigorosa dos dados do callback
         if (!isset($data['withdrawStatusId']) || !isset($data['id']) || !isset($data['amount'])) {
-            \Log::warning("[PIX-OUT] Callback inválido - dados obrigatórios ausentes");
+            Log::warning("[PIX-OUT] Callback inválido - dados obrigatórios ausentes");
             return response()->json(['status' => false, 'message' => 'Dados inválidos']);
         }
 
@@ -130,7 +123,7 @@ class CallbackController extends Controller
             $cashout->update(['status' => 'COMPLETED', 'updated_at' => $data['updatedAt']]);
             $user = User::where('user_id', $cashout->user_id)->first();
             if ($user) {
-                Helper::decrementAmount($user, $request->amount, 'valor_saque_pendente');
+                Helper::decrementAmount($user, $data['amount'] ?? $cashout->amount, 'valor_saque_pendente');
             }
 
 
@@ -147,7 +140,7 @@ class CallbackController extends Controller
                     'accept' => 'application/json'
                 ])->post($cashout->callback, $payload);
 
-                \Log::debug("[PIX-OUT] Send Callback: Para $cashout->callback -> Enviando...");
+                Log::debug("[PIX-OUT] Send Callback: Para $cashout->callback -> Enviando...");
                 if ($cashout->callback && $cashout->callback != 'web') {
                     $payload = [
                         "status"            => "paid",
@@ -256,22 +249,6 @@ class CallbackController extends Controller
                     }
                 }
 
-                if (!is_null($user->integracao_utmfy)) {
-                    $payload = [
-                        'name' => $cashin['client_name'],
-                        'email' => $cashin['client_email'],
-                        'phone' => $cashin['client_telefone'],
-                        'cpf' => $cashin['client_document'],
-                        'value' => $cashin->amount
-                    ];
-                    $ip = $request->header('X-Forwarded-For') ?
-                        $request->header('X-Forwarded-For') : ($request->header('CF-Connecting-IP') ?
-                            $request->header('CF-Connecting-IP') :
-                            $request->ip());
-                    $msg = "PIX Pago " . env('APP_NAME');
-                    UtmfyTrait::gerarUTM('PIX', 'paid', $cashin, $user->integracao_utmfy, $ip, $msg);
-                }
-
                 if ($cashin->callback && $cashin->callback != 'web') {
                     $payload = [
                         "status"            => "paid",
@@ -284,7 +261,7 @@ class CallbackController extends Controller
                         'accept' => 'application/json'
                     ])->post($cashin->callback, $payload);
 
-                    \Log::debug("[PIX-IN] Send Callback: Para $cashin->callback -> Enviando...");
+                    Log::debug("[PIX-IN] Send Callback: Para $cashin->callback -> Enviando...");
                     return response()->json(['status' => 'paid']);
                 } else {
                     $order = CheckoutOrders::where('idTransaction', $data['data_id'])->first();
@@ -315,7 +292,7 @@ class CallbackController extends Controller
 
         $dados = $data['pix'][0];
         $tipo = isset($dados['tipo']) && $dados['tipo'] == 'SOLICITACAO' ? 'saque' : 'deposito';
-        \Log::debug('[+] Tipo de callback Efí: ' . $tipo);
+        Log::debug('[+] Tipo de callback Efí: ' . $tipo);
 
         switch ($tipo) {
             case 'deposito':
@@ -372,22 +349,6 @@ class CallbackController extends Controller
                         }
                     }
 
-                    if (!is_null($user->integracao_utmfy)) {
-                        $payload = [
-                            'name' => $cashin['client_name'],
-                            'email' => $cashin['client_email'],
-                            'phone' => $cashin['client_telefone'],
-                            'cpf' => $cashin['client_document'],
-                            'value' => $cashin->amount
-                        ];
-                        $ip = $request->header('X-Forwarded-For') ?
-                            $request->header('X-Forwarded-For') : ($request->header('CF-Connecting-IP') ?
-                                $request->header('CF-Connecting-IP') :
-                                $request->ip());
-                        $msg = "PIX Pago " . env('APP_NAME');
-                        UtmfyTrait::gerarUTM('PIX', 'paid', $cashin, $user->integracao_utmfy, $ip, $msg);
-                    }
-
                     if ($cashin->callback && $cashin->callback != 'web') {
                         $payload = [
                             "status"            => "paid",
@@ -400,7 +361,7 @@ class CallbackController extends Controller
                             'accept' => 'application/json'
                         ])->post($cashin->callback, $payload);
 
-                        \Log::debug("[PIX-IN] Send Callback: Para $cashin->callback -> Enviando...");
+                        Log::debug("[PIX-IN] Send Callback: Para $cashin->callback -> Enviando...");
                         if ($cashin->callback && $cashin->callback != 'web') {
                             $payload = [
                                 "status"            => "paid",
@@ -445,7 +406,7 @@ class CallbackController extends Controller
                     $cashout->update(['status' => 'COMPLETED']);
                     $user = User::where('user_id', $cashout->user_id)->first();
                     if ($user) {
-                        Helper::decrementAmount($user, $request->amount, 'valor_saque_pendente');
+                        Helper::decrementAmount($user, $cashout->amount, 'valor_saque_pendente');
                     }
 
                     if ($cashout->callback && $cashout->callback != 'web') {
@@ -460,7 +421,7 @@ class CallbackController extends Controller
                             'accept' => 'application/json'
                         ])->post($cashout->callback, $payload);
 
-                        \Log::debug("[PIX-OUT] Send Callback: Para $cashout->callback -> Enviando...");
+                        Log::debug("[PIX-OUT] Send Callback: Para $cashout->callback -> Enviando...");
                         if ($cashout->callback && $cashout->callback != 'web') {
                             $payload = [
                                 "status"            => "paid",
@@ -501,7 +462,7 @@ class CallbackController extends Controller
                             'accept' => 'application/json'
                         ])->post($cashout->callback, $payload);
 
-                        \Log::debug("[PIX-OUT] Send Callback: Para $cashout->callback -> Enviando...");
+                        Log::debug("[PIX-OUT] Send Callback: Para $cashout->callback -> Enviando...");
                         if ($cashout->callback && $cashout->callback != 'web') {
                             $payload = [
                                 "status"            => "canceled",
@@ -571,23 +532,6 @@ class CallbackController extends Controller
                 }
             }
 
-            if (!is_null($user->integracao_utmfy)) {
-                $payload = [
-                    'name' => $cashin['client_name'],
-                    'email' => $cashin['client_email'],
-                    'phone' => $cashin['client_telefone'],
-                    'cpf' => $cashin['client_document'],
-                    'value' => $cashin->amount
-                ];
-
-                $ip = $request->header('X-Forwarded-For') ?
-                    $request->header('X-Forwarded-For') : ($request->header('CF-Connecting-IP') ?
-                        $request->header('CF-Connecting-IP') :
-                        $request->ip());
-                $msg = "PIX Pago " . env('APP_NAME');
-                UtmfyTrait::gerarUTM('PIX', 'paid', $cashin, $user->integracao_utmfy, $ip, $msg);
-            }
-
             $order = CheckoutOrders::where('idTransaction', $transaction_id)->first();
             if ($order) {
                 $order->update(['status' => 'pago']);
@@ -615,7 +559,7 @@ class CallbackController extends Controller
                     'accept' => 'application/json'
                 ])->post($cashin->callback, $payload);
 
-                \Log::debug("[PIX-IN] Send Callback: Para $cashin->callback -> Enviando...");
+                Log::debug("[PIX-IN] Send Callback: Para $cashin->callback -> Enviando...");
                 if ($cashin->callback && $cashin->callback != 'web') {
                     $payload = [
                         "status"            => "paid",

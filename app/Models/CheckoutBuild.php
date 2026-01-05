@@ -52,7 +52,6 @@ class CheckoutBuild extends Model
         'checkout_ads_meta',
         'checkout_ads_google',
         'checkout_ads_tiktok',
-        'checkout_ads_utmfy',
         'status',
         'methods'
     ];
