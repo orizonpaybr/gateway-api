@@ -74,5 +74,20 @@ class UserStatusHelper
     {
         return $user->status == UserStatus::INACTIVE && !$user->banido;
     }
+    
+    /**
+     * Verificar se usuário está aprovado e pode realizar operações
+     * 
+     * Usuário está aprovado quando:
+     * - Status é ACTIVE (1)
+     * - Não está banido
+     * 
+     * @param User $user
+     * @return bool
+     */
+    public static function isApproved(User $user): bool
+    {
+        return $user->status == UserStatus::ACTIVE && !($user->banido ?? false);
+    }
 }
 

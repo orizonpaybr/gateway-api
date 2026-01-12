@@ -392,6 +392,21 @@ class PixKeyController extends Controller
                 ], 401)->header('Access-Control-Allow-Origin', '*');
             }
 
+            // Verificar se usuário está aprovado (status = ACTIVE e não banido)
+            if (!\App\Helpers\UserStatusHelper::isApproved($user)) {
+                Log::warning('Tentativa de saque PIX com conta não aprovada', [
+                    'username' => $user->username,
+                    'status' => $user->status,
+                    'banido' => $user->banido ?? false,
+                    'ip' => $request->ip()
+                ]);
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Sua conta precisa estar aprovada para realizar saques PIX. Entre em contato com o suporte.'
+                ], 403)->header('Access-Control-Allow-Origin', '*');
+            }
+
             $validator = Validator::make($request->all(), [
                 'key_id' => 'nullable|exists:pix_keys,id',
                 'key_type' => 'required_without:key_id|in:cpf,cnpj,telefone,email,aleatoria',

@@ -444,7 +444,7 @@ class UserController extends Controller
      * Gerar QR Code para recebimento PIX
      */
     public function generatePixQR(Request $request)
-    {
+    {   
         try {
             // Obter usuário do middleware verify.jwt
             $user = $request->user() ?? $request->input('user_auth');
@@ -454,6 +454,21 @@ class UserController extends Controller
                     'success' => false,
                     'message' => 'Usuário não autenticado'
                 ], 401)->header('Access-Control-Allow-Origin', '*');
+            }
+
+            // Verificar se usuário está aprovado (status = ACTIVE e não banido)
+            if (!\App\Helpers\UserStatusHelper::isApproved($user)) {
+                Log::warning('Tentativa de gerar QR Code PIX com conta não aprovada', [
+                    'username' => $user->username,
+                    'status' => $user->status,
+                    'banido' => $user->banido ?? false,
+                    'ip' => $request->ip()
+                ]);
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Sua conta precisa estar aprovada para gerar QR Codes PIX. Entre em contato com o suporte.'
+                ], 403)->header('Access-Control-Allow-Origin', '*');
             }
 
             $validator = Validator::make($request->all(), [
@@ -531,6 +546,7 @@ class UserController extends Controller
                     'response' => $response,
                     'user_id' => $user->username
                 ]);
+
 
                 return response()->json([
                     'success' => false,
