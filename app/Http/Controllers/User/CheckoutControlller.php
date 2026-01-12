@@ -105,7 +105,7 @@ class CheckoutControlller extends Controller
     public function edit($id, Request $request)
     {
         // Validação dos campos obrigatórios
-        $request->validate([
+        $request->validate([    
             "produto_name" => "required|string",
             "produto_valor" => "required|numeric|min:0.01",
             "produto_descricao" => "required|string",

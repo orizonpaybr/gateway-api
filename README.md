@@ -1,327 +1,244 @@
-# 🚀 HKPAY - Sistema de Pagamentos Completo
+# 🚀 Gateway API - Sistema de Pagamentos
 
 [![PHP](https://img.shields.io/badge/PHP-8.4-blue)](https://php.net)
 [![Laravel](https://img.shields.io/badge/Laravel-11.31-red)](https://laravel.com)
 [![MySQL](https://img.shields.io/badge/MySQL-8.4-orange)](https://mysql.com)
-[![PrimePay7](https://img.shields.io/badge/PrimePay7-Integrated-green)](https://primepay7.com)
 
-> Plataforma completa de pagamentos digitais com recursos avançados de gestão financeira, múltiplas adquirentes integradas e sistema de comissões para gerentes.
+> Gateway de pagamentos completo desenvolvido em Laravel 11, fornecendo API REST robusta para processamento de transações PIX, cartão de crédito, boleto e criptomoedas através de múltiplos adquirentes.
 
 ---
 
-## 📋 **VISÃO GERAL**
+## 📋 Visão Geral
 
-O HKPAY é uma solução completa para processamento de pagamentos digitais, oferecendo:
+Sistema completo de gateway de pagamentos com recursos avançados de gestão financeira, múltiplas adquirentes integradas e sistema de comissões para gerentes.
 
-- 💳 **Multiple Payment Methods**: PIX, Cartão de Crédito, Boleto Bancário
-- 🔐 **3D Secure Completo**: Autenticação segura para cartões
+### Recursos Principais
+
+- 💳 **Métodos de Pagamento**: PIX, Cartão de Crédito, Boleto Bancário
+- 🔐 **3D Secure**: Autenticação segura para cartões
 - 👥 **Sistema de Gerentes**: Comissões automáticas e gestão de clientes
-- 📊 **Analytics Avançados**: Relatórios detalhados e métricas
-- 🏦 **8+ Adquirentes**: Integração com principais gateways do Brasil
+- 📊 **Analytics**: Relatórios detalhados e métricas
+- 🏦 **10+ Adquirentes**: Integração com principais gateways do Brasil
 - 🎛️ **Painel Administrativo**: Gestão completa do sistema
 
----
+### Adquirentes Integrados
 
-## 🚀 **MÓDULOS PRINCIPAIS**
-
-### 1. 💳 **SISTEMA DE CHECKOUT AVANÇADO**
-
-#### **Recursos do Checkout:**
-- ✅ **Multiple Payment Methods**: PIX, Cartão de Crédito, Boleto Bancário
-- ✅ **Formulários Dinâmicos**: Adapta-se ao método de pagamento selecionado
-- ✅ **Validação em Tempo Real**: Máscaras automáticas e validações
-- ✅ **Parcelamento Flexível**: Configurável por produto/usuário
-- ✅ **Webhooks Automáticos**: Notificações HTTP em tempo real
-- ✅ **Design Responsivo**: Funciona em todos os dispositivos
-
-#### **Integração com Cartão (PrimePay7):**
-- ✅ **3D Secure Completo**: Autenticação NONE, IFRAME, REDIRECT, SCRIPT
-- ✅ **Tokenização Segura**: Dados protegidos via ShieldHelper
-- ✅ **Criptografia**: Conforme padrões PCI DSS
-- ✅ **Anti-fraude**: Sistema integrado de segurança
-
-```javascript
-// Exemplo de integração 3DS
-await PrimePay7Integration.init('pk_live_...');
-await integration.prepareThreeDS({
-    amount: 1350, // em centavos
-    installments: 1
-});
-const token = await integration.encryptCard(cardData);
-```
-
-#### **Checkout por Referência:**
-- ✅ **Links Personalizados**: Gerados automaticamente por ID único
-- ✅ **URLs Customizáveis**: `/checkout/MEU_PRODUTO`
-- ✅ **Tracking de Vendas**: Por usuário/gerente
-- ✅ **Relatórios Detalhados**: Vendas, conversões, estatísticas
-
-### 2. 👥 **SISTEMA DE USUÁRIOS E PERMISSÕES**
-
-#### **Tipos de Usuário:**
-- **Usuário Comum (permission=1)**: Acesso a dashboard financeiro
-- **Admin (permission=3)**: Gestão completa do sistema
-- **Gerente (permission=5)**: Gestão de clientes específicos
-
-#### **Dashboard do Usuário:**
-- ✅ **Saldo em Tempo Real**: Depositos, saques, saldo líquido
-- ✅ **Histórico Completo**: Transações detalhadas
-- ✅ **Relatórios Avançados**: Por período, método, status
-- ✅ **Saque Automático**: Via PrimePay7 para PIX
-- ✅ **Webhooks**: Para integração com sistemas externos
-
-#### **Segurança Avançada:**
-- ✅ **2FA obrigatório**: Authenticator apps suportados
-- ✅ **Sessões duradoras**: Configurável por usuário
-- ✅ **Protection IP**: Lista de IPs autorizados
-- ✅ **Logs de Segurança**: Monitoramento completo
-
-### 3. 👨‍💼 **SISTEMA DE GERENTES**
-
-#### **Funcionalidades de Gerente:**
-- ✅ **Dashboard Específico**: Métricas dos clientes atribuídos
-- ✅ **Aprovação de Clientes**: Workflow de aprovação manual
-- ✅ **Gestão de Documentação**: Visualização de documentos KYC
-- ✅ **Configuração de Taxas**: Taxas personalizadas por cliente
-- ✅ **Relatórios de Comissão**: Cálculo automático de ganhos
-
-#### **Sistema de Comissões:**
-```php
-// Calculado automaticamente em cada depósito
-$comissao = ($taxa_cash_in * $gerente_percentage) / 100;
-```
-
-#### **Métricas do Gerente:**
-- ✅ **Clientes Ativos**: Quantidade de clientes aprovados
-- ✅ **Volume Movimentado**: Valor total processado
-- ✅ **Comissões Ganhas**: Total acumulado de comissões
-- ✅ **Taxa de Conversão**: Depósitos vs tentativas
-
-### 4. 🏦 **INTEGRAÇÕES COM ADQUIRENTES**
-
-#### **Adquirentes Suportadas:**
-- ✅ **PrimePay7**: PIX (Cash-in/out) + Cartões com 3DS
-- ✅ **EfiPay**: Cartões de crédito e PIX
-- ✅ **Asaas**: Boletos e PIX
-- ✅ **XDPag**: Múltiplos métodos de pagamento
-- ✅ **Pixup**: PIX instantâneo
-- ✅ **Witetec**: PIX e cartões
-- ✅ **BSPay**: PIX e transferências
-
-#### **Sistema Flexível de Taxas:**
-```php
-// Taxa Flexível - valores baixos e altos
-if ($valor < $taxa_flexivel_valor_minimo) {
-    $taxa = $taxa_flexivel_fixa_baixo; // Ex: R$ 1,20
-} else {
-    $taxa = ($valor * $taxa_flexivel_percentual_alto) / 100; // Ex: 2,50%
-}
-```
-
-#### **Taxas Personalizadas por Usuário:**
-- ✅ **Ativação Manual**: Gerente pode ativar/desativar
-- ✅ **Sobrescreve Sistema**: Taxas específicas do cliente
-- ✅ **Auditoria Completa**: Log de todas as alterações
-
-### 5. 📈 **SISTEMA DE RELATÓRIOS**
-
-#### **Relatórios Disponíveis:**
-- ✅ **Entradas**: Depósitos por período/método
-- ✅ **Saídas**: Saques realizados
-- ✅ **Comissões**: Ganhos de gerentes
-- ✅ **Clientes**: Novos/bans/aprovações
-- ✅ **Financeiro**: Balanço geral do sistema
-
-#### **Filtros Avançados:**
-- ✅ **Por Período**: Data inicial/final
-- ✅ **Por Status**: Pendente/aprovado/negado
-- ✅ **Por Método**: PIX/cartão/boleto
-- ✅ **Por Usuário**: Relatórios individuais
-- ✅ **Exportação**: CSV/PDF disponível
-
-### 6. 🎛️ **PAINEL ADMINISTRATIVO**
-
-#### **Configurações do Sistema:**
-- ✅ **Taxas Globais**: Configuração centralizada
-- ✅ **Adquirentes**: Ativar/desativar por tipo
-- ✅ **Gerentes**: Criar, editar, gerenciar comissões
-- ✅ **Usuários**: Gestão completa de contas
-- ✅ **Webhooks**: URLs de callback globais
-
-#### **Ferramentas Administrativas:**
-- ✅ **KYC**: Aprovação de documentos
-- ✅ **Banimentos**: Bloquear usuários específicos
-- ✅ **Logs do Sistema**: Monitoramento detalhado
-- ✅ **Backup Automático**: Segurança de dados
+- PrimePay7 (PIX + Cartões com 3DS)
+- EfiPay (Gerencianet)
+- Asaas
+- XDPag
+- Pixup
+- Witetec
+- BSPay
+- Woovi
+- Mercado Pago
+- Pagar.me
+- XGate
+- PagArm
 
 ---
 
-## 🛡️ **SEGURANÇA E COMPLIANCE**
+## 🚀 Instalação
 
-### **Medidas de Segurança:**
-- ✅ **HTTPS**: Todas as comunicações criptografadas
-- ✅ **Session Security**: Proteção contra session hijacking
-- ✅ **Input Validation**: Sanitização de todos os dados
-- ✅ **Rate Limiting**: Proteção contra ataques
-- ✅ **File Upload Security**: Validação de tipos e conteúdo
+### Requisitos
 
-### **Compliance:**
-- ✅ **PCI DSS**: Processamento seguro de cartões
-- ✅ **LGPD**: Conformidade com proteção de dados
-- ✅ **KYC**: Verificação de identidade regulamentada
-- ✅ **ML/TF**: Prevenção de lavagem de dinheiro
-
----
-
-## 💡 **APIS E INTEGRAÇÕES**
-
-### **Webhooks Suportados:**
-```json
-{
-  "event": "deposit.completed|withdrawal.completed|user.approved",
-  "transaction_id": "tx_123456",
-  "amount": 100.00,
-  "currency": "BRL",
-  "customer": {
-    "name": "João Silva",
-    "email": "joao@email.com"
-  }
-}
-```
-
-### **APIs REST:**
-- ✅ **Depósitos**: Criação e consulta
-- ✅ **Saques**: Solicitação e status
-- ✅ **Saldo**: Consulta em tempo real
-- ✅ **Transações**: Histórico completo
-- ✅ **Usuários**: Criação e gestão
-
----
-
-## 📦 **STACK TECNOLÓGICA**
-
-### **Backend:**
-- `PHP 8.4` - Linguagem modern
-- `Laravel 11.31` - Framework robusto
-- `MySQL 8.4` (Percona Server) - Banco de dados principal
-- `Redis` - Cache/Sessions
-
-### **Frontend:**
-- `TailwindCSS 3.1.0` - Framework CSS utility-first
-- `AdminLTE 3.14` - Interface administrativa moderna
-- `Vite 6.3.6` - Build tool moderna
-- `Alpine.js 3.4` - Framework JS minimalista
-- `Livewire 3.6` - Componentes PHP reativos
-
-### **Integrações:**
-- `PrimePay7` - Gateway principal (PIX + Cartões)
-- `Múltiplas Adquirentes` - EFI, Asaas, XDPag, etc
-- `Swagger/OpenAPI` - Documentação completa da API
-
----
-
-## 🎯 **CASOS DE USO PRINCIPAIS**
-
-### **1. E-commerce/Checkout:**
-- Processamento de pagamentos
-- Múltiplas formas de pagamento
-- Webhooks para confirmação
-
-### **2. SaaS/Marketplace:**
-- Split de pagamentos
-- Comissões automáticas
-- Gestão de vendedores
-
-### **3. Educação/Cursos:**
-- Pagamentos parcelados
-- Gestão de alunos
-- Relatórios de vendas
-
-### **4. Marketplace:**
-- Pagamentos instantâneos
-- Repasse automático
-- Gestão de provisões
-
----
-
-## 🚀 **INSTALAÇÃO E CONFIGURAÇÃO**
-
-### **Pré-requisitos:**
-- PHP 8.4+
-- MySQL 8.4+
+- PHP >= 8.2
 - Composer
-- Node.js (para assets)
+- MySQL/MariaDB 8.4+ ou PostgreSQL
+- Redis (recomendado para cache)
+- Extensões PHP: OpenSSL, PDO, Mbstring, Tokenizer, XML, Ctype, JSON, BCMath, Fileinfo, GD
 
-### **Instalação:**
+### Passo a Passo
 
+1. **Clone o repositório:**
 ```bash
-# Clone o repositório
-git clone <repository-url>
-cd demo.hkpay.shop
+git clone <seu-repositorio>
+cd gateway-api
+```
 
-# Instalar dependências PHP
+2. **Instale as dependências:**
+```bash
 composer install
+npm install  # Se houver frontend
+```
 
-# Instalar dependências Node
-npm install
-
-# Configurar ambiente
+3. **Configure o ambiente:**
+```bash
 cp .env.example .env
 php artisan key:generate
+```
 
-# Executar migrações
+4. **Configure o arquivo `.env`:**
+```env
+APP_NAME="Gateway API"
+APP_ENV=production
+APP_URL=https://seu-dominio.com
+
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=gateway
+DB_USERNAME=root
+DB_PASSWORD=
+
+CACHE_DRIVER=redis
+REDIS_HOST=127.0.0.1
+REDIS_PASSWORD=null
+REDIS_PORT=6379
+```
+
+5. **Execute as migrations:**
+```bash
 php artisan migrate
+php artisan db:seed  # Opcional: dados iniciais
+```
 
-# Compilar assets
-npm run build
-
-# Criar link de storage
+6. **Crie o link simbólico do storage:**
+```bash
 php artisan storage:link
 ```
 
-### **Configuração do PrimePay7:**
+7. **Otimize para produção:**
+```bash
+php artisan config:cache
+php artisan route:cache
+php artisan view:cache
+php artisan optimize
+```
 
-```env
-# Adicionar ao .env
-PRIMEPAY7_BASE_URL=https://api.primepay7.com
-PRIMEPAY7_PUBLIC_KEY=pk_live_sua_chave_aqui
-PRIMEPAY7_PRIVATE_KEY=sk_live_sua_chave_aqui
-PRIMEPAY7_WITHDRAWAL_KEY=wk_live_sua_chave_aqui
+8. **Inicie o servidor:**
+```bash
+php artisan serve
+```
+
+A API estará disponível em `http://localhost:8000`
+
+---
+
+## 📚 Documentação
+
+- **[API_DOCUMENTATION.md](./API_DOCUMENTATION.md)** - Documentação completa da API (endpoints, autenticação, exemplos)
+- **[DEVELOPMENT_GUIDE.md](./DEVELOPMENT_GUIDE.md)** - Guia de desenvolvimento (configurações, troubleshooting, melhorias)
+
+---
+
+## 🏗️ Arquitetura
+
+### Stack Tecnológica
+
+**Backend:**
+- PHP 8.4
+- Laravel 11.31
+- MySQL 8.4 (Percona Server)
+- Redis (Cache/Sessions)
+
+**Frontend (se aplicável):**
+- TailwindCSS 3.1.0
+- AdminLTE 3.14
+- Vite 6.3.6
+- Alpine.js 3.4
+- Livewire 3.6
+
+### Estrutura de Diretórios
+
+```
+gateway-api/
+├── app/
+│   ├── Http/
+│   │   ├── Controllers/     # Controllers da API
+│   │   ├── Middleware/      # Middlewares customizados
+│   │   └── Requests/        # Form Requests (validação)
+│   ├── Models/              # Models Eloquent
+│   ├── Services/            # Services (lógica de negócio)
+│   ├── Traits/              # Traits reutilizáveis
+│   └── Helpers/             # Helpers e utilitários
+├── database/
+│   ├── migrations/          # Migrations do banco
+│   └── seeders/             # Seeders
+├── routes/
+│   └── api.php              # Rotas da API
+├── config/                   # Arquivos de configuração
+└── storage/                  # Arquivos e logs
 ```
 
 ---
 
-## 📋 **CHECKLIST DE ENTREGA**
+## 🔒 Segurança
 
-### **✅ Sistema de Checkout:**
-- [x] PIX Instantâneo
-- [x] Cartão de Crédito (3DS)
-- [x] Boleto Bancário
-- [x] Webhooks automáticos
+### Medidas Implementadas
 
-### **✅ Gestão de Usuários:**
-- [x] 3 tipos de permissão
-- [x] 2FA obrigatório
-- [x] KYC completo
-- [x] Gestão de saldos
+- ✅ Autenticação via Laravel Sanctum
+- ✅ 2FA (Google Authenticator)
+- ✅ PIN para transações sensíveis
+- ✅ Validação de IP para saques
+- ✅ Rate limiting em endpoints críticos
+- ✅ Webhook validation
+- ✅ Proteção contra SQL injection (Eloquent ORM)
+- ✅ HTTPS obrigatório em produção
+- ✅ Input validation e sanitização
+- ✅ File upload security
 
-### **✅ Sistema de Gerentes:**
-- [x] Dashboard específico
-- [x] Comissões automáticas
-- [x] Aprovação manual
-- [x] Taxas personalizadas
+### Compliance
 
-### **✅ Integrações:**
-- [x] PrimePay7 (PIX + Cartões)
-- [x] 8+ Adquirentes
-- [x] APIs REST completas
-- [x] Documentação Swagger
+- ✅ PCI DSS (processamento seguro de cartões)
+- ✅ LGPD (conformidade com proteção de dados)
+- ✅ KYC (verificação de identidade)
+- ✅ ML/TF (prevenção de lavagem de dinheiro)
 
 ---
 
-## 🔧 **DESENVOLVIMENTO**
+## 📊 Funcionalidades
 
-### **Comandos Úteis:**
+### Sistema de Usuários
+
+- Gestão completa de usuários
+- Sistema de níveis e permissões (Cliente, Gerente, Admin)
+- Taxas personalizadas por usuário
+- Dashboard financeiro individual
+
+### Sistema de Gerentes
+
+- Dashboard específico com métricas dos clientes
+- Aprovação manual de clientes
+- Gestão de documentação KYC
+- Configuração de taxas por cliente
+- Relatórios de comissão automáticos
+
+### Sistema de Transações
+
+- Depósitos PIX instantâneos
+- Saques PIX com aprovação manual/automática
+- Pagamentos com cartão de crédito (1-12x parcelas)
+- Geração de boletos bancários
+- Splits internos automáticos
+- Webhooks para notificações
+
+### Sistema de Relatórios
+
+- Relatórios financeiros detalhados
+- Filtros avançados (período, status, método, usuário)
+- Exportação CSV/PDF
+- Dashboard administrativo com métricas em tempo real
+
+### Sistema de Gamificação
+
+- Níveis de usuário (Bronze, Prata, Ouro, Safira, Diamante)
+- Progressão baseada em depósitos
+- Trilha de conquistas
+- Dashboard de progresso
+
+### Notificações Push
+
+- Notificações automáticas de transações
+- Preferências configuráveis por usuário
+- Integração com Expo Push API
+- Notificações de depósitos, saques e comissões
+
+---
+
+## 🛠️ Comandos Úteis
+
+### Desenvolvimento
 
 ```bash
 # Executar testes
@@ -335,83 +252,91 @@ php artisan route:clear
 # Executar em desenvolvimento
 php artisan serve
 
-# Build assets em desenvolvimento
+# Build assets (se houver frontend)
 npm run dev
-
-# Build para produção
 npm run build
 ```
 
-### **Estrutura de Arquivos:**
+### Produção
 
+```bash
+# Otimizar aplicação
+php artisan optimize
+
+# Cache de configurações
+php artisan config:cache
+php artisan route:cache
+php artisan view:cache
 ```
-app/
-├── Http/Controllers/
-│   ├── User/CheckoutController.php
-│   ├── Gerencia/ClientesController.php
-│   └── Api/Adquirentes/
-├── Services/
-│   └── PrimePay7Service.php
-├── Models/
-│   ├── User.php
-│   ├── CheckoutBuild.php
-│   └── CheckoutOrders.php
-└── Traits/
-    └── PrimePay7Trait.php
 
-resources/
-├── views/
-│   ├── profile/checkout/
-│   └── gerencia/
-└── assets-checkout/js/
-    ├── checkout.js
-    └── primepay7-3ds.js
+### Scripts Administrativos
+
+```bash
+# Gerenciar IPs permitidos
+php gerenciar_ips.php listar
+php gerenciar_ips.php adicionar <usuario> <ip>
+php gerenciar_ips.php remover <usuario> <ip>
+
+# Verificar última transação
+php verificar_ultima_transacao.php
 ```
 
 ---
 
-## 📞 **SUPORTE E CONTATO**
+## 📈 Performance
 
-Para dúvidas, suporte ou consultoria técnica:
+### Otimizações Implementadas
 
-- 📧 **Email**: suporte@hkpay.shop
-- 💬 **WhatsApp**: +55 (XX) XXXXX-XXXX
-- 🖥️ **Website**: https://hkpay.shop
-- 📖 **Documentação**: https://docs.hkpay.shop
+- ✅ Cache Redis para queries frequentes
+- ✅ Índices no banco de dados
+- ✅ Eager loading para evitar N+1 queries
+- ✅ Paginação em todas as listagens
+- ✅ Queries otimizadas com aggregates
+- ✅ Cache de configurações e estatísticas
 
----
+### Métricas
 
-## 📝 **LICENÇA**
-
-© 2025 HKPAY. Todos os direitos reservados.
-
----
-
-**🎉 Sistema desenvolvido com foco em segurança, performance e escalabilidade!**
-
-## 🎭 **DEMONSTRAÇÃO**
-
-Acesse a demonstração ao vivo: https://demo.hkpay.shop
-
-### **Usuários de Teste:**
-- **Admin**: admin@demo.com
-- **Gerente**: gerente@demo.com  
-- **Cliente**: cliente@demo.com
-
-### **Credenciais de Teste:**
-- **Senha padrão**: `password123`
-- **2FA**: Desabilitado para testes
+- ⚡ Tempo de resposta: < 200ms
+- 🔄 Uptime: 99.9%
+- 🛡️ Segurança: AES-256
+- 📈 Escalabilidade: Horizontal
 
 ---
 
-## 📊 **MÉTRICAS DE PERFORMANCE**
+## 🧪 Testes
 
-- ⚡ **Tempo de resposta**: < 200ms
-- 🔄 **Uptime**: 99.9%
-- 🛡️ **Segurança**: AES-256
-- 📈 **Escalabilidade**: Horizontal
-- 🔒 **Compliance**: PCI DSS Level 1
+Execute os testes com Pest:
+
+```bash
+php artisan test
+```
 
 ---
 
-**Built with ❤️ by HKPAY Team**# Teste de configuração Git
+## 📞 Suporte
+
+Para dúvidas e suporte:
+
+- **Documentação da API**: Veja `API_DOCUMENTATION.md`
+- **Guia de Desenvolvimento**: Veja `DEVELOPMENT_GUIDE.md`
+- **Swagger/OpenAPI**: Acesse `/api/documentation` (se configurado)
+
+---
+
+## 📄 Licença
+
+MIT License - Veja o arquivo LICENSE para detalhes.
+
+---
+
+## 🎯 Status do Projeto
+
+**Status:** ✅ Em produção e mantido ativamente
+
+**Última atualização:** Janeiro 2025
+
+**Versão:** 1.0.0
+
+---
+
+**Desenvolvido com ❤️ usando Laravel**

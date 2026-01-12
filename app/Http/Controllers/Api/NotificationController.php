@@ -39,8 +39,8 @@ class NotificationController extends Controller
                 ], 400)->header('Access-Control-Allow-Origin', '*');
             }
 
-            // Obter usuário do request (usando middleware check.token.secret)
-            $user = $this->getUserFromRequest($request);
+            // Obter usuário autenticado pelo middleware VerifyJWT
+            $user = $request->user() ?? $request->user_auth;
             
             if (!$user) {
                 return response()->json([
@@ -85,7 +85,8 @@ class NotificationController extends Controller
     public function getNotifications(Request $request)
     {
         try {
-            $user = $this->getUserFromRequest($request);
+            // Obter usuário autenticado pelo middleware VerifyJWT
+            $user = $request->user() ?? $request->user_auth;
             
             if (!$user) {
                 return response()->json([
@@ -139,7 +140,8 @@ class NotificationController extends Controller
     public function markAsRead(Request $request, $id)
     {
         try {
-            $user = $this->getUserFromRequest($request);
+            // Obter usuário autenticado pelo middleware VerifyJWT
+            $user = $request->user() ?? $request->user_auth;
             
             if (!$user) {
                 return response()->json([
@@ -184,7 +186,8 @@ class NotificationController extends Controller
     public function markAllAsRead(Request $request)
     {
         try {
-            $user = $this->getUserFromRequest($request);
+            // Obter usuário autenticado pelo middleware VerifyJWT
+            $user = $request->user() ?? $request->user_auth;
             
             if (!$user) {
                 return response()->json([
@@ -220,7 +223,8 @@ class NotificationController extends Controller
     public function getStats(Request $request)
     {
         try {
-            $user = $this->getUserFromRequest($request);
+            // Obter usuário autenticado pelo middleware VerifyJWT
+            $user = $request->user() ?? $request->user_auth;
             
             if (!$user) {
                 return response()->json([
