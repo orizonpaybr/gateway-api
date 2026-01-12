@@ -207,15 +207,8 @@ Route::middleware(['verify.jwt'])->group(function () {
         Route::delete('admin/acquirers/{id}', [App\Http\Controllers\Api\AdminDashboardController::class, 'deleteAcquirer'])->where('id', '[0-9]+');
         Route::post('admin/acquirers/{id}/toggle-status', [App\Http\Controllers\Api\AdminDashboardController::class, 'toggleAcquirerStatus'])->where('id', '[0-9]+');
         
-        // Rotas de gerenciamento de saques (Admin)
-        // Rotas específicas devem vir antes da rota com {id} para evitar colisão ('stats' sendo interpretado como {id})
-        Route::get('admin/withdrawals', [App\Http\Controllers\Api\WithdrawalController::class, 'index']);
-        Route::get('admin/withdrawals/stats', [App\Http\Controllers\Api\WithdrawalController::class, 'stats']);
-        Route::get('admin/withdrawals/config', [App\Http\Controllers\Api\WithdrawalController::class, 'getConfig']);
+        // Rotas de configuração de saque (Apenas Admin)
         Route::put('admin/withdrawals/config', [App\Http\Controllers\Api\WithdrawalController::class, 'updateConfig']);
-        Route::get('admin/withdrawals/{id}', [App\Http\Controllers\Api\WithdrawalController::class, 'show'])->where('id', '[0-9]+');
-        Route::post('admin/withdrawals/{id}/approve', [App\Http\Controllers\Api\WithdrawalController::class, 'approve'])->where('id', '[0-9]+');
-        Route::post('admin/withdrawals/{id}/reject', [App\Http\Controllers\Api\WithdrawalController::class, 'reject'])->where('id', '[0-9]+');
         
         // Rotas do módulo financeiro (Admin)
         Route::get('admin/financial/transactions', [App\Http\Controllers\Api\FinancialController::class, 'getAllTransactions']);
@@ -267,6 +260,15 @@ Route::middleware(['verify.jwt'])->group(function () {
         
         // Configurações de afiliado
         Route::post('admin/users/{id}/affiliate-settings', [App\Http\Controllers\Api\AdminDashboardController::class, 'saveAffiliateSettings']);
+        
+        // Rotas de gerenciamento de saques (Admin e Gerente)
+        // Rotas específicas devem vir antes da rota com {id} para evitar colisão ('stats' sendo interpretado como {id})
+        Route::get('admin/withdrawals', [App\Http\Controllers\Api\WithdrawalController::class, 'index']);
+        Route::get('admin/withdrawals/stats', [App\Http\Controllers\Api\WithdrawalController::class, 'stats']);
+        Route::get('admin/withdrawals/config', [App\Http\Controllers\Api\WithdrawalController::class, 'getConfig']);
+        Route::get('admin/withdrawals/{id}', [App\Http\Controllers\Api\WithdrawalController::class, 'show'])->where('id', '[0-9]+');
+        Route::post('admin/withdrawals/{id}/approve', [App\Http\Controllers\Api\WithdrawalController::class, 'approve'])->where('id', '[0-9]+');
+        Route::post('admin/withdrawals/{id}/reject', [App\Http\Controllers\Api\WithdrawalController::class, 'reject'])->where('id', '[0-9]+');
     });
     
     // Transações Otimizadas

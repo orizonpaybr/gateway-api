@@ -10,6 +10,7 @@ use App\Services\WithdrawalStatsService;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
 use App\Helpers\Helper;
+use App\Constants\UserPermission;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -223,9 +224,9 @@ class WithdrawalController extends Controller
     public function approve($id, Request $request)
     {
         try {
-            // Verificar se o usuário tem permissão
+            // Verificar se o usuário tem permissão (Admin ou Gerente)
             $user = $request->user();
-            if ($user->permission != 3) {
+            if (!in_array($user->permission, [UserPermission::ADMIN, UserPermission::MANAGER], true)) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Você não tem permissão para aprovar saques.'
@@ -337,9 +338,9 @@ class WithdrawalController extends Controller
     public function reject($id, Request $request)
     {
         try {
-            // Verificar se o usuário tem permissão
+            // Verificar se o usuário tem permissão (Admin ou Gerente)
             $user = $request->user();
-            if ($user->permission != 3) {
+            if (!in_array($user->permission, [UserPermission::ADMIN, UserPermission::MANAGER], true)) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Você não tem permissão para rejeitar saques.'
@@ -524,9 +525,9 @@ class WithdrawalController extends Controller
     public function updateConfig(Request $request)
     {
         try {
-            // Verificar se o usuário tem permissão
+            // Verificar se o usuário tem permissão (Apenas Admin)
             $user = $request->user();
-            if ($user->permission != 3) {
+            if ($user->permission != UserPermission::ADMIN) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Você não tem permissão para atualizar configurações.'
