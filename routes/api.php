@@ -189,21 +189,14 @@ Route::middleware(['verify.jwt'])->group(function () {
     // IMPORTANTE: verify.jwt deve vir antes de ensure.admin para autenticar o usuário
     Route::middleware(['verify.jwt', 'ensure.admin'])->group(function () {
         Route::get('admin/dashboard/stats', [App\Http\Controllers\Api\AdminDashboardController::class, 'getDashboardStats']);
-        Route::get('admin/dashboard/users-stats', [App\Http\Controllers\Api\AdminDashboardController::class, 'getUserStats']);
         Route::get('admin/dashboard/transactions', [App\Http\Controllers\Api\AdminDashboardController::class, 'getRecentTransactions']);
         Route::get('admin/dashboard/cache-metrics', [App\Http\Controllers\Api\AdminDashboardController::class, 'getCacheMetrics']);
         
-        // CRUD de Usuários (Admin)
-        Route::get('admin/users/{id}', [App\Http\Controllers\Api\AdminDashboardController::class, 'showUser']);
+        // CRUD de Usuários (Apenas Admin - ações críticas)
         Route::post('admin/users', [App\Http\Controllers\Api\AdminDashboardController::class, 'storeUser']);
-        Route::put('admin/users/{id}', [App\Http\Controllers\Api\AdminDashboardController::class, 'updateUser']);
         Route::delete('admin/users/{id}', [App\Http\Controllers\Api\AdminDashboardController::class, 'deleteUser']);
-        Route::get('admin/default-fees', [App\Http\Controllers\Api\AdminDashboardController::class, 'getDefaultFees']);
         Route::post('admin/users/{id}/approve', [App\Http\Controllers\Api\AdminDashboardController::class, 'approveUser']);
-        Route::post('admin/users/{id}/toggle-block', [App\Http\Controllers\Api\AdminDashboardController::class, 'toggleBlockUser']);
-        Route::post('admin/users/{id}/toggle-withdraw-block', [App\Http\Controllers\Api\AdminDashboardController::class, 'toggleWithdrawBlock']);
         Route::post('admin/users/{id}/adjust-balance', [App\Http\Controllers\Api\AdminDashboardController::class, 'adjustBalance']);
-        Route::post('admin/users/{id}/affiliate-settings', [App\Http\Controllers\Api\AdminDashboardController::class, 'saveAffiliateSettings']);
         Route::get('admin/users-managers', [App\Http\Controllers\Api\AdminDashboardController::class, 'listManagers']);
         Route::get('admin/pix-acquirers', [App\Http\Controllers\Api\AdminDashboardController::class, 'listPixAcquirers']);
         
@@ -251,7 +244,29 @@ Route::middleware(['verify.jwt'])->group(function () {
     
     // Rotas compartilhadas entre Admin (3) e Gerente (2)
     Route::middleware(['verify.jwt', 'ensure.admin_or_manager'])->group(function () {
+        // Lista de usuários
         Route::get('admin/dashboard/users', [App\Http\Controllers\Api\AdminDashboardController::class, 'getUsers']);
+        
+        // Estatísticas de usuários (cards: total, mês, pendentes, banidos)
+        Route::get('admin/dashboard/users-stats', [App\Http\Controllers\Api\AdminDashboardController::class, 'getUserStats']);
+        
+        // Visualizar usuário específico
+        Route::get('admin/users/{id}', [App\Http\Controllers\Api\AdminDashboardController::class, 'showUser']);
+        
+        // Editar usuário
+        Route::put('admin/users/{id}', [App\Http\Controllers\Api\AdminDashboardController::class, 'updateUser']);
+        
+        // Bloquear/desbloquear usuário
+        Route::post('admin/users/{id}/toggle-block', [App\Http\Controllers\Api\AdminDashboardController::class, 'toggleBlockUser']);
+        
+        // Bloquear/desbloquear saque do usuário
+        Route::post('admin/users/{id}/toggle-withdraw-block', [App\Http\Controllers\Api\AdminDashboardController::class, 'toggleWithdrawBlock']);
+        
+        // Ver taxas padrão
+        Route::get('admin/default-fees', [App\Http\Controllers\Api\AdminDashboardController::class, 'getDefaultFees']);
+        
+        // Configurações de afiliado
+        Route::post('admin/users/{id}/affiliate-settings', [App\Http\Controllers\Api\AdminDashboardController::class, 'saveAffiliateSettings']);
     });
     
     // Transações Otimizadas

@@ -98,7 +98,7 @@ class AdminDashboardController extends Controller
     public function getUsers(Request $request)
     {
         try {
-            // Verificação de admin feita pelo middleware 'ensure.admin'
+            // Verificação de admin ou gerente feita pelo middleware 'ensure.admin_or_manager'
             $status = $request->input('status');
             $search = $request->input('search');
             $gerenteId = $request->input('gerente_id');
@@ -279,7 +279,7 @@ class AdminDashboardController extends Controller
     public function getUserStats(Request $request)
     {
         try {
-            // Verificação de admin feita pelo middleware 'ensure.admin'
+            // Verificação de admin ou gerente feita pelo middleware 'ensure.admin_or_manager'
             // Cache key para estatísticas de usuários usando CacheKeyService
             $cacheKey = CacheKeyService::adminUsersStats();
             
@@ -866,7 +866,7 @@ class AdminDashboardController extends Controller
     public function showUser(Request $request, int $id)
     {
         try {
-            // Verificação de admin feita pelo middleware 'ensure.admin'
+            // Verificação de admin ou gerente feita pelo middleware 'ensure.admin_or_manager'
             $user = $this->userService->getUserById($id, true);
 
             if (!$user) {
@@ -1006,7 +1006,7 @@ class AdminDashboardController extends Controller
     public function getDefaultFees(Request $request)
     {
         try {
-            // Verificação de admin feita pelo middleware 'ensure.admin'
+            // Verificação de admin ou gerente feita pelo middleware 'ensure.admin_or_manager'
             $setting = AppSettingsHelper::getSettings();
             
             if (!$setting) {
@@ -1081,6 +1081,7 @@ class AdminDashboardController extends Controller
     public function updateUser(UpdateUserRequest $request, int $id)
     {
         try {
+            // Verificação de admin ou gerente feita pelo middleware 'ensure.admin_or_manager'
             $user = $this->userService->updateUser($id, $request->validated());
             
             return $this->successResponse([
@@ -1175,7 +1176,7 @@ class AdminDashboardController extends Controller
     public function toggleBlockUser(Request $request, int $id)
     {
         try {
-            // Verificação de admin feita pelo middleware 'ensure.admin'
+            // Verificação de admin ou gerente feita pelo middleware 'ensure.admin_or_manager'
             $block = $request->input('block', true);
             $approve = $request->input('approve', false);
             $userData = $this->userService->toggleUserBlock($id, $block, $approve);
@@ -1211,7 +1212,7 @@ class AdminDashboardController extends Controller
     public function toggleWithdrawBlock(Request $request, int $id)
     {
         try {
-            // Verificação de admin feita pelo middleware 'ensure.admin'
+            // Verificação de admin ou gerente feita pelo middleware 'ensure.admin_or_manager'
             $block = $request->input('block', true);
             $userData = $this->userService->toggleWithdrawBlock($id, $block);
             
