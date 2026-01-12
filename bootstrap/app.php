@@ -33,6 +33,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'verify.jwt' => \App\Http\Middleware\VerifyJWT::class,
             'check.admin' => \App\Http\Middleware\AdminMiddleware::class,
             'ensure.admin' => \App\Http\Middleware\EnsureAdminPermission::class,
+            'ensure.admin_or_manager' => \App\Http\Middleware\EnsureAdminOrManagerPermission::class,
             'check.auth' => \App\Http\Middleware\AuthMiddleware::class,
             'security' => \App\Http\Middleware\SecurityMiddleware::class,
             'validate.webhook' => \App\Http\Middleware\ValidateWebhook::class,

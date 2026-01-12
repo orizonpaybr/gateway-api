@@ -189,7 +189,6 @@ Route::middleware(['verify.jwt'])->group(function () {
     // IMPORTANTE: verify.jwt deve vir antes de ensure.admin para autenticar o usuário
     Route::middleware(['verify.jwt', 'ensure.admin'])->group(function () {
         Route::get('admin/dashboard/stats', [App\Http\Controllers\Api\AdminDashboardController::class, 'getDashboardStats']);
-        Route::get('admin/dashboard/users', [App\Http\Controllers\Api\AdminDashboardController::class, 'getUsers']);
         Route::get('admin/dashboard/users-stats', [App\Http\Controllers\Api\AdminDashboardController::class, 'getUserStats']);
         Route::get('admin/dashboard/transactions', [App\Http\Controllers\Api\AdminDashboardController::class, 'getRecentTransactions']);
         Route::get('admin/dashboard/cache-metrics', [App\Http\Controllers\Api\AdminDashboardController::class, 'getCacheMetrics']);
@@ -248,6 +247,11 @@ Route::middleware(['verify.jwt'])->group(function () {
         Route::get('admin/levels/{id}', [App\Http\Controllers\Api\AdminLevelsController::class, 'show'])->where('id', '[0-9]+');
         Route::put('admin/levels/{id}', [App\Http\Controllers\Api\AdminLevelsController::class, 'update'])->where('id', '[0-9]+');
         Route::post('admin/levels/toggle-active', [App\Http\Controllers\Api\AdminLevelsController::class, 'toggleActive']);
+    });
+    
+    // Rotas compartilhadas entre Admin (3) e Gerente (2)
+    Route::middleware(['verify.jwt', 'ensure.admin_or_manager'])->group(function () {
+        Route::get('admin/dashboard/users', [App\Http\Controllers\Api\AdminDashboardController::class, 'getUsers']);
     });
     
     // Transações Otimizadas
