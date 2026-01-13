@@ -9,7 +9,7 @@ class UserStatus
 {
     public const INACTIVE = 0;
     public const ACTIVE = 1;
-    public const PENDING = 5;
+    public const PENDING = 2;
     
     /**
      * Obter texto do status
