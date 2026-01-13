@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\App;
 use App\Models\GerenteApoio;
 use App\Models\Transactions;
+use App\Constants\UserStatus;
 use Illuminate\Http\Request;
 use App\Models\User;
 use App\Models\UsersKey;
@@ -153,8 +154,11 @@ class ClientesController extends Controller
         }
 
         if ($request->tipo === 'status') {
-            $status = $usuario->status == 5 ? 1 : 5;
-            $message = $status == 5 ? "Status alterado para pendente!" : "Status alterado para Aprovado";
+            // Alternar entre ACTIVE (1) e PENDING (2)
+            // Se estiver pendente (2 ou 5 para compatibilidade), aprovar (1)
+            // Se estiver aprovado (1), tornar pendente (2)
+            $status = ($usuario->status == UserStatus::ACTIVE) ? UserStatus::PENDING : UserStatus::ACTIVE;
+            $message = $status == UserStatus::PENDING ? "Status alterado para pendente!" : "Status alterado para Aprovado";
             $usuario->update(['status' => $status]);
         }
 

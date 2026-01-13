@@ -79,7 +79,7 @@ class VerifyJWT
             ]);
 
             // Bloquear apenas usuários inativos (status = 0) ou banidos
-            // Usuários pendentes (status = 5) podem acessar todas as APIs
+            // Usuários pendentes (status = 2) podem acessar todas as APIs (exceto integração)
             if ($user->status == 0 || ($user->banido ?? false)) {
                 return Response::json([
                     'success' => false,

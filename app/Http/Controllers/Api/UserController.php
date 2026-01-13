@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Constants\UserStatus;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Http;
@@ -2069,7 +2070,7 @@ class UserController extends Controller
                     'permission' => $user->permission ?? null,
                     'phone' => $user->telefone ?? '',
                     'cnpj' => $user->cpf_cnpj ?? '',
-                    'status' => $user->status == 1 ? 'active' : ($user->status == 5 ? 'pending' : 'inactive'),
+                    'status' => $user->status == UserStatus::ACTIVE ? 'active' : ($user->status == UserStatus::PENDING ? 'pending' : 'inactive'),
                     'status_numeric' => $user->status,
                     'balance' => $user->saldo ?? 0,
                     'agency' => $user->agency ?? '',

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Helpers\Helper;
 use App\Http\Controllers\Controller;
+use App\Constants\UserStatus;
 use Illuminate\Http\Request;
 use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
@@ -91,7 +92,7 @@ class DashboardController extends Controller
         $transacoes_aprovadas = (clone $solicitacoes)->count() + (clone $saques)->count();
 
         $cadastros_total = User::whereBetween('created_at', [$dataInicio, $dataFim])->count();
-        $cadastros_analise = User::where('status', 5)->whereBetween('created_at', [$dataInicio, $dataFim])->count();
+        $cadastros_analise = User::where('status', UserStatus::PENDING)->whereBetween('created_at', [$dataInicio, $dataFim])->count();
 
         $saques_pendentes = SolicitacoesCashOut::where('status', 'PENDING')->whereBetween('date', [$dataInicio, $dataFim]);
  		$carteiras = User::sum('saldo'); // Removido saldo_bloqueado pois não está sendo usado corretamente
@@ -180,7 +181,7 @@ class DashboardController extends Controller
         $valor_aprovado = (clone $solicitacoes)->sum('amount') + (clone $saques)->sum('amount');
         $transacoes_aprovadas = (clone $solicitacoes)->count() + (clone $saques)->count();
         $cadastros_total = User::whereBetween('created_at', [$dataInicio, $dataFim])->count();
-        $cadastros_analise = User::where('status', 5)->whereBetween('created_at', [$dataInicio, $dataFim])->count();
+        $cadastros_analise = User::where('status', UserStatus::PENDING)->whereBetween('created_at', [$dataInicio, $dataFim])->count();
         $saques_pendentes = SolicitacoesCashOut::where('status', 'PENDING')->whereBetween('date', [$dataInicio, $dataFim])->sum('amount');
         $carteiras = User::sum('saldo'); // Removido saldo_bloqueado pois não está sendo usado corretamente
 

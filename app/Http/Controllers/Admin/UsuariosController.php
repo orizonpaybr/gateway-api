@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Helpers\Helper;
 use App\Http\Controllers\Controller;
+use App\Constants\UserStatus;
 use Illuminate\Http\Request;
 use App\Models\User;
 use App\Models\UsersKey;
@@ -28,7 +29,7 @@ class UsuariosController extends Controller
                 $users->where('banido', 1);
                 break;
             case 'pendentes':
-                $users->where('status', 5);
+                $users->where('status', UserStatus::PENDING);
                 break;
         }
         if (isset($buscar)) {
@@ -79,8 +80,11 @@ class UsuariosController extends Controller
         $usuario = User::where('id', $usuarioId)->first();
 
         if ($request->tipo === 'status') {
-            $status = $usuario->status == 5 ? 1 : 5;
-            $message = $usuario->status == 5 ? "Status alterado para pendente!" : "Status alterado para Aprovado";
+            // Alternar entre ACTIVE (1) e PENDING (2)
+            // Se estiver pendente (2 ou 5 para compatibilidade), aprovar (1)
+            // Se estiver aprovado (1), tornar pendente (2)
+            $status = ($usuario->status == UserStatus::ACTIVE || $usuario->status == 1) ? UserStatus::PENDING : UserStatus::ACTIVE;
+            $message = $status == UserStatus::PENDING ? "Status alterado para pendente!" : "Status alterado para Aprovado";
             $usuario->update(['status' => $status]);
         }
 

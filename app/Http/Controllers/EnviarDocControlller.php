@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Validation\ValidationException;
 use Illuminate\Http\Request;
+use App\Constants\UserStatus;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
@@ -80,7 +81,7 @@ class EnviarDocControlller extends Controller
                 'foto_rg_frente' => $fotoRgFrente ?? "",
                 'foto_rg_verso' => $fotoRgVerso ?? "",
                 'selfie_rg' => $selfieRg ?? "",
-                'status' => 5,
+                'status' => UserStatus::PENDING,
             ];
 
             // Adiciona contrato social apenas se for CNPJ

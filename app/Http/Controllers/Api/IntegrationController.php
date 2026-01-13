@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\UsersKey;
 use App\Traits\IPManagementTrait;
+use App\Constants\UserStatus;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -41,6 +42,14 @@ class IntegrationController extends Controller
                     'success' => false,
                     'message' => 'Usuário não autenticado'
                 ], 401);
+            }
+
+            // Bloquear acesso se usuário estiver pendente
+            if ($user->status == UserStatus::PENDING) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Acesso negado. Sua conta está pendente de aprovação.'
+                ], 403);
             }
 
             // Cache das credenciais (5 minutos)
@@ -106,6 +115,14 @@ class IntegrationController extends Controller
                     'success' => false,
                     'message' => 'Usuário não autenticado'
                 ], 401);
+            }
+
+            // Bloquear acesso se usuário estiver pendente
+            if ($user->status == UserStatus::PENDING) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Acesso negado. Sua conta está pendente de aprovação.'
+                ], 403);
             }
 
             // Se 2FA estiver ativo para o usuário, exigir PIN válido
@@ -190,6 +207,14 @@ class IntegrationController extends Controller
                 ], 401);
             }
 
+            // Bloquear acesso se usuário estiver pendente
+            if ($user->status == UserStatus::PENDING) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Acesso negado. Sua conta está pendente de aprovação.'
+                ], 403);
+            }
+
             // Cache dos IPs (2 minutos)
             $cacheKey = "allowed_ips_{$user->username}";
             $ips = Cache::remember($cacheKey, 120, function () use ($user) {
@@ -247,6 +272,14 @@ class IntegrationController extends Controller
                     'success' => false,
                     'message' => 'Usuário não autenticado'
                 ], 401);
+            }
+
+            // Bloquear acesso se usuário estiver pendente
+            if ($user->status == UserStatus::PENDING) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Acesso negado. Sua conta está pendente de aprovação.'
+                ], 403);
             }
 
             // Construir regras de validação de forma condicional
@@ -363,6 +396,14 @@ class IntegrationController extends Controller
                     'success' => false,
                     'message' => 'Usuário não autenticado'
                 ], 401);
+            }
+
+            // Bloquear acesso se usuário estiver pendente
+            if ($user->status == UserStatus::PENDING) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Acesso negado. Sua conta está pendente de aprovação.'
+                ], 403);
             }
 
             // Validar formato do IP
