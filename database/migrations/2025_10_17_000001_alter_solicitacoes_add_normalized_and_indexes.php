@@ -39,9 +39,9 @@ return new class extends Migration {
                 }
             }
             if (Schema::hasColumn('solicitacoes', 'descricao_normalizada') && !$this->indexExistsUsingInformationSchema('solicitacoes', 'sol_desc_norm_idx')) {
-                Schema::table('solicitacoes', function (Blueprint $table) {
-                    $table->index(['descricao_normalizada'], 'sol_desc_norm_idx');
-                });
+                // Para colunas TEXT/BLOB, é necessário especificar um comprimento prefixado no índice
+                // Usando 255 caracteres como prefixo (máximo comum para índices MySQL)
+                DB::statement('ALTER TABLE `solicitacoes` ADD INDEX `sol_desc_norm_idx` (`descricao_normalizada`(255))');
             }
         }
     }

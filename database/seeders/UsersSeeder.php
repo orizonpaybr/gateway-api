@@ -26,7 +26,7 @@ class UsersSeeder extends Seeder
                 'cpf_cnpj' => '123.456.789-01',
                 'telefone' => '(11) 98765-4321',
                 'gender' => 'male',
-                'saldo' => 5250000.50, // Acima de 1 milhão para teste
+                'saldo' => 10000000.00, // 10 milhões
                 'volume_transacional' => 12500000.00,
                 'total_transacoes' => 450,
                 'transacoes_aproved' => 420,
@@ -60,7 +60,7 @@ class UsersSeeder extends Seeder
                 'cpf_cnpj' => '987.654.321-09',
                 'telefone' => '(21) 97654-3210',
                 'gender' => 'female',
-                'saldo' => 8750000.75, // Acima de 1 milhão para teste
+                'saldo' => 12000000.00, // 12 milhões
                 'volume_transacional' => 18900000.00,
                 'total_transacoes' => 680,
                 'transacoes_aproved' => 650,
@@ -94,7 +94,7 @@ class UsersSeeder extends Seeder
                 'cpf_cnpj' => '456.789.123-45',
                 'telefone' => '(11) 91234-5678',
                 'gender' => 'male',
-                'saldo' => 2150000.25, // Acima de 1 milhão para teste
+                'saldo' => 8500000.00, // 8.5 milhões
                 'volume_transacional' => 5600000.00,
                 'total_transacoes' => 180,
                 'transacoes_aproved' => 170,
@@ -130,7 +130,7 @@ class UsersSeeder extends Seeder
                 'cpf_cnpj' => '321.654.987-32',
                 'telefone' => '(21) 98765-4321',
                 'gender' => 'female',
-                'saldo' => 3890000.90, // Acima de 1 milhão para teste
+                'saldo' => 6500000.00, // 6.5 milhões (Total: 37 milhões)
                 'volume_transacional' => 8200000.00,
                 'total_transacoes' => 320,
                 'transacoes_aproved' => 310,

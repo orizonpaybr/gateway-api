@@ -12,17 +12,35 @@ return new class extends Migration
      */
     public function up(): void
     {
-        // Adicionar PagArm na tabela adquirentes
-        DB::table('adquirentes')->insert([
-            'adquirente' => 'pagarm',
-            'status' => 0,
-            'url' => 'https://api.pagarm.com.br/v1',
-            'referencia' => 'pagarm',
-            'is_default' => 0,
-            'is_default_card_billet' => 0,
-            'created_at' => now(),
-            'updated_at' => now()
-        ]);
+        // Verificar se a tabela adquirentes existe antes de inserir
+        if (Schema::hasTable('adquirentes')) {
+            // Verificar se já existe para evitar duplicação
+            $exists = DB::table('adquirentes')->where('referencia', 'pagarm')->exists();
+            
+            if (!$exists) {
+                // Preparar dados base (campos que sempre existem)
+                $data = [
+                    'adquirente' => 'pagarm',
+                    'status' => 0,
+                    'url' => 'https://api.pagarm.com.br/v1',
+                    'referencia' => 'pagarm',
+                    'created_at' => now(),
+                    'updated_at' => now()
+                ];
+                
+                // Adicionar campos opcionais apenas se existirem na tabela
+                if (Schema::hasColumn('adquirentes', 'is_default')) {
+                    $data['is_default'] = 0;
+                }
+                
+                if (Schema::hasColumn('adquirentes', 'is_default_card_billet')) {
+                    $data['is_default_card_billet'] = 0;
+                }
+                
+                // Adicionar PagArm na tabela adquirentes
+                DB::table('adquirentes')->insert($data);
+            }
+        }
     }
 
     /**
