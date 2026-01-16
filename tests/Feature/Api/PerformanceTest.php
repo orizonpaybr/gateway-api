@@ -154,12 +154,12 @@ class PerformanceTest extends TestCase
 
         // Primeira requisição (sem cache)
         $start1 = microtime(true);
-        $response1 = $this->withHeaders($this->getAuthHeaders())->getJson('/api/dashboard/stats-optimized');
+        $response1 = $this->withHeaders($this->getAuthHeaders())->getJson('/api/dashboard/stats');
         $time1 = (microtime(true) - $start1) * 1000; // em ms
 
         // Segunda requisição (com cache)
         $start2 = microtime(true);
-        $response2 = $this->withHeaders($this->getAuthHeaders())->getJson('/api/dashboard/stats-optimized');
+        $response2 = $this->withHeaders($this->getAuthHeaders())->getJson('/api/dashboard/stats');
         $time2 = (microtime(true) - $start2) * 1000; // em ms
 
         $response1->assertStatus(200);
@@ -191,7 +191,7 @@ class PerformanceTest extends TestCase
 
         // Simular requisições simultâneas
         for ($i = 0; $i < $concurrentRequests; $i++) {
-            $responses[] = $this->withHeaders($this->getAuthHeaders())->getJson('/api/dashboard/stats-optimized');
+            $responses[] = $this->withHeaders($this->getAuthHeaders())->getJson('/api/dashboard/stats');
         }
 
         $totalTime = (microtime(true) - $startTime) * 1000; // em ms
@@ -227,7 +227,7 @@ class PerformanceTest extends TestCase
 
         $startTime = microtime(true);
         
-        $response = $this->withHeaders($this->getAuthHeaders())->getJson('/api/dashboard/transaction-summary-optimized?periodo=30dias');
+        $response = $this->withHeaders($this->getAuthHeaders())->getJson('/api/dashboard/transaction-summary?periodo=30dias');
 
         $duration = (microtime(true) - $startTime) * 1000; // em ms
 
@@ -291,7 +291,7 @@ class PerformanceTest extends TestCase
             $headers = $token === 'acting_as_token' 
                 ? [] 
                 : ['Authorization' => 'Bearer ' . $token];
-            $responses[] = $this->withHeaders($headers)->getJson('/api/dashboard/stats-optimized');
+            $responses[] = $this->withHeaders($headers)->getJson('/api/dashboard/stats');
         }
 
         $totalTime = (microtime(true) - $startTime) * 1000;
@@ -317,7 +317,7 @@ class PerformanceTest extends TestCase
         Cache::flush();
 
         // Primeira requisição (cache miss)
-        $this->withHeaders($this->getAuthHeaders())->getJson('/api/dashboard/stats-optimized');
+        $this->withHeaders($this->getAuthHeaders())->getJson('/api/dashboard/stats');
 
         // Múltiplas requisições subsequentes (cache hit)
         $cacheHits = 0;
@@ -325,7 +325,7 @@ class PerformanceTest extends TestCase
 
         for ($i = 0; $i < $totalRequests; $i++) {
             $start = microtime(true);
-            $response = $this->withHeaders($this->getAuthHeaders())->getJson('/api/dashboard/stats-optimized');
+            $response = $this->withHeaders($this->getAuthHeaders())->getJson('/api/dashboard/stats');
             
             $duration = (microtime(true) - $start) * 1000;
             
@@ -354,7 +354,7 @@ class PerformanceTest extends TestCase
 
         // Testar endpoint otimizado (query agregada)
         $startOptimized = microtime(true);
-        $responseOptimized = $this->withHeaders($this->getAuthHeaders())->getJson('/api/dashboard/transaction-summary-optimized?periodo=30dias');
+        $responseOptimized = $this->withHeaders($this->getAuthHeaders())->getJson('/api/dashboard/transaction-summary?periodo=30dias');
         $timeOptimized = (microtime(true) - $startOptimized) * 1000;
 
         $responseOptimized->assertStatus(200);
@@ -379,7 +379,7 @@ class PerformanceTest extends TestCase
         $successful = 0;
 
         for ($i = 0; $i < $requestCount; $i++) {
-            $response = $this->withHeaders($this->getAuthHeaders())->getJson('/api/dashboard/stats-optimized');
+            $response = $this->withHeaders($this->getAuthHeaders())->getJson('/api/dashboard/stats');
             
             if ($response->status() === 200) {
                 $successful++;

@@ -54,7 +54,7 @@ class DashboardOptimizedTest extends TestCase
     }
 
     /**
-     * Teste: GET /api/dashboard/stats-optimized retorna 200
+     * Teste: GET /api/dashboard/stats retorna 200
      */
     public function test_get_dashboard_stats_returns_200(): void
     {
@@ -62,7 +62,7 @@ class DashboardOptimizedTest extends TestCase
             ? [] 
             : ['Authorization' => 'Bearer ' . $this->token];
             
-        $response = $this->withHeaders($headers)->getJson('/api/dashboard/stats-optimized');
+        $response = $this->withHeaders($headers)->getJson('/api/dashboard/stats');
 
         $response->assertStatus(200)
             ->assertJsonStructure([
@@ -81,17 +81,17 @@ class DashboardOptimizedTest extends TestCase
     }
 
     /**
-     * Teste: GET /api/dashboard/stats-optimized requer autenticação
+     * Teste: GET /api/dashboard/stats requer autenticação
      */
     public function test_get_dashboard_stats_requires_auth(): void
     {
-        $response = $this->getJson('/api/dashboard/stats-optimized');
+        $response = $this->getJson('/api/dashboard/stats');
 
         $response->assertStatus(401);
     }
 
     /**
-     * Teste: GET /api/dashboard/interactive-movement-optimized retorna 200
+     * Teste: GET /api/dashboard/interactive-movement retorna 200
      */
     public function test_get_interactive_movement_returns_200(): void
     {
@@ -99,7 +99,7 @@ class DashboardOptimizedTest extends TestCase
             ? [] 
             : ['Authorization' => 'Bearer ' . $this->token];
             
-        $response = $this->withHeaders($headers)->getJson('/api/dashboard/interactive-movement-optimized?periodo=hoje');
+        $response = $this->withHeaders($headers)->getJson('/api/dashboard/interactive-movement?periodo=hoje');
 
         $response->assertStatus(200)
             ->assertJsonStructure([
@@ -120,7 +120,7 @@ class DashboardOptimizedTest extends TestCase
     }
 
     /**
-     * Teste: GET /api/dashboard/transaction-summary-optimized retorna 200
+     * Teste: GET /api/dashboard/transaction-summary retorna 200
      */
     public function test_get_transaction_summary_returns_200(): void
     {
@@ -128,7 +128,7 @@ class DashboardOptimizedTest extends TestCase
             ? [] 
             : ['Authorization' => 'Bearer ' . $this->token];
             
-        $response = $this->withHeaders($headers)->getJson('/api/dashboard/transaction-summary-optimized?periodo=hoje');
+        $response = $this->withHeaders($headers)->getJson('/api/dashboard/transaction-summary?periodo=hoje');
 
         $response->assertStatus(200)
             ->assertJsonStructure([
@@ -159,11 +159,11 @@ class DashboardOptimizedTest extends TestCase
             : ['Authorization' => 'Bearer ' . $this->token];
         
         $start1 = microtime(true);
-        $response1 = $this->withHeaders($headers)->getJson('/api/dashboard/stats-optimized');
+        $response1 = $this->withHeaders($headers)->getJson('/api/dashboard/stats');
         $time1 = microtime(true) - $start1;
 
         $start2 = microtime(true);
-        $response2 = $this->withHeaders($headers)->getJson('/api/dashboard/stats-optimized');
+        $response2 = $this->withHeaders($headers)->getJson('/api/dashboard/stats');
         $time2 = microtime(true) - $start2;
 
         $response1->assertStatus(200);
@@ -231,7 +231,7 @@ class DashboardOptimizedTest extends TestCase
             ? [] 
             : ['Authorization' => 'Bearer ' . $this->token];
             
-        $response = $this->withHeaders($headers)->getJson('/api/dashboard/stats-optimized');
+        $response = $this->withHeaders($headers)->getJson('/api/dashboard/stats');
 
         $response->assertStatus(200);
         $data = $response->json('data');

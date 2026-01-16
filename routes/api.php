@@ -72,12 +72,6 @@ Route::options('user/profile', function () {
 Route::options('pix/generate-qr', function () {
     return response('', 200)->header('Access-Control-Allow-Origin', '*');
 });
-Route::options('pix/withdraw', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('statement', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
 Route::options('extrato', function () {
     return response('', 200)->header('Access-Control-Allow-Origin', '*');
 });
@@ -153,8 +147,6 @@ Route::middleware(['verify.jwt'])->group(function () {
     Route::get('transactions/{id}', [UserController::class, 'getTransactionById']);
     Route::get('user/profile', [UserController::class, 'getProfile']);
     Route::post('pix/generate-qr', [UserController::class, 'generatePixQR']);
-    Route::post('pix/withdraw', [UserController::class, 'makePixWithdraw']); //The front-end does not use this route for
-    Route::get('statement', [UserController::class, 'getStatement']); //The front-end does not use this route for
     Route::get('extrato', [UserController::class, 'getExtrato']);
     Route::get('user/real-data', [UserController::class, 'getRealData']);
     Route::get('dashboard/stats', [UserController::class, 'getDashboardStats']);
@@ -178,11 +170,6 @@ Route::middleware(['verify.jwt'])->group(function () {
     
     // QR Codes (Otimizado)
     Route::get('qrcodes', [App\Http\Controllers\Api\QRCodeController::class, 'index']);
-    
-    // Dashboard Otimizado
-    Route::get('dashboard/stats-optimized', [App\Http\Controllers\Api\OptimizedDashboardController::class, 'getDashboardStats']);
-    Route::get('dashboard/interactive-movement-optimized', [App\Http\Controllers\Api\OptimizedDashboardController::class, 'getInteractiveMovement']);
-    Route::get('dashboard/transaction-summary-optimized', [App\Http\Controllers\Api\OptimizedDashboardController::class, 'getTransactionSummary']);
     
     // Dashboard Administrativo (apenas para admins - permission == 3)
     // MELHORIA: Usar middleware para evitar código duplicado
@@ -271,12 +258,6 @@ Route::middleware(['verify.jwt'])->group(function () {
         Route::post('admin/withdrawals/{id}/reject', [App\Http\Controllers\Api\WithdrawalController::class, 'reject'])->where('id', '[0-9]+');
     });
     
-    // Transações Otimizadas
-    Route::get('transactions/recent-optimized', [UserController::class, 'getRecentTransactions']);
-    
-    // Infrações PIX Otimizadas
-    Route::get('pix-infracoes-optimized', [PixInfracoesController::class, 'index']);
-    
     // Rotas de notificações (com rate limiting)
     Route::middleware('throttle:60,1')->group(function () {
         Route::post('notifications/register-token', [NotificationController::class, 'registerToken']);
@@ -339,11 +320,6 @@ Route::get('/link-storage', function (Request $request) {
     }
     
     return redirect('/');
-})->middleware('auth:sanctum');
-
-
-Route::get('/user', function (Request $request) {
-    return $request->user();
 })->middleware('auth:sanctum');
 
 /* PIX */
