@@ -253,11 +253,10 @@ Route::get('/download-boleto', function () {
     ]);
 });
 
-require __DIR__ . '/auth.php';
-
-// Rotas de 2FA para login
-Route::get('/2fa/verify', [App\Http\Controllers\Auth\AuthenticatedSessionController::class, 'show2FAForm'])->name('2fa.verify');
-Route::post('/2fa/verify', [App\Http\Controllers\Auth\AuthenticatedSessionController::class, 'verify2FA'])->name('2fa.verify.post');
+// Rotas de 2FA para login web (legado - não usado pelo frontend Next.js que usa API)
+// Mantidas temporariamente para compatibilidade, mas podem ser removidas se não houver uso externo
+// Route::get('/2fa/verify', [App\Http\Controllers\Auth\AuthenticatedSessionController::class, 'show2FAForm'])->name('2fa.verify');
+// Route::post('/2fa/verify', [App\Http\Controllers\Auth\AuthenticatedSessionController::class, 'verify2FA'])->name('2fa.verify.post');
 require __DIR__ . '/groups/adquirentes/cashtime.php';
 require __DIR__ . '/groups/adquirentes/mercadopago.php';
 require __DIR__ . '/groups/adquirentes/efi.php';
