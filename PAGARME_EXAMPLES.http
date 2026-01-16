@@ -1,0 +1,289 @@
+###
+### Arquivo de exemplos HTTP para testar a integração Pagar.me
+### Use com extensões HTTP Client (VS Code, IntelliJ) ou Postman
+###
+
+@baseUrl = http://localhost:8000/api
+@token = SEU_TOKEN_JWT_AQUI
+
+###
+### 1. AUTENTICAÇÃO - Obter Token JWT
+###
+
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "seu-email@email.com",
+  "password": "sua-senha"
+}
+
+###
+### 2. CRIAR DEPÓSITO - Usando Token de Cartão (Recomendado)
+###
+
+POST {{baseUrl}}/deposit/card
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "amount": 100.00,
+  "debtor_name": "João Silva",
+  "email": "joao@email.com",
+  "debtor_document": "12345678900",
+  "phone": "11999999999",
+  "card_token": "tok_xxxxxxxxxxxxx",
+  "installments": 1,
+  "use_3ds": true,
+  "callbackUrl": "https://seu-site.com/callback",
+  "save_card": false,
+  "description": "Depósito via cartão de crédito"
+}
+
+###
+### 3. CRIAR DEPÓSITO - Usando Cartão Salvo (card_id)
+###
+
+POST {{baseUrl}}/deposit/card
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "amount": 150.00,
+  "debtor_name": "Maria Santos",
+  "email": "maria@email.com",
+  "debtor_document": "98765432100",
+  "phone": "11988888888",
+  "card_id": "card_xxxxxxxxxxxxx",
+  "installments": 3,
+  "use_3ds": true,
+  "callbackUrl": "https://seu-site.com/callback"
+}
+
+###
+### 4. CRIAR DEPÓSITO - Com Dados Completos (Apenas para Testes)
+### Use cartão de teste: 4111111111111111
+###
+
+POST {{baseUrl}}/deposit/card
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "amount": 200.00,
+  "debtor_name": "Pedro Costa",
+  "email": "pedro@email.com",
+  "debtor_document": "11122233344",
+  "phone": "11977777777",
+  "card": {
+    "number": "4111111111111111",
+    "holder_name": "PEDRO COSTA",
+    "exp_month": 12,
+    "exp_year": 2025,
+    "cvv": "123",
+    "billing_address": {
+      "line_1": "123, Rua Exemplo, Centro",
+      "zip_code": "01234567",
+      "city": "São Paulo",
+      "state": "SP",
+      "country": "BR"
+    }
+  },
+  "installments": 1,
+  "use_3ds": true,
+  "callbackUrl": "https://seu-site.com/callback",
+  "save_card": true
+}
+
+###
+### 5. CRIAR DEPÓSITO - Parcelado (3x)
+###
+
+POST {{baseUrl}}/deposit/card
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "amount": 300.00,
+  "debtor_name": "Ana Paula",
+  "email": "ana@email.com",
+  "debtor_document": "55566677788",
+  "phone": "11966666666",
+  "card": {
+    "number": "4111111111111111",
+    "holder_name": "ANA PAULA",
+    "exp_month": 12,
+    "exp_year": 2025,
+    "cvv": "123"
+  },
+  "installments": 3,
+  "use_3ds": true,
+  "description": "Depósito parcelado em 3x"
+}
+
+###
+### 6. LISTAR CARTÕES SALVOS
+###
+
+GET {{baseUrl}}/cards
+Authorization: Bearer {{token}}
+
+###
+### 7. DEFINIR CARTÃO COMO PADRÃO
+###
+
+POST {{baseUrl}}/cards/1/default
+Authorization: Bearer {{token}}
+
+###
+### 8. REMOVER CARTÃO SALVO
+###
+
+DELETE {{baseUrl}}/cards/1
+Authorization: Bearer {{token}}
+
+###
+### 9. VERIFICAR STATUS DE DEPÓSITO
+###
+
+POST {{baseUrl}}/status
+Content-Type: application/json
+
+{
+  "idTransaction": "or_xxxxxxxxxxxxx"
+}
+
+###
+### 10. TESTE COM CARTÃO QUE EXIGE 3D SECURE
+###
+
+POST {{baseUrl}}/deposit/card
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "amount": 100.00,
+  "debtor_name": "Carlos Teste",
+  "email": "carlos@email.com",
+  "debtor_document": "12345678900",
+  "phone": "11999999999",
+  "card": {
+    "number": "4000000000000010",
+    "holder_name": "CARLOS TESTE",
+    "exp_month": 12,
+    "exp_year": 2025,
+    "cvv": "123"
+  },
+  "installments": 1,
+  "use_3ds": true
+}
+
+###
+### 11. TESTE COM CARTÃO RECUSADO
+###
+
+POST {{baseUrl}}/deposit/card
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "amount": 50.00,
+  "debtor_name": "Teste Recusado",
+  "email": "teste@email.com",
+  "debtor_document": "12345678900",
+  "phone": "11999999999",
+  "card": {
+    "number": "4000000000009995",
+    "holder_name": "TESTE RECUSADO",
+    "exp_month": 12,
+    "exp_year": 2025,
+    "cvv": "123"
+  },
+  "installments": 1,
+  "use_3ds": true
+}
+
+###
+### 12. OBTER SALDO DO USUÁRIO
+###
+
+GET {{baseUrl}}/balance
+Authorization: Bearer {{token}}
+
+###
+### 13. OBTER EXTRATO
+###
+
+GET {{baseUrl}}/extrato?page=1&limit=20
+Authorization: Bearer {{token}}
+
+###
+### EXEMPLOS DE WEBHOOK (para testes)
+###
+
+### Simular Webhook - Pagamento Aprovado
+POST http://localhost:8000/pagarme/webhook
+Content-Type: application/json
+X-Pagarme-Signature: signature_aqui
+
+{
+  "type": "order.paid",
+  "data": {
+    "id": "or_xxxxxxxxxxxxx",
+    "status": "paid",
+    "charges": [
+      {
+        "id": "ch_xxxxxxxxxxxxx",
+        "status": "paid",
+        "payment_method": "credit_card",
+        "amount": 10000,
+        "paid_amount": 10000,
+        "last_transaction": {
+          "id": "tran_xxxxxxxxxxxxx",
+          "status": "paid",
+          "acquirer_nsu": "123456",
+          "acquirer_tid": "789012",
+          "acquirer_auth_code": "123456"
+        }
+      }
+    ]
+  }
+}
+
+### Simular Webhook - Pagamento Recusado
+POST http://localhost:8000/pagarme/webhook
+Content-Type: application/json
+X-Pagarme-Signature: signature_aqui
+
+{
+  "type": "order.payment_failed",
+  "data": {
+    "id": "or_xxxxxxxxxxxxx",
+    "status": "failed",
+    "charges": [
+      {
+        "id": "ch_xxxxxxxxxxxxx",
+        "status": "failed",
+        "payment_method": "credit_card",
+        "last_transaction": {
+          "status": "refused",
+          "gateway_response": {
+            "errors": [
+              {
+                "message": "Cartão recusado pela operadora"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+}
+
+###
+### NOTAS:
+### 1. Substitua {{token}} pelo token JWT obtido no login
+### 2. Substitua {{baseUrl}} pela URL da sua API
+### 3. Use cartões de teste da Pagar.me para testes seguros
+### 4. Para webhooks locais, use ngrok: ngrok http 8000
+###

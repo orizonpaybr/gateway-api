@@ -153,8 +153,8 @@ Route::middleware(['verify.jwt'])->group(function () {
     Route::get('transactions/{id}', [UserController::class, 'getTransactionById']);
     Route::get('user/profile', [UserController::class, 'getProfile']);
     Route::post('pix/generate-qr', [UserController::class, 'generatePixQR']);
-    Route::post('pix/withdraw', [UserController::class, 'makePixWithdraw']);
-    Route::get('statement', [UserController::class, 'getStatement']);
+    Route::post('pix/withdraw', [UserController::class, 'makePixWithdraw']); //The front-end does not use this route for
+    Route::get('statement', [UserController::class, 'getStatement']); //The front-end does not use this route for
     Route::get('extrato', [UserController::class, 'getExtrato']);
     Route::get('user/real-data', [UserController::class, 'getRealData']);
     Route::get('dashboard/stats', [UserController::class, 'getDashboardStats']);
@@ -355,6 +355,14 @@ Route::middleware('throttle:20,1')->post('status', [DepositController::class, 's
 Route::middleware(['check.token.secret', 'throttle:60,1'])->post('card/payment', [\App\Http\Controllers\Api\CardPaymentController::class, 'createPayment']);
 Route::middleware(['check.token.secret', 'throttle:60,1'])->get('card/payment/{transactionId}', [\App\Http\Controllers\Api\CardPaymentController::class, 'getPaymentStatus']);
 Route::post('card/webhook', [\App\Http\Controllers\Api\CardPaymentController::class, 'webhook']);
+
+/* CARTÃO PAGAR.ME - Depósitos via cartão de crédito */
+Route::middleware(['check.token.secret', 'throttle:30,1'])->post('deposit/card', [DepositController::class, 'makeCardDeposit']);
+Route::middleware(['verify.jwt', 'throttle:60,1'])->group(function () {
+    Route::get('cards', [DepositController::class, 'listSavedCards']);
+    Route::delete('cards/{cardId}', [DepositController::class, 'deleteSavedCard']);
+    Route::post('cards/{cardId}/default', [DepositController::class, 'setDefaultCard']);
+});
 
 /* BOLETO */
 Route::middleware(['check.token.secret', 'throttle:5,1'])->post('billet/charge', [BilletController::class, 'charge']);
