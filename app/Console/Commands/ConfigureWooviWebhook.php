@@ -28,49 +28,8 @@ class ConfigureWooviWebhook extends Command
      */
     public function handle()
     {
-        $this->info('🔧 Configurando webhook da Woovi...');
-
-        // Verificar se a Woovi está configurada
-        $woovi = Woovi::first();
-        if (!$woovi) {
-            $this->error('❌ Woovi não está configurado. Configure primeiro na área administrativa.');
-            return 1;
-        }
-
-        if (!$woovi->status) {
-            $this->error('❌ Woovi está inativo. Ative primeiro na área administrativa.');
-            return 1;
-        }
-
-        // Obter URL do webhook
-        $webhookUrl = $this->option('url') ?: env('APP_URL') . '/api/woovi/callback';
-        
-        // Obter ou gerar secret
-        $webhookSecret = $this->option('secret');
-        if (!$webhookSecret) {
-            $webhookSecret = Str::random(32);
-            $this->info("🔑 Gerando webhook_secret: {$webhookSecret}");
-        }
-
-        $this->info("🌐 URL do webhook: {$webhookUrl}");
-        $this->info("🔐 Secret do webhook: {$webhookSecret}");
-
-        // Configurar webhook via API da Woovi
-        $wooviService = new WooviService();
-        $result = $wooviService->configureWebhook($webhookUrl, $webhookSecret);
-
-        if ($result['success']) {
-            // Salvar o webhook_secret no banco de dados
-            $woovi->update(['webhook_secret' => $webhookSecret]);
-            
-            $this->info('✅ Webhook configurado com sucesso!');
-            $this->info("📋 URL completa: {$webhookUrl}?authorization={$webhookSecret}");
-            $this->info('💾 webhook_secret salvo no banco de dados');
-            
-            return 0;
-        } else {
-            $this->error('❌ Erro ao configurar webhook: ' . $result['message']);
-            return 1;
-        }
+        $this->error('❌ Comando desativado: Woovi foi removido da aplicação.');
+        $this->info('Apenas Pagar.me permanece ativo para processamento de cartão de crédito.');
+        return 1;
     }
 }

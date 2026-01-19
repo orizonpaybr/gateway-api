@@ -9,9 +9,10 @@ use Illuminate\Support\Facades\Validator;
 use App\Models\User;
 use App\Models\CheckoutOrders;
 use App\Models\Solicitacoes;
-use App\Services\PrimePay7Service;
+use App\Services\PagarMeService;
 use App\Helpers\Helper;
 use App\Models\App as AppModel;
+use App\Models\Pagarme;
 
 class CardPaymentController extends Controller
 {
@@ -70,19 +71,19 @@ class CardPaymentController extends Controller
             // Obter adquirente padrão para cartão
             $adquirente = Helper::adquirenteDefault($user, 'card_billet');
 
-            if ($adquirente !== 'primepay7') {
+            if ($adquirente !== 'pagarme') {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Pagamento com cartão não configurado. Configure PrimePay7 como adquirente padrão para cartão.'
+                    'message' => 'Pagamento com cartão não configurado. Configure Pagar.me como adquirente padrão para cartão.'
                 ], 400);
             }
 
-            // Verificar se PrimePay7 está ativo
-            $primepay7 = \App\Models\PrimePay7::first();
-            if (!$primepay7 || !$primepay7->status) {
+            // Verificar se Pagar.me está ativo e configurado para cartão
+            $pagarme = Pagarme::first();
+            if (!$pagarme || !$pagarme->card_enabled) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Adquirente de cartão não disponível no momento'
+                    'message' => 'Pagamento com cartão não disponível no momento. Pagar.me não está configurado para cartão.'
                 ], 503);
             }
 
@@ -99,49 +100,56 @@ class CardPaymentController extends Controller
             // Gerar ID único para a transação
             $externalReference = 'API_CARD_' . uniqid() . '_' . time();
 
-            // Preparar payload para PrimePay7
+            // Preparar payload para Pagar.me
             $cardData = $request->card;
-            $saleData = [
-                'amount' => (int) ($amount * 100), // Converter para centavos
+            $orderData = [
+                'amount' => $amount,
                 'installments' => $installments,
                 'items' => [
                     [
-                        'title' => $request->description ?? 'Pagamento via API',
-                        'unitPrice' => (int) ($amount * 100),
+                        'amount' => $amount,
+                        'description' => $request->description ?? 'Pagamento via API',
                         'quantity' => 1,
-                        'tangible' => false
                     ]
                 ],
                 'customer' => [
                     'name' => $request->client_name,
                     'email' => $request->client_email,
-                    'document' => [
-                        'type' => 'cpf',
-                        'number' => preg_replace('/\D/', '', $request->client_document)
-                    ],
-                    'phone' => preg_replace('/\D/', '', $request->client_phone)
+                    'document' => preg_replace('/\D/', '', $request->client_document),
+                    'phone' => preg_replace('/\D/', '', $request->client_phone),
                 ],
                 'card' => [
-                    'hash' => $cardData['hash'] ?? null,
                     'number' => $cardData['number'] ?? null,
-                    'holderName' => $cardData['holder_name'] ?? null,
-                    'expirationMonth' => $cardData['expiration_month'] ?? null,
-                    'expirationYear' => $cardData['expiration_year'] ?? null,
+                    'holder_name' => $cardData['holder_name'] ?? null,
+                    'exp_month' => $cardData['expiration_month'] ?? null,
+                    'exp_year' => $cardData['expiration_year'] ?? null,
                     'cvv' => $cardData['cvv'] ?? null,
                 ],
-                'returnURL' => $request->return_url ?? url('/api/card/callback'),
-                'postbackUrl' => $request->postback_url ?? url('/api/card/webhook')
+                'card_token' => $cardData['hash'] ?? null,
+                'statement_descriptor' => substr($setting->gateway_name ?? 'GATEWAY', 0, 13),
+                'use_3ds' => $pagarme->is3dsEnabled(),
             ];
 
-            // Processar pagamento na PrimePay7
-            Log::info('💳 Enviando pagamento para PrimePay7:', ['user_id' => $user->user_id, 'amount' => $amount]);
+            // Processar pagamento na Pagar.me
+            Log::info('💳 Enviando pagamento para Pagar.me:', ['user_id' => $user->user_id, 'amount' => $amount]);
             
-            $primePay7Service = new PrimePay7Service();
-            $response = $primePay7Service->createCardSale($saleData);
+            $pagarmeService = new PagarMeService();
+            $response = $pagarmeService->createCardOrder($orderData);
 
-            if (isset($response['id'])) {
+            if ($response && isset($response['id'])) {
                 $transactionId = $response['id'];
-                $status = $response['status'] ?? 'processing';
+                $chargeId = $response['charges'][0]['id'] ?? null;
+                $chargeStatus = $response['charges'][0]['status'] ?? 'pending';
+
+                // Mapear status do Pagar.me
+                $statusMap = [
+                    'pending' => 'WAITING_FOR_APPROVAL',
+                    'paid' => 'PAID_OUT',
+                    'captured' => 'PAID_OUT',
+                    'refunded' => 'REFUNDED',
+                    'failed' => 'CANCELLED',
+                ];
+                $internalStatus = $statusMap[$chargeStatus] ?? 'WAITING_FOR_APPROVAL';
 
                 // Criar registro na tabela solicitacoes
                 $solicitacao = Solicitacoes::create([
@@ -152,39 +160,45 @@ class CardPaymentController extends Controller
                     'client_document' => preg_replace('/\D/', '', $request->client_document),
                     'client_email' => $request->client_email,
                     'date' => now(),
-                    'status' => 'WAITING_FOR_APPROVAL', // Aguardando confirmação
+                    'status' => $internalStatus,
                     'idTransaction' => $transactionId,
                     'deposito_liquido' => $deposito_liquido,
                     'qrcode_pix' => '',
                     'paymentcode' => '',
                     'paymentCodeBase64' => '',
-                    'adquirente_ref' => 'PrimePay7',
+                    'adquirente_ref' => 'PagarMe_Card',
                     'taxa_cash_in' => $taxa_cash_in,
-                    'taxa_pix_cash_in_adquirente' => 0,
-                    'taxa_pix_cash_in_valor_fixo' => 0,
+                    'taxa_pix_cash_in_adquirente' => $pagarme->card_tx_percent ?? 0,
+                    'taxa_pix_cash_in_valor_fixo' => $pagarme->card_tx_fixed ?? 0,
                     'client_telefone' => $request->client_phone,
                     'executor_ordem' => 'API Card Payment',
                     'descricao_transacao' => $request->description ?? 'Pagamento com Cartão via API',
+                    'method' => 'card',
+                    'installments' => $installments,
+                    'charge_id' => $chargeId,
                 ]);
+
+                // Se pagamento foi aprovado imediatamente, creditar saldo
+                if (in_array($chargeStatus, ['paid', 'captured'])) {
+                    Helper::incrementAmount($user, $deposito_liquido, 'saldo');
+                    Helper::calculaSaldoLiquido($user->user_id);
+                }
 
                 Log::info('✅ Pagamento criado com sucesso:', [
                     'transaction_id' => $transactionId,
                     'solicitacao_id' => $solicitacao->id,
-                    'status' => $status
+                    'status' => $chargeStatus
                 ]);
 
-                // Mapear status da PrimePay7 para resposta da API
-                $statusMap = [
-                    'waiting_payment' => 'pending',
+                // Mapear status do Pagar.me para resposta da API
+                $apiStatusMap = [
                     'pending' => 'pending',
-                    'processing' => 'processing',
-                    'approved' => 'approved',
                     'paid' => 'paid',
-                    'refused' => 'refused',
-                    'cancelled' => 'cancelled',
+                    'captured' => 'paid',
+                    'refunded' => 'refunded',
+                    'failed' => 'refused',
                 ];
-
-                $apiStatus = $statusMap[$status] ?? 'processing';
+                $apiStatus = $apiStatusMap[$chargeStatus] ?? 'processing';
 
                 return response()->json([
                     'status' => 'success',
@@ -197,7 +211,6 @@ class CardPaymentController extends Controller
                         'fee' => $taxa_cash_in,
                         'installments' => $installments,
                         'created_at' => now()->toIso8601String(),
-                        'return_url' => $response['returnURL'] ?? null,
                     ]
                 ], 201);
 
@@ -205,15 +218,15 @@ class CardPaymentController extends Controller
                 // Erro ao processar pagamento
                 $errorMessage = 'Erro ao processar pagamento';
                 
-                if (isset($response['errors']) && is_array($response['errors'])) {
+                if (isset($response['message'])) {
+                    $errorMessage = $response['message'];
+                } elseif (isset($response['errors']) && is_array($response['errors'])) {
                     $errorMessage = implode(', ', array_map(function($error) {
                         return $error['message'] ?? $error;
                     }, $response['errors']));
-                } elseif (isset($response['message'])) {
-                    $errorMessage = $response['message'];
                 }
 
-                Log::error('❌ Erro ao criar pagamento PrimePay7:', [
+                Log::error('❌ Erro ao criar pagamento Pagar.me:', [
                     'user_id' => $user->user_id,
                     'response' => $response
                 ]);
@@ -307,7 +320,7 @@ class CardPaymentController extends Controller
     }
 
     /**
-     * Webhook para receber atualizações da PrimePay7 (via API)
+     * Webhook para receber atualizações da Pagar.me (via API)
      * 
      * @param Request $request
      * @return \Illuminate\Http\JsonResponse

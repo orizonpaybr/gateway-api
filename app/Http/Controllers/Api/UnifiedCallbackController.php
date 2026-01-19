@@ -3,8 +3,6 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Http\Controllers\Api\Adquirentes\PixupController;
-use App\Http\Controllers\Api\Adquirentes\BSPayController;
 use App\Http\Controllers\Api\CallbackController;
 use App\Helpers\Helper;
 use App\Models\User;
@@ -35,29 +33,15 @@ class UnifiedCallbackController extends Controller
             Log::info("[UNIFIED CALLBACK] Adquirente identificada: $adquirente");
 
             // Redireciona para o controller da adquirente específica
+            // Apenas Pagar.me permanece ativo
             switch ($adquirente) {
-                case 'pixup':
-                    $pixupController = new PixupController();
-                    return $pixupController->callbackDeposit($request);
-                    
-                case 'bspay':
-                    $bspayController = new BSPayController();
-                    return $bspayController->callbackDeposit($request);
-                    
-                case 'efi':
-                    $callbackController = new CallbackController();
-                    return $callbackController->callbackEfi($request);
-                    
-                case 'woovi':
-                    $callbackController = new CallbackController();
-                    return $callbackController->callbackWoovi($request);
-                    
                 case 'pagarme':
-                    $callbackController = new CallbackController();
+                    // Usar app() para resolver dependências automaticamente
+                    $callbackController = app(CallbackController::class);
                     return $callbackController->webhookPagarme($request);
                     
                 default:
-                    Log::warning("[UNIFIED CALLBACK] Adquirente não suportada: $adquirente");
+                    Log::warning("[UNIFIED CALLBACK] Adquirente não suportada ou removida: $adquirente");
                     return response()->json(['status' => false, 'message' => 'Adquirente não suportada'], 400);
             }
 
@@ -71,66 +55,20 @@ class UnifiedCallbackController extends Controller
 
     /**
      * Identifica a adquirente baseada nos dados recebidos
+     * Nota: Apenas Pagar.me permanece ativo
      */
     private function identifyAdquirente($data)
     {
         Log::info('[UNIFIED CALLBACK] Iniciando identificação da adquirente...');
         
-        // BSPay - formato específico
-        if (isset($data['status']) && isset($data['idTransaction']) && isset($data['typeTransaction'])) {
-            Log::info('[UNIFIED CALLBACK] Identificado como BSPay (formato direto)');
-            return 'bspay';
-        }
-
-        // BSPay também pode vir no formato PIXUP - verificar pelo external_id primeiro
-        if (isset($data['requestBody']) && isset($data['requestBody']['transactionType'])) {
-            $externalId = $data['requestBody']['external_id'] ?? null;
-            if ($externalId) {
-                Log::info("[UNIFIED CALLBACK] Formato PIXUP detectado, buscando external_id: $externalId");
-                
-                // Busca no banco para identificar a adquirente
-                $solicitacao = \App\Models\Solicitacoes::where('externalreference', $externalId)
-                    ->orWhere('idTransaction', $externalId)
-                    ->first();
-                    
-                if ($solicitacao && $solicitacao->adquirente_ref) {
-                    Log::info("[UNIFIED CALLBACK] Encontrado em depósitos (formato PIXUP) - Adquirente: {$solicitacao->adquirente_ref}");
-                    return $solicitacao->adquirente_ref;
-                }
-                
-                // Se não encontrou em depósitos, busca em saques
-                $cashout = \App\Models\SolicitacoesCashOut::where('externalreference', $externalId)
-                    ->orWhere('idTransaction', $externalId)
-                    ->first();
-                    
-                if ($cashout) {
-                    Log::info("[UNIFIED CALLBACK] Encontrado em saques (formato PIXUP) - Executor: {$cashout->executor_ordem}");
-                    if ($cashout->executor_ordem) {
-                        return $cashout->executor_ordem;
-                    }
-                }
-            }
-            Log::info("[UNIFIED CALLBACK] Formato PIXUP não identificado no banco, usando PIXUP como padrão");
-            return 'pixup';
-        }
-
-        // EFI - formato específico
-        if (isset($data['pix']) && isset($data['endToEndId'])) {
-            return 'efi';
-        }
-
-        // Woovi - formato específico
-        if (isset($data['event']) && isset($data['data'])) {
-            return 'woovi';
-        }
-
         // Pagar.me - formato específico
         if (isset($data['type']) && isset($data['data']['charges'])) {
             return 'pagarme';
         }
-
-        // Se não conseguir identificar, tenta buscar pelo external_id ou transaction_id
-        $externalId = $data['external_id'] ?? $data['idTransaction'] ?? $data['transaction_id'] ?? null;
+        
+        // Tentar identificar pelo external_id ou transaction_id no banco
+        $externalId = $data['external_id'] ?? $data['idTransaction'] ?? $data['transaction_id'] ?? 
+                      ($data['requestBody']['external_id'] ?? null) ?? null;
         
         if ($externalId) {
             Log::info("[UNIFIED CALLBACK] Buscando transação no banco de dados: $externalId");
@@ -193,17 +131,15 @@ class UnifiedCallbackController extends Controller
             Log::info("[UNIFIED WITHDRAW CALLBACK] Redirecionando para adquirente: $adquirente");
 
             // Redireciona para o controller da adquirente específica
+            // Apenas Pagar.me permanece ativo (mas não suporta saques PIX diretamente)
             switch ($adquirente) {
-                case 'pixup':
-                    $pixupController = new PixupController();
-                    return $pixupController->callbackWithdraw($request);
-                    
-                case 'bspay':
-                    $bspayController = new BSPayController();
-                    return $bspayController->callbackWithdraw($request);
+                case 'pagarme':
+                    // Pagar.me não suporta saques PIX diretamente
+                    Log::warning("[UNIFIED WITHDRAW CALLBACK] Pagar.me não suporta saques PIX");
+                    return response()->json(['status' => false, 'message' => 'Saque PIX não disponível'], 400);
                     
                 default:
-                    Log::warning("[UNIFIED WITHDRAW CALLBACK] Adquirente não suportada para saques: $adquirente");
+                    Log::warning("[UNIFIED WITHDRAW CALLBACK] Adquirente não suportada ou removida: $adquirente");
                     return response()->json(['status' => false, 'message' => 'Adquirente não suportada para saques'], 400);
             }
 

@@ -610,37 +610,20 @@ class AdminDashboardController extends Controller
     /**
      * Calcular taxas pagas aos adquirentes
      * 
+     * Nota: Adquirentes PIX foram removidos. Apenas Pagar.me permanece para cartão.
+     * Taxas de adquirentes PIX não são mais calculadas.
+     * 
      * @param $solicitacoes
      * @param $saques
      * @return array
      */
     private function calculateAcquirerFees($solicitacoes, $saques): array
     {
-        $taxasAdquirentesEntradas = 0;
-        $taxasAdquirentesSaidas = 0;
-        
-        // Buscar taxa da XDPag (adquirente padrão) usando Cache facade padronizado
-        $xdpagCacheKey = CacheKeyService::xdpagConfig();
-        try {
-            $xdpag = Cache::remember($xdpagCacheKey, 3600, function () {
-                return \App\Models\XDPag::first();
-            });
-        } catch (\Exception $e) {
-            Log::warning('Erro ao usar cache de XDPag, usando query direta', ['error' => $e->getMessage()]);
-            $xdpag = \App\Models\XDPag::first();
-        }
-
-        if ($xdpag) {
-            $taxasAdquirentesEntradas = (clone $solicitacoes)
-                ->sum(DB::raw('amount * ' . ($xdpag->taxa_adquirente_entradas / 100)));
-            
-            $taxasAdquirentesSaidas = (clone $saques)
-                ->sum(DB::raw('amount * ' . ($xdpag->taxa_adquirente_saidas / 100)));
-        }
-
+        // Adquirentes PIX foram removidos - apenas Pagar.me permanece para cartão
+        // Como não há mais adquirentes PIX processando transações, retornar 0
         return [
-            'entradas' => $taxasAdquirentesEntradas,
-            'saidas' => $taxasAdquirentesSaidas,
+            'entradas' => 0,
+            'saidas' => 0,
         ];
     }
 

@@ -183,15 +183,13 @@ class SaqueController extends Controller
                     return response()->json(['status' => 'error', 'message' => 'Adquirente não suportado.'], 500);
             }
 
-            // Verificar se é um erro específico da API Pixup
-            if (isset($response['data']['pixup_error']) && $response['data']['pixup_error']) {
+            // Verificar se há erros na resposta
+            if (isset($response['data']['error']) || isset($response['error'])) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => $response['data']['message'],
-                    'details' => $response['data']['details'] ?? null,
-                    'pixup_error' => true,
-                    'pixup_raw_response' => $response['data']['pixup_raw_response'] ?? null
-                ], $response['status']);
+                    'message' => $response['data']['message'] ?? $response['message'] ?? 'Erro ao processar saque',
+                    'details' => $response['data']['details'] ?? null
+                ], $response['status'] ?? 500);
             }
             
             // Padronizar resposta de saque

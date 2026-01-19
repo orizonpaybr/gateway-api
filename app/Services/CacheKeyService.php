@@ -56,11 +56,12 @@ class CacheKeyService
     }
     
     /**
-     * Cache key para XDPag config
+     * Cache key para Pagar.me config
+     * Nota: XDPag foi removido, mantido apenas para compatibilidade se necessário
      */
-    public static function xdpagConfig(): string
+    public static function pagarmeConfig(): string
     {
-        return 'xdpag:config';
+        return 'pagarme:config';
     }
     
     /**
