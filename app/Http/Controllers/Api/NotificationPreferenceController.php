@@ -18,41 +18,6 @@ class NotificationPreferenceController extends Controller
     }
 
     /**
-     * Retornar resposta de erro padrão
-     * 
-     * @param string $message
-     * @param int $statusCode
-     * @return \Illuminate\Http\JsonResponse
-     */
-    private function errorResponse(string $message, int $statusCode = 500): \Illuminate\Http\JsonResponse
-    {
-        return response()->json([
-            'success' => false,
-            'message' => $message
-        ], $statusCode);
-    }
-
-    /**
-     * Retornar resposta de sucesso padrão
-     * 
-     * @param mixed $data
-     * @param string|null $message
-     * @return \Illuminate\Http\JsonResponse
-     */
-    private function successResponse($data, ?string $message = null): \Illuminate\Http\JsonResponse
-    {
-        $response = ['success' => true];
-        
-        if ($message) {
-            $response['message'] = $message;
-        }
-        
-        $response['data'] = is_array($data) ? $data : $data->toArray();
-        
-        return response()->json($response);
-    }
-
-    /**
      * Obter preferências de notificação do usuário
      * 
      * @param Request $request

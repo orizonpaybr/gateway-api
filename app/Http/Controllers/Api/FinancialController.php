@@ -276,28 +276,6 @@ class FinancialController extends Controller
     // ========== Métodos Helper ==========
 
     /**
-     * Resposta de sucesso padronizada
-     */
-    private function successResponse($data): JsonResponse
-    {
-        return response()->json([
-            'success' => true,
-            'data' => $data,
-        ]);
-    }
-
-    /**
-     * Resposta de erro padronizada
-     */
-    private function errorResponse(string $message, int $statusCode = 500): JsonResponse
-    {
-        return response()->json([
-            'success' => false,
-            'message' => $message,
-        ], $statusCode);
-    }
-
-    /**
      * Validar ordem de ordenação
      */
     private function validateSortOrder(?string $order): string

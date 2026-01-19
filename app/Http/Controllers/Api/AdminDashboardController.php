@@ -707,35 +707,6 @@ class AdminDashboardController extends Controller
         return [$dataInicio, $dataFim];
     }
 
-    /**
-     * Resposta de sucesso padronizada
-     * 
-     * @param array $data
-     * @return \Illuminate\Http\JsonResponse
-     */
-    private function successResponse(array $data)
-    {
-        return response()->json([
-            'success' => true,
-            'data' => $data
-        ])->header('Access-Control-Allow-Origin', '*');
-    }
-
-    /**
-     * Resposta de erro padronizada
-     * 
-     * @param string $message
-     * @param int $code
-     * @return \Illuminate\Http\JsonResponse
-     */
-    private function errorResponse(string $message, int $code = 400)
-    {
-        return response()->json([
-            'success' => false,
-            'message' => $message
-        ], $code)->header('Access-Control-Allow-Origin', '*');
-    }
-    
     // =====================================================
     // CRUD DE USUÁRIOS
     // =====================================================

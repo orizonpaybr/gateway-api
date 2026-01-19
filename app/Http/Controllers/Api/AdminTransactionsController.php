@@ -296,19 +296,5 @@ class AdminTransactionsController extends Controller
         ];
     }
     
-    /**
-     * Resposta de erro padronizada
-     * 
-     * @param string $message
-     * @param int $statusCode
-     * @return JsonResponse
-     */
-    private function errorResponse(string $message, int $statusCode): JsonResponse
-    {
-        return response()->json([
-            'success' => false,
-            'message' => $message,
-        ], $statusCode);
-    }
 }
 
