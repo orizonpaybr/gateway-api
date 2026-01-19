@@ -7,18 +7,7 @@ use App\Models\Adquirente;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
-use App\Traits\CashtimeTrait;
-use App\Traits\MercadoPagoTrait;
-use App\Traits\EfiTrait;
 use App\Traits\PagarMeTrait;
-use App\Traits\XgateTrait;
-use App\Traits\WitetecTrait;
-use App\Traits\PixupTrait;
-use App\Traits\BSPayTrait;
-use App\Traits\WooviTrait;
-use App\Traits\AsaasTrait;
-use App\Traits\PrimePay7Trait;
-use App\Traits\XDPagTrait;
 use App\Models\Solicitacoes;
 use App\Models\App;
 use App\Models\Pagarme;
@@ -98,53 +87,9 @@ class DepositController extends Controller
 
         Log::info('DepositController - Executando switch para adquirente', ['adquirente' => $default]);
         switch($default){
-            case 'cashtime':
-                Log::info('DepositController - Executando CashtimeTrait', []);
-                $response = CashtimeTrait::requestDepositCashtime($request);
-            break;
-            case 'mercadopago':
-                Log::info('DepositController - Executando MercadoPagoTrait', []);
-                $response = MercadoPagoTrait::requestDepositMercadoPago($request);
-            break;
-            case 'efi':
-                Log::info('DepositController - Executando EfiTrait', []);
-                $response = EfiTrait::requestDepositEfi($request);
-            break;
             case 'pagarme':
                 Log::info('DepositController - Executando PagarMeTrait', []);
                 $response = PagarMeTrait::requestDepositPagarme($request);
-            break;
-            case 'xgate':
-                Log::info('DepositController - Executando XgateTrait', []);
-                $response = XgateTrait::requestDepositXgate($request);
-            break;
-            case 'witetec':
-                Log::info('DepositController - Executando WitetecTrait', []);
-                $response = WitetecTrait::requestDepositWitetec($request);
-            break;
-            case 'pixup':
-                Log::info('DepositController - Executando PixupTrait', []);
-                $response = PixupTrait::requestDepositPixup($request);
-            break;
-            case 'bspay':
-                Log::info('DepositController - Executando BSPayTrait', []);
-                $response = BSPayTrait::requestDepositBSPay($request);
-            break;
-            case 'woovi':
-                Log::info('DepositController - Executando WooviTrait', []);
-                $response = WooviTrait::requestPaymentWoovi($request);
-            break;
-            case 'asaas':
-                Log::info('DepositController - Executando AsaasTrait', []);
-                $response = AsaasTrait::requestDepositAsaas($request);
-            break;
-            case 'primepay7':
-                Log::info('DepositController - Executando PrimePay7Trait', []);
-                $response = PrimePay7Trait::generateQrCodePrimePay7($request);
-            break;
-            case 'xdpag':
-                Log::info('DepositController - Executando XDPagTrait', []);
-                $response = XDPagTrait::requestDepositXDPag($request);
             break;
             default:
                 Log::info('DepositController - Adquirente não suportado', ['adquirente' => $default]);

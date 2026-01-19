@@ -23,9 +23,4 @@ Route::get('/download-boleto', function () {
 });
 
 // Rotas de adquirentes (webhooks e callbacks específicos)
-require __DIR__ . '/groups/adquirentes/cashtime.php';
-require __DIR__ . '/groups/adquirentes/mercadopago.php';
-require __DIR__ . '/groups/adquirentes/efi.php';
 require __DIR__ . '/groups/adquirentes/pagarme.php';
-require __DIR__ . '/groups/adquirentes/xgate.php';
-require __DIR__ . '/groups/adquirentes/witetec.php';

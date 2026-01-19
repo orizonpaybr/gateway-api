@@ -9,11 +9,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\SaqueController;
 use App\Http\Controllers\Api\DepositController;
-use App\Http\Controllers\Api\Adquirentes\PixupController;
-use App\Http\Controllers\Api\Adquirentes\BSPayController;
-use App\Http\Controllers\Api\Adquirentes\AsaasController;
-use App\Http\Controllers\Api\Adquirentes\PrimePay7Controller;
-use App\Http\Controllers\Api\Adquirentes\XDPagController;
 use Illuminate\Support\Facades\Artisan;
 use App\Http\Controllers\Api\PixInfracoesController;
 use App\Http\Controllers\Api\PixKeyController;
@@ -342,37 +337,3 @@ Route::middleware(['verify.jwt', 'throttle:60,1'])->group(function () {
 
 /* BOLETO */
 Route::middleware(['check.token.secret', 'throttle:5,1'])->post('billet/charge', [BilletController::class, 'charge']);
-
-/* PIXUP CALLBACKS */
-Route::post('pixup/callback/deposit', [PixupController::class, 'callbackDeposit'])->middleware(['validate.webhook', 'throttle:30,1']);
-Route::post('pixup/callback/withdraw', [PixupController::class, 'callbackWithdraw'])->middleware(['validate.webhook', 'throttle:30,1']);
-Route::post('pixup/test', [PixupController::class, 'testCallback'])->middleware(['validate.webhook', 'throttle:10,1']);
-
-/* WOOVI CALLBACKS */
-Route::post('woovi/callback', [CallbackController::class, 'callbackWoovi'])->middleware(['validate.webhook', 'throttle:30,1']);
-Route::post('woovi/callback/withdraw', [CallbackController::class, 'callbackWooviWithdraw'])->middleware(['validate.webhook', 'throttle:30,1']);
-
-/* BSPAY CALLBACKS */
-Route::post('bspay/callback/deposit', [BSPayController::class, 'callbackDeposit'])->middleware(['validate.webhook', 'throttle:30,1']);
-Route::post('bspay/callback/withdraw', [BSPayController::class, 'callbackWithdraw'])->middleware(['validate.webhook', 'throttle:30,1']);
-Route::post('bspay/test', [BSPayController::class, 'testCallback'])->middleware(['validate.webhook', 'throttle:10,1']);
-
-/* ASAAS CALLBACKS */
-Route::post('asaas/callback/deposit', [AsaasController::class, 'callbackDeposit'])->middleware(['validate.webhook', 'throttle:30,1']);
-Route::post('asaas/callback/withdraw', [AsaasController::class, 'callbackWithdraw'])->middleware(['validate.webhook', 'throttle:30,1']);
-Route::post('asaas/test', [AsaasController::class, 'testCallback'])->middleware(['validate.webhook', 'throttle:10,1']);
-
-/* PRIMEPAY7 CALLBACKS */
-Route::post('primepay7/callback/deposit', [PrimePay7Controller::class, 'callbackDeposit'])->middleware(['validate.webhook', 'throttle:30,1']);
-Route::post('primepay7/callback/withdraw', [PrimePay7Controller::class, 'callbackWithdraw'])->middleware(['validate.webhook', 'throttle:30,1']);
-Route::post('primepay7/callback', [PrimePay7Controller::class, 'callbackUnified'])->middleware(['validate.webhook', 'throttle:30,1']);
-Route::post('primepay7/webhook', [PrimePay7Controller::class, 'webhook'])->middleware(['validate.webhook', 'throttle:30,1']);
-
-/* XDPAG CALLBACKS */
-Route::post('xdpag/callback/deposit', [XDPagController::class, 'callbackDeposit'])->middleware(['validate.webhook', 'throttle:30,1']);
-Route::post('xdpag/callback/withdraw', [XDPagController::class, 'callbackWithdraw'])->middleware(['validate.webhook', 'throttle:30,1']);
-Route::post('xdpag/test', [XDPagController::class, 'testCallback'])->middleware(['validate.webhook', 'throttle:10,1']);
-
-/* PAGARM CALLBACKS */
-Route::post('pagarm/callback/deposit', [\App\Http\Controllers\Api\Adquirentes\PagArmController::class, 'callbackDeposit'])->middleware(['validate.webhook', 'throttle:30,1']);
-Route::post('pagarm/callback/withdraw', [\App\Http\Controllers\Api\Adquirentes\PagArmController::class, 'callbackWithdraw'])->middleware(['validate.webhook', 'throttle:30,1']);

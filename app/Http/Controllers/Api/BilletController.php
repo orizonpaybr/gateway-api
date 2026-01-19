@@ -3,12 +3,10 @@
 namespace App\Http\Controllers\Api;
 
 use Illuminate\Validation\ValidationException;
-use App\Traits\EfiTrait;
 use Illuminate\Http\Request;
 
 class BilletController
 {
-    use EfiTrait;
     public function charge(Request $request)
     {
         try {
@@ -44,8 +42,10 @@ class BilletController
                 'payment.banking_billet.message' => ['sometimes', 'string'],
             ]);
 
-            $response = self::requestBoletoEfi($request);
-            return response()->json($response['data'], $response['status']);
+            // EfiTrait removido - funcionalidade de boleto não disponível
+            return response()->json([
+                'message' => 'Funcionalidade de boleto não disponível. EfiTrait foi removido.'
+            ], 503);
         } catch (ValidationException $e) {
             return response()->json([
                 'message' => 'Erro de validação',
@@ -56,11 +56,9 @@ class BilletController
 
     public function callbackCharge(Request $request)
     {
-        $data = $request->all();
-        \Log::debug('[+][EFI][BILLET][WEBHOOK][CHARGE]: '.json_encode($data));
-        $notification = $data['notification'];
-        self::webhookCharge($notification);
-        
-        return response()->json([], 200);
+        // EfiTrait removido - funcionalidade de boleto não disponível
+        return response()->json([
+            'message' => 'Funcionalidade de boleto não disponível. EfiTrait foi removido.'
+        ], 503);
     }
 }

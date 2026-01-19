@@ -6,7 +6,6 @@ use Illuminate\Console\Command;
 use App\Services\AsaasService;
 use App\Models\Asaas;
 use App\Models\Adquirente;
-use App\Traits\AsaasTrait;
 
 class TestAsaasIntegration extends Command
 {

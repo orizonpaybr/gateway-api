@@ -6,17 +6,6 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\{Log, Cache};
 use App\Enums\PixKeyType;
-use App\Traits\CashtimeTrait;
-use App\Traits\EfiTrait;
-use App\Traits\XgateTrait;
-use App\Traits\WitetecTrait;
-use App\Traits\MercadoPagoTrait;
-use App\Traits\PixupTrait;
-use App\Traits\BSPayTrait;
-use App\Traits\WooviTrait;
-use App\Traits\AsaasTrait;
-use App\Traits\PrimePay7Trait;
-use App\Traits\XDPagTrait;
 use App\Traits\IPManagementTrait;
 use App\Models\User;
 use App\Models\App;
@@ -187,40 +176,9 @@ class SaqueController extends Controller
         try {
             // Executar o pagamento baseado no adquirente
             switch ($default) {
-                case 'cashtime':
-                    $response = CashtimeTrait::requestPaymentCashtime($request);
-                    break;
-                case 'mercadopago':
                 case 'pagarme':
-                    $response = MercadoPagoTrait::requestPaymentCashtime($request);
-                    break;
-                case 'efi':
-                    $response = EfiTrait::requestPaymentEfi($request);
-                    break;
-                case 'xgate':
-                    $response = XgateTrait::requestPaymentXgate($request);
-                    break;
-                case 'witetec':
-                    $response = WitetecTrait::requestPaymentWitetec($request);
-                    break;
-                case 'pixup':
-                    $response = PixupTrait::requestPaymentPixup($request);
-                    break;
-                case 'bspay':
-                    $response = BSPayTrait::requestPaymentBSPay($request);
-                    break;
-                case 'woovi':
-                    $response = WooviTrait::requestSaqueWoovi($request);
-                    break;
-                case 'asaas':
-                    $response = AsaasTrait::requestPaymentAsaas($request);
-                    break;
-                case 'primepay7':
-                    $response = PrimePay7Trait::requestPaymentPrimePay7($request);
-                    break;
-                case 'xdpag':
-                    $response = XDPagTrait::requestPaymentXDPag($request);
-                    break;
+                    // Pagar.me não suporta saques PIX diretamente
+                    return response()->json(['status' => 'error', 'message' => 'Adquirente não suportado para saques.'], 500);
                 default:
                     return response()->json(['status' => 'error', 'message' => 'Adquirente não suportado.'], 500);
             }

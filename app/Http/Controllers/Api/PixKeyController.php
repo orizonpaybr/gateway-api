@@ -498,31 +498,11 @@ class PixKeyController extends Controller
                 return $user;
             });
 
-            // Escolher o trait baseado no adquirente padrão
-            $response = null;
-            switch ($adquirenteDefault) {
-                case 'woovi':
-                    $response = \App\Traits\WooviTrait::requestSaqueWoovi($requestData);
-                    break;
-                case 'bspay':
-                    $response = \App\Traits\BSPayTrait::requestPaymentBSPay($requestData);
-                    break;
-                case 'pixup':
-                    $response = \App\Traits\PixupTrait::requestPaymentPixup($requestData);
-                    break;
-                case 'xdpag':
-                    $response = \App\Traits\XDPagTrait::requestPaymentXDPag($requestData);
-                    break;
-                case 'primepay7':
-                    $response = \App\Traits\PrimePay7Trait::requestPaymentPrimePay7($requestData);
-                    break;
-                case 'asaas':
-                    $response = \App\Traits\AsaasTrait::requestPaymentAsaas($requestData);
-                    break;
-                default:
-                    $response = \App\Traits\WooviTrait::requestSaqueWoovi($requestData);
-                    break;
-            }
+            // Adquirentes removidos - apenas Pagar.me disponível (apenas para cartão)
+            return response()->json([
+                'success' => false,
+                'message' => 'Saque PIX não disponível. Adquirentes PIX foram removidos.'
+            ], 503)->header('Access-Control-Allow-Origin', '*');
 
             if (!$response || $response['status'] !== 200) {
                 Log::error('Erro ao realizar saque via adquirente', [

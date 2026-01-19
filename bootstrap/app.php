@@ -16,12 +16,7 @@ return Application::configure(basePath: dirname(__DIR__))
             \App\Http\Middleware\AtualizarSaldosClientes::class,
         ]);
         $middleware->validateCsrfTokens([
-             '/cashtime/*',
-             '/mercadopago/*',
-             '/efi/*',
              '/pagarme/*',
-             '/xgate/*',
-             '/witetec/*',
              '/callback',
              '/callback/*',
              '/checkout/webhook/*',

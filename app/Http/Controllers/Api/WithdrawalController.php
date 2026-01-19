@@ -14,19 +14,6 @@ use App\Constants\UserPermission;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
-use App\Traits\{
-    CashtimeTrait, 
-    MercadoPagoTrait, 
-    EfiTrait, 
-    XgateTrait, 
-    WitetecTrait, 
-    XDPagTrait, 
-    PixupTrait, 
-    BSPayTrait, 
-    AsaasTrait, 
-    WooviTrait, 
-    PrimePay7Trait
-};
 
 class WithdrawalController extends Controller
 {
@@ -255,40 +242,12 @@ class WithdrawalController extends Controller
 
             // Processar aprovação baseado no adquirente
             switch ($default) {
-                case 'cashtime':
-                    $result = CashtimeTrait::liberarSaqueManual($id);
-                    break;
-                case 'mercadopago':
                 case 'pagarme':
-                    $result = MercadoPagoTrait::liberarSaqueManual($id);
-                    break;
-                case 'efi':
-                    $result = EfiTrait::liberarSaqueManual($id);
-                    break;
-                case 'xgate':
-                    $result = XgateTrait::liberarSaqueManual($id);
-                    break;
-                case 'witetec':
-                    $result = WitetecTrait::liberarSaqueManualWitetec($id);
-                    break;
-                case 'xdpag':
-                    $result = XDPagTrait::liberarSaqueManual($id);
-                    break;
-                case 'pixup':
-                    $result = PixupTrait::liberarSaqueManual($id);
-                    break;
-                case 'bspay':
-                    $result = BSPayTrait::liberarSaqueManual($id);
-                    break;
-                case 'asaas':
-                    $result = AsaasTrait::liberarSaqueManual($id);
-                    break;
-                case 'woovi':
-                    $result = WooviTrait::liberarSaqueManual($id);
-                    break;
-                case 'primepay7':
-                    $result = PrimePay7Trait::liberarSaqueManual($id);
-                    break;
+                    // Pagar.me não suporta saques PIX diretamente
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Adquirente não suportado para saques.'
+                    ], 500);
                 default:
                     return response()->json([
                         'success' => false,
