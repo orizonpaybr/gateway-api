@@ -4,6 +4,7 @@ namespace App\Traits;
 
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 
 trait IPManagementTrait
 {
@@ -12,6 +13,16 @@ trait IPManagementTrait
      */
     public static function isIPAllowed(string $clientIP, User $user): bool
     {
+        // Recarregar usuário do banco para garantir dados atualizados
+        // Isso evita problemas de cache quando IPs são adicionados/removidos
+        $user = User::where('username', $user->username)->first();
+        if (!$user) {
+            Log::error('[IP_MANAGEMENT] Usuário não encontrado ao verificar IP', [
+                'client_ip' => $clientIP
+            ]);
+            return false;
+        }
+
         // Buscar IPs globais do banco de dados
         $app = \App\Models\App::first();
         $globalIPs = $app ? ($app->global_ips ?? []) : [];
@@ -27,12 +38,6 @@ trait IPManagementTrait
         
         // Verificar se é um IP global primeiro
         if (in_array($clientIP, $globalIPs)) {
-            Log::info('[IP_MANAGEMENT] IP global autorizado', [
-                'user_id' => $user->user_id,
-                'client_ip' => $clientIP,
-                'is_global' => true,
-                'global_ips' => $globalIPs
-            ]);
             return true;
         }
 
@@ -47,22 +52,10 @@ trait IPManagementTrait
         $allowedIPs = self::parseAllowedIPs($user->ips_saque_permitidos);
         
         if (empty($allowedIPs)) {
-            Log::warning('[IP_MANAGEMENT] Lista de IPs vazia após parsing', [
-                'user_id' => $user->user_id,
-                'client_ip' => $clientIP,
-                'raw_ips' => $user->ips_saque_permitidos
-            ]);
             return false;
         }
 
         $isAllowed = self::checkIPInList($clientIP, $allowedIPs);
-
-        Log::info('[IP_MANAGEMENT] Verificação de IP', [
-            'user_id' => $user->user_id,
-            'client_ip' => $clientIP,
-            'allowed_ips' => $allowedIPs,
-            'is_allowed' => $isAllowed
-        ]);
 
         return $isAllowed;
     }
@@ -253,29 +246,80 @@ trait IPManagementTrait
     public static function addAllowedIP(User $user, string $ip): bool
     {
         try {
+            // Recarregar usuário do banco para garantir dados atualizados
+            $user = User::where('username', $user->username)->first();
+            if (!$user) {
+                Log::error('[IP_MANAGEMENT] Usuário não encontrado ao adicionar IP', [
+                    'ip' => $ip
+                ]);
+                return false;
+            }
+
             $currentIPs = self::parseAllowedIPs($user->ips_saque_permitidos ?? '');
             
             // Verificar se o IP já existe
             if (in_array($ip, $currentIPs)) {
+                Log::info('[IP_MANAGEMENT] IP já existe na lista', [
+                    'user_id' => $user->user_id,
+                    'ip' => $ip,
+                    'current_ips' => $currentIPs
+                ]);
                 return false; // IP já existe
             }
 
             $currentIPs[] = $ip;
-            $user->ips_saque_permitidos = json_encode($currentIPs);
-            $user->save();
+            $ipsJson = json_encode($currentIPs);
+            
+            Log::info('[IP_MANAGEMENT] Tentando salvar IP', [
+                'user_id' => $user->user_id,
+                'username' => $user->username,
+                'new_ip' => $ip,
+                'all_ips' => $currentIPs,
+                'ips_json' => $ipsJson,
+                'before_save' => $user->ips_saque_permitidos
+            ]);
+
+            // Atualizar e salvar usando update direto para garantir persistência
+            $updated = \Illuminate\Support\Facades\DB::table('users')
+                ->where('username', $user->username)
+                ->update(['ips_saque_permitidos' => $ipsJson]);
+
+            // Verificar se realmente salvou
+            $user->refresh();
+            $afterSave = $user->ips_saque_permitidos;
+
+            Log::info('[IP_MANAGEMENT] Resultado do update', [
+                'user_id' => $user->user_id,
+                'username' => $user->username,
+                'updated_rows' => $updated,
+                'after_save' => $afterSave,
+                'ips_match' => $afterSave === $ipsJson
+            ]);
+
+            if ($afterSave !== $ipsJson) {
+                Log::error('[IP_MANAGEMENT] IP não foi salvo corretamente', [
+                    'user_id' => $user->user_id,
+                    'expected' => $ipsJson,
+                    'actual' => $afterSave
+                ]);
+                return false;
+            }
 
             Log::info('[IP_MANAGEMENT] IP adicionado com sucesso', [
                 'user_id' => $user->user_id,
+                'username' => $user->username,
                 'new_ip' => $ip,
-                'all_ips' => $currentIPs
+                'all_ips' => $currentIPs,
+                'saved_value' => $afterSave
             ]);
 
             return true;
         } catch (\Exception $e) {
             Log::error('[IP_MANAGEMENT] Erro ao adicionar IP', [
-                'user_id' => $user->user_id,
+                'user_id' => $user->user_id ?? 'unknown',
                 'ip' => $ip,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
             return false;
         }

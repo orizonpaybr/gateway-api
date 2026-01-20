@@ -56,3 +56,10 @@ Thumbs.db
 # Temporary documentation files
 /ANALISE_QUALIDADE_SOFTWARE.md
 /COMO_RODAR_TESTES.md
+
+# Certificates (Treeal/ONZ)
+/storage/app/certificates/*.pfx
+/storage/app/certificates/*.key
+/storage/app/certificates/*.crt
+/storage/app/certificates/*.pem
+/storage/app/certificates/pem/

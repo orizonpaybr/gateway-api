@@ -60,19 +60,42 @@ class WebhookService
                     ], 200);
                 }
             }
+            
+            // Se existe mas não está PROCESSED, usar o registro existente
+            $webhookLog = $existing;
+        } else {
+            // Extrair transaction_id para logging
+            $transactionId = $this->extractTransactionId($request);
+            
+            // Criar registro ANTES de processar (usar firstOrCreate para evitar race condition)
+            $webhookLog = WebhookLog::firstOrCreate(
+                [
+                    'idempotency_key' => $idempotencyKey,
+                    'adquirente' => $adquirente,
+                ],
+                [
+                    'transaction_id' => $transactionId,
+                    'status' => 'PROCESSING',
+                    'payload' => $request->all(),
+                ]
+            );
+            
+            // Se já existia (race condition), verificar status
+            if ($webhookLog->status === 'PROCESSED') {
+                return response()->json([
+                    'status' => 'success',
+                    'message' => 'Webhook já processado anteriormente'
+                ], 200);
+            }
+            
+            // Atualizar payload e transaction_id se necessário
+            if ($webhookLog->wasRecentlyCreated === false) {
+                $webhookLog->update([
+                    'transaction_id' => $transactionId ?? $webhookLog->transaction_id,
+                    'payload' => $request->all(),
+                ]);
+            }
         }
-        
-        // Extrair transaction_id para logging
-        $transactionId = $this->extractTransactionId($request);
-        
-        // Criar registro ANTES de processar
-        $webhookLog = WebhookLog::create([
-            'idempotency_key' => $idempotencyKey,
-            'adquirente' => $adquirente,
-            'transaction_id' => $transactionId,
-            'status' => 'PROCESSING',
-            'payload' => $request->all(),
-        ]);
         
         try {
             $result = DB::transaction(function () use ($processor, $webhookLog) {
@@ -141,13 +164,21 @@ class WebhookService
     
     /**
      * Extrai transaction_id do request
+     * 
+     * Suporta múltiplos formatos de diferentes adquirentes:
+     * - Treeal: txid, txId
+     * - Pagar.me: idTransaction, transaction_id
+     * - Outros: id, data.id, etc
      */
     private function extractTransactionId(Request $request): ?string
     {
         $data = $request->all();
         
-        return $data['idTransaction'] 
+        return $data['txid'] 
+            ?? $data['txId'] 
+            ?? $data['idTransaction'] 
             ?? $data['transaction_id'] 
+            ?? $data['transactionId']
             ?? $data['data']['id'] 
             ?? $data['data_id'] 
             ?? $data['id']

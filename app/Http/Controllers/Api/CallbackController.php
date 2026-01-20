@@ -17,6 +17,8 @@ use App\Models\Transactions;
 use App\Services\PushNotificationService;
 use App\Traits\SplitTrait;
 use App\Helpers\SecureLog;
+use App\Services\TreealService;
+use App\Services\PaymentProcessingService;
 
 class CallbackController extends Controller
 {
@@ -277,6 +279,182 @@ class CallbackController extends Controller
         }
 
         return response()->json(['status' => true]);
+    }
+
+    /**
+     * Webhook da Treeal/ONZ para depósitos PIX (Cash In)
+     * 
+     * Implementação limpa seguindo padrão PIX do Banco Central
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function webhookTreeal(Request $request)
+    {
+        $webhookService = app(\App\Services\WebhookService::class);
+        
+        return $webhookService->processWebhook($request, 'treeal', function () use ($request) {
+            $data = $request->all();
+            SecureLog::webhook('TREEAL', 'WEBHOOK', $data);
+
+            Log::info('[TREEAL] Webhook recebido', [
+                'data' => $data
+            ]);
+
+            // Treeal pode enviar webhooks em diferentes formatos
+            // Verificar se é evento de cobrança (Cash In) ou pagamento (Cash Out)
+            $txid = $data['txid'] ?? $data['txId'] ?? $data['idTransaction'] ?? null;
+            $status = $data['status'] ?? $data['paymentStatus'] ?? null;
+            $endToEndId = $data['endToEndId'] ?? $data['end_to_end_id'] ?? null;
+
+            // Se for evento de cobrança (Cash In)
+            if (isset($data['txid']) || isset($data['txId'])) {
+                return $this->handleTreealCashInWebhook($txid, $status, $data);
+            }
+
+            // Se for evento de pagamento (Cash Out)
+            if (isset($data['transactionId']) || isset($endToEndId)) {
+                return $this->handleTreealCashOutWebhook($txid ?? $data['transactionId'], $status, $data);
+            }
+
+            Log::warning('[TREEAL] Webhook com formato desconhecido', [
+                'data' => $data
+            ]);
+
+            return response()->json(['status' => true, 'message' => 'Webhook recebido']);
+        });
+    }
+
+    /**
+     * Processa webhook de depósito PIX (Cash In) da Treeal
+     */
+    private function handleTreealCashInWebhook($txid, $status, $data)
+    {
+        if (!$txid) {
+            Log::warning('[TREEAL] Webhook Cash In sem txid', ['data' => $data]);
+            return response()->json(['status' => false, 'message' => 'txid não encontrado'], 400);
+        }
+
+        $cashin = Solicitacoes::where('idTransaction', $txid)
+            ->orWhere('externalreference', $txid)
+            ->first();
+
+        if (!$cashin) {
+            Log::warning('[TREEAL] Solicitação não encontrada', ['txid' => $txid]);
+            return response()->json(['status' => false, 'message' => 'Transação não encontrada'], 404);
+        }
+
+        Log::info('[TREEAL] Processando webhook Cash In', [
+            'txid' => $txid,
+            'status' => $status,
+            'current_status' => $cashin->status
+        ]);
+
+        // Mapear status da Treeal para status interno
+        $internalStatus = $this->mapTreealStatusToInternal($status);
+
+        // Se status for CONCLUIDA/ATIVA e ainda não foi processado
+        if (in_array(strtoupper($status ?? ''), ['CONCLUIDA', 'ATIVA', 'PAID', 'COMPLETED']) 
+            && $cashin->status !== 'PAID_OUT') {
+            
+            // Atualizar end_to_end se disponível
+            if (isset($data['endToEndId'])) {
+                $cashin->update(['end_to_end' => $data['endToEndId']]);
+            }
+
+            // Processar pagamento de forma atômica (thread-safe)
+            try {
+                $paymentService = app(PaymentProcessingService::class);
+                $paymentService->processPaymentReceived($cashin);
+                
+                Log::info('[TREEAL] Pagamento processado com sucesso', [
+                    'txid' => $txid,
+                    'amount' => $cashin->amount
+                ]);
+            } catch (\Exception $e) {
+                Log::error('[TREEAL] Erro ao processar pagamento', [
+                    'txid' => $txid,
+                    'error' => $e->getMessage()
+                ]);
+                // Se já foi processado, continuar normalmente
+                $cashin->refresh();
+                if ($cashin->status !== 'PAID_OUT') {
+                    throw $e;
+                }
+            }
+        } else {
+            // Atualizar apenas o status se necessário
+            if ($cashin->status !== $internalStatus) {
+                $cashin->update(['status' => $internalStatus]);
+            }
+        }
+
+        return response()->json(['status' => true, 'message' => 'Webhook processado']);
+    }
+
+    /**
+     * Processa webhook de saque PIX (Cash Out) da Treeal
+     */
+    private function handleTreealCashOutWebhook($transactionId, $status, $data)
+    {
+        if (!$transactionId) {
+            Log::warning('[TREEAL] Webhook Cash Out sem transactionId', ['data' => $data]);
+            return response()->json(['status' => false, 'message' => 'transactionId não encontrado'], 400);
+        }
+
+        $cashOut = SolicitacoesCashOut::where('idTransaction', $transactionId)
+            ->orWhere('externalreference', $transactionId)
+            ->first();
+
+        if (!$cashOut) {
+            Log::warning('[TREEAL] Saque não encontrado', ['transaction_id' => $transactionId]);
+            return response()->json(['status' => false, 'message' => 'Saque não encontrado'], 404);
+        }
+
+        Log::info('[TREEAL] Processando webhook Cash Out', [
+            'transaction_id' => $transactionId,
+            'status' => $status,
+            'current_status' => $cashOut->status
+        ]);
+
+        // Mapear status da Treeal para status interno
+        $internalStatus = $this->mapTreealStatusToInternal($status);
+
+        // Atualizar status
+        if ($cashOut->status !== $internalStatus) {
+            $cashOut->update(['status' => $internalStatus]);
+            
+            // Log do endToEndId se disponível (para auditoria)
+            if (isset($data['endToEndId'])) {
+                Log::info('[TREEAL] Webhook Cash Out - endToEndId recebido', [
+                    'transaction_id' => $transactionId,
+                    'end_to_end_id' => $data['endToEndId']
+                ]);
+            }
+        }
+
+        return response()->json(['status' => true, 'message' => 'Webhook processado']);
+    }
+
+    /**
+     * Mapeia status da Treeal para status interno
+     */
+    private function mapTreealStatusToInternal(string $status): string
+    {
+        $statusUpper = strtoupper($status);
+        
+        $statusMap = [
+            'ATIVA' => 'WAITING_FOR_APPROVAL',
+            'CONCLUIDA' => 'PAID_OUT',
+            'PAID' => 'PAID_OUT',
+            'COMPLETED' => 'PAID_OUT',
+            'PROCESSING' => 'PROCESSING',
+            'FAILED' => 'FAILED',
+            'CANCELLED' => 'CANCELLED',
+            'CANCELED' => 'CANCELLED',
+        ];
+
+        return $statusMap[$statusUpper] ?? 'PENDING';
     }
 
 }

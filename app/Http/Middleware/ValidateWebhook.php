@@ -46,8 +46,8 @@ class ValidateWebhook
     {
         $path = $request->path();
         
-        // Apenas Pagar.me permanece ativo
         if (str_contains($path, 'pagarme')) return 'pagarme';
+        if (str_contains($path, 'treeal')) return 'treeal';
         return 'unknown';
     }
 
@@ -56,10 +56,28 @@ class ValidateWebhook
         switch ($adquirente) {
             case 'pagarme':
                 return $this->validatePagarmeWebhook($request);
+            case 'treeal':
+                // Treeal: aceitar em desenvolvimento/local para testes
+                // Em produção, implementar validação de assinatura se necessário
+                return app()->environment('local', 'development', 'testing') || 
+                       $this->validateTreealWebhook($request);
             default:
                 // Para adquirentes desconhecidos, aceitar apenas em ambiente de desenvolvimento
                 return app()->environment('local', 'development');
         }
+    }
+    
+    /**
+     * Valida assinatura do webhook da Treeal/ONZ
+     * 
+     * Por enquanto, aceita em todos os ambientes para facilitar testes
+     * Em produção, implementar validação de assinatura se a Treeal fornecer
+     */
+    private function validateTreealWebhook(Request $request): bool
+    {
+        // TODO: Implementar validação de assinatura quando Treeal fornecer documentação
+        // Por enquanto, aceitar todos os webhooks da Treeal
+        return true;
     }
 
     private function validatePagarmeWebhook(Request $request): bool

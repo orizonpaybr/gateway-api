@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Adquirente;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
@@ -15,6 +14,8 @@ use App\Helpers\Helper;
 use App\Helpers\ApiResponseStandardizer;
 use App\Services\PagarMeService;
 use App\DTO\PagarMeDTO\CardDepositDTO;
+use App\Services\TreealService;
+use App\Models\Treeal;
 
 /**
  * @OA\Info(
@@ -90,7 +91,11 @@ class DepositController extends Controller
             case 'pagarme':
                 Log::info('DepositController - Executando PagarMeTrait', []);
                 $response = PagarMeTrait::requestDepositPagarme($request);
-            break;
+                break;
+            case 'treeal':
+                Log::info('DepositController - Processando depósito Treeal', []);
+                $response = $this->processTreealDeposit($request, $user, $setting);
+                break;
             default:
                 Log::info('DepositController - Adquirente não suportado', ['adquirente' => $default]);
                 return response()->json(['status' => 'error', 'message' => 'Adquirente não suportado.'], 500);
@@ -509,5 +514,143 @@ class DepositController extends Controller
         ];
 
         return $statusMap[strtolower($pagarmeStatus)] ?? 'PENDING';
+    }
+
+    /**
+     * Processa depósito PIX usando Treeal/ONZ
+     * 
+     * Implementação limpa e moderna que serve como referência para futuras integrações
+     * 
+     * @param Request $request
+     * @param \App\Models\User $user
+     * @param \App\Models\App $setting
+     * @return array
+     */
+    private function processTreealDeposit(Request $request, $user, $setting): array
+    {
+        try {
+            $treealService = app(TreealService::class);
+            $treealConfig = Treeal::first();
+
+            // Validar se Treeal está configurado e ativo
+            if (!$treealConfig || !$treealService->isActive()) {
+                Log::error('DepositController::processTreealDeposit - Treeal não configurado ou inativo');
+                return [
+                    'status' => 500,
+                    'data' => [
+                        'status' => 'error',
+                        'message' => 'Adquirente Treeal não está configurada ou ativa.'
+                    ]
+                ];
+            }
+
+            $amount = (float) $request->amount;
+            $description = $request->input('description', 'Depósito via PIX');
+            
+            // Calcular taxas
+            $taxaPercentual = (float) ($user->taxa_cash_in ?? $treealConfig->taxa_pix_cash_in ?? 0);
+            $taxaFixa = (float) ($user->taxa_cash_in_fixa ?? 0);
+            $baseline = (float) ($setting->baseline ?? 0);
+
+            // Calcular taxa total (percentual)
+            $taxaTotal = ($amount * $taxaPercentual) / 100;
+            $depositoLiquido = $amount - $taxaTotal;
+            $descricaoTaxa = 'PORCENTAGEM';
+
+            // Se taxa calculada for menor que baseline, usar baseline
+            if ($taxaTotal < $baseline && $baseline > 0) {
+                $depositoLiquido = $amount - $baseline;
+                $taxaTotal = $baseline;
+                $descricaoTaxa = 'FIXA';
+            }
+
+            // Adicionar taxa fixa do usuário
+            $depositoLiquido = $depositoLiquido - $taxaFixa;
+            $taxaTotal = $taxaTotal + $taxaFixa;
+
+            // Gerar QR Code usando TreealService
+            $qrCodeResult = $treealService->generateQRCode(
+                $amount,
+                $description,
+                null, // txid será gerado automaticamente
+                3600  // 1 hora de expiração
+            );
+
+            if (!$qrCodeResult['success']) {
+                Log::error('DepositController::processTreealDeposit - Erro ao gerar QR Code', [
+                    'error' => $qrCodeResult['message'] ?? 'Erro desconhecido'
+                ]);
+                return [
+                    'status' => 500,
+                    'data' => [
+                        'status' => 'error',
+                        'message' => $qrCodeResult['message'] ?? 'Erro ao gerar QR Code PIX'
+                    ]
+                ];
+            }
+
+            $txid = $qrCodeResult['txid'];
+            $qrCode = $qrCodeResult['qr_code'] ?? $qrCodeResult['pixCopiaECola'] ?? null;
+
+            // Criar registro na tabela Solicitacoes
+            $solicitacao = Solicitacoes::create([
+                'user_id' => $user->username,
+                'externalreference' => $txid,
+                'amount' => $amount,
+                'client_name' => $request->debtor_name,
+                'client_document' => $request->debtor_document_number,
+                'client_email' => $request->email,
+                'client_telefone' => $request->phone,
+                'date' => Carbon::now(),
+                'status' => 'WAITING_FOR_APPROVAL',
+                'idTransaction' => $txid,
+                'deposito_liquido' => $depositoLiquido,
+                'qrcode_pix' => $qrCode,
+                'paymentcode' => $qrCode,
+                'paymentCodeBase64' => $qrCode,
+                'adquirente_ref' => 'Treeal',
+                'executor_ordem' => 'Treeal',
+                'taxa_cash_in' => $taxaTotal,
+                'taxa_pix_cash_in_adquirente' => $treealConfig->taxa_pix_cash_in ?? 0,
+                'taxa_pix_cash_in_valor_fixo' => $taxaFixa,
+                'descricao_transacao' => $descricaoTaxa,
+                'callback' => $request->postback ?? null,
+                'split_email' => $request->split_email ?? null,
+                'split_percentage' => $request->split_percentage ?? null,
+            ]);
+
+            Log::info('DepositController::processTreealDeposit - Depósito criado com sucesso', [
+                'txid' => $txid,
+                'amount' => $amount,
+                'deposito_liquido' => $depositoLiquido,
+                'solicitacao_id' => $solicitacao->id
+            ]);
+
+            // Retornar resposta no formato esperado
+            return [
+                'status' => 200,
+                'data' => [
+                    'idTransaction' => $txid,
+                    'qrcode' => $qrCode,
+                    'status' => 'WAITING_FOR_APPROVAL',
+                    'amount' => $amount,
+                    'expires_at' => now()->addHour()->toIso8601String(),
+                ]
+            ];
+
+        } catch (\Exception $e) {
+            Log::error('DepositController::processTreealDeposit - Exceção', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return [
+                'status' => 500,
+                'data' => [
+                    'status' => 'error',
+                    'message' => 'Erro ao processar depósito PIX: ' . $e->getMessage()
+                ]
+            ];
+        }
     }
 }

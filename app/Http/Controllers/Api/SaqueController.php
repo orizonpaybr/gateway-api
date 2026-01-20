@@ -13,6 +13,9 @@ use App\Helpers\Helper;
 use App\Models\Adquirente;
 use App\Models\SolicitacoesCashOut;
 use App\Helpers\ApiResponseStandardizer;
+use App\Services\TreealService;
+use App\Models\Treeal;
+use Carbon\Carbon;
 
 class SaqueController extends Controller
 {
@@ -179,29 +182,17 @@ class SaqueController extends Controller
                 case 'pagarme':
                     // Pagar.me não suporta saques PIX diretamente
                     return response()->json(['status' => 'error', 'message' => 'Adquirente não suportado para saques.'], 500);
+                case 'treeal':
+                    Log::info('SaqueController - Processando saque Treeal', [
+                        'user_id' => $request->user()?->id,
+                        'amount' => $request->amount,
+                        'is_automatico' => $isAutomatico
+                    ]);
+                    // processTreealWithdrawal já retorna JsonResponse completo
+                    return $this->processTreealWithdrawal($request, $isAutomatico);
                 default:
                     return response()->json(['status' => 'error', 'message' => 'Adquirente não suportado.'], 500);
             }
-
-            // Verificar se há erros na resposta
-            if (isset($response['data']['error']) || isset($response['error'])) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => $response['data']['message'] ?? $response['message'] ?? 'Erro ao processar saque',
-                    'details' => $response['data']['details'] ?? null
-                ], $response['status'] ?? 500);
-            }
-            
-            // Padronizar resposta de saque
-            if ($response['status'] === 200) {
-                $standardizedResponse = ApiResponseStandardizer::standardizeWithdrawResponse(
-                    $response['data'], 
-                    $request->amount
-                );
-                return response()->json($standardizedResponse, 200);
-            }
-            
-            return response()->json($response['data'], $response['status']);
         } catch (\Exception $e) {
             $tipo = $isAutomatico ? 'automático' : 'manual';
             Log::error("Erro no saque {$tipo}", [
@@ -216,5 +207,199 @@ class SaqueController extends Controller
                 'message' => "Erro ao processar saque {$tipo}. Tente novamente."
             ], 500);
         }
+    }
+
+    /**
+     * Processa saque PIX usando Treeal/ONZ
+     * 
+     * Implementação limpa e moderna que serve como referência para futuras integrações
+     * 
+     * @param Request $request
+     * @param bool $isAutomatico Se true, executa o saque imediatamente; se false, cria solicitação manual
+     * @return \Illuminate\Http\JsonResponse
+     */
+    private function processTreealWithdrawal(Request $request, bool $isAutomatico = false)
+    {
+        try {
+            $user = $request->user();
+            $treealService = app(TreealService::class);
+            $treealConfig = Treeal::first();
+            $setting = App::first();
+
+            // Validar se Treeal está configurado e ativo
+            if (!$treealConfig || !$treealService->isActive()) {
+                Log::error('SaqueController::processTreealWithdrawal - Treeal não configurado ou inativo');
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Adquirente Treeal não está configurada ou ativa.'
+                ], 500);
+            }
+
+            $amount = (float) $request->amount;
+            $pixKey = $request->pixKey;
+            $pixKeyType = $request->pixKeyType;
+            $description = $request->input('description', 'Saque via PIX');
+
+            // Calcular taxas
+            $taxaPercentual = (float) ($user->taxa_cash_out ?? $treealConfig->taxa_pix_cash_out ?? 0);
+            $taxaFixa = (float) ($user->taxa_cash_out_fixa ?? 0);
+            
+            $taxaTotal = ($amount * $taxaPercentual) / 100 + $taxaFixa;
+            $cashOutLiquido = $amount - $taxaTotal;
+
+            // Verificar saldo disponível (já verificado antes, mas garantir)
+            if ($user->saldo < $amount) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Saldo insuficiente.'
+                ], 401);
+            }
+
+            // Se for saque automático, executar imediatamente
+            if ($isAutomatico) {
+                // Gerar idempotency key único
+                $idempotencyKey = str()->uuid()->toString();
+
+                // Criar saque na API Treeal
+                $withdrawalResult = $treealService->createWithdrawalByPixKey(
+                    $amount,
+                    $pixKey,
+                    $description,
+                    $idempotencyKey,
+                    $pixKeyType
+                );
+
+                if (!$withdrawalResult['success']) {
+                    Log::error('SaqueController::processTreealWithdrawal - Erro ao criar saque na API', [
+                        'error' => $withdrawalResult['message'] ?? 'Erro desconhecido'
+                    ]);
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => $withdrawalResult['message'] ?? 'Erro ao processar saque PIX'
+                    ], 500);
+                }
+
+                $transactionId = $withdrawalResult['transaction_id'] ?? $withdrawalResult['id'] ?? null;
+                $status = $withdrawalResult['status'] ?? 'PROCESSING';
+
+                // Criar registro na tabela SolicitacoesCashOut
+                $cashOut = SolicitacoesCashOut::create([
+                    'user_id' => $user->username,
+                    'externalreference' => $transactionId,
+                    'amount' => $amount,
+                    'beneficiaryname' => $user->name ?? $user->username,
+                    'beneficiarydocument' => $pixKey,
+                    'pix' => $pixKey,
+                    'pixkey' => $pixKeyType,
+                    'date' => Carbon::now(),
+                    'status' => $this->mapTreealStatusToInternal($status),
+                    'type' => 'PIX',
+                    'idTransaction' => $transactionId,
+                    'taxa_cash_out' => $taxaTotal,
+                    'cash_out_liquido' => $cashOutLiquido,
+                    'descricao_transacao' => 'AUTOMATICO',
+                    'executor_ordem' => 'Treeal',
+                ]);
+
+                // Debitar saldo do usuário (thread-safe)
+                $balanceService = app(\App\Services\BalanceService::class);
+                $balanceService->decrementBalance($user, $amount, 'saldo');
+                Helper::calculaSaldoLiquido($user->user_id);
+
+                Log::info('SaqueController::processTreealWithdrawal - Saque automático criado', [
+                    'transaction_id' => $transactionId,
+                    'amount' => $amount,
+                    'cash_out_liquido' => $cashOutLiquido,
+                    'cash_out_id' => $cashOut->id
+                ]);
+
+                // Padronizar resposta usando ApiResponseStandardizer
+                $standardizedResponse = ApiResponseStandardizer::standardizeWithdrawResponse([
+                    'data' => [
+                        'id' => $transactionId,
+                        'idTransaction' => $transactionId,
+                        'status' => 'processing',
+                        'amount' => $amount,
+                        'pixKey' => $pixKey,
+                        'pixKeyType' => $pixKeyType,
+                        'withdrawStatusId' => 'Processing',
+                    ]
+                ], $amount);
+
+                return response()->json($standardizedResponse, 200);
+
+            } else {
+                // Saque manual - criar solicitação para aprovação
+                // Não debitar saldo ainda, apenas criar registro pendente
+                $transactionId = str()->uuid()->toString();
+
+                $cashOut = SolicitacoesCashOut::create([
+                    'user_id' => $user->username,
+                    'externalreference' => $transactionId,
+                    'amount' => $amount,
+                    'beneficiaryname' => $user->name ?? $user->username,
+                    'beneficiarydocument' => $pixKey,
+                    'pix' => $pixKey,
+                    'pixkey' => $pixKeyType,
+                    'date' => Carbon::now(),
+                    'status' => 'PENDING',
+                    'type' => 'PIX',
+                    'idTransaction' => $transactionId,
+                    'taxa_cash_out' => $taxaTotal,
+                    'cash_out_liquido' => $cashOutLiquido,
+                    'descricao_transacao' => 'MANUAL',
+                    'executor_ordem' => null, // Manual = sem executor automático
+                ]);
+
+                Log::info('SaqueController::processTreealWithdrawal - Saque manual criado', [
+                    'transaction_id' => $transactionId,
+                    'amount' => $amount,
+                    'cash_out_id' => $cashOut->id
+                ]);
+
+                // Padronizar resposta usando ApiResponseStandardizer
+                $standardizedResponse = ApiResponseStandardizer::standardizeWithdrawResponse([
+                    'data' => [
+                        'id' => $transactionId,
+                        'idTransaction' => $transactionId,
+                        'status' => 'pending',
+                        'amount' => $amount,
+                        'pixKey' => $pixKey,
+                        'pixKeyType' => $pixKeyType,
+                        'withdrawStatusId' => 'PendingProcessing',
+                        'message' => 'Saque criado e aguardando aprovação manual'
+                    ]
+                ], $amount);
+
+                return response()->json($standardizedResponse, 200);
+            }
+
+        } catch (\Exception $e) {
+            Log::error('SaqueController::processTreealWithdrawal - Exceção', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Erro ao processar saque PIX: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Mapeia status da Treeal para status interno
+     */
+    private function mapTreealStatusToInternal(string $treealStatus): string
+    {
+        $statusMap = [
+            'PROCESSING' => 'PROCESSING',
+            'COMPLETED' => 'PAID_OUT',
+            'CONFIRMED' => 'PAID_OUT',
+            'FAILED' => 'FAILED',
+            'CANCELLED' => 'CANCELLED',
+        ];
+
+        return $statusMap[strtoupper($treealStatus)] ?? 'PENDING';
     }
 }
