@@ -367,17 +367,26 @@ class CardPaymentController extends Controller
                 // Atualizar status
                 $solicitacao->update(['status' => $newStatus]);
 
-                // Se foi aprovado, creditar saldo
+                // Se foi aprovado, creditar saldo (usando PaymentProcessingService para operação atômica)
                 if ($newStatus === 'PAID_OUT') {
-                    $user = User::where('user_id', $solicitacao->user_id)->first();
-                    if ($user) {
-                        Helper::incrementAmount($user, $solicitacao->deposito_liquido, 'saldo');
-                        Helper::calculaSaldoLiquido($user->user_id);
-
+                    try {
+                        $paymentService = app(\App\Services\PaymentProcessingService::class);
+                        $paymentService->processPaymentReceived($solicitacao);
+                        
                         Log::info('✅ Saldo creditado via API:', [
-                            'user_id' => $user->user_id,
+                            'transaction_id' => $solicitacao->idTransaction,
                             'amount' => $solicitacao->deposito_liquido
                         ]);
+                    } catch (\Exception $e) {
+                        Log::error('❌ Erro ao processar pagamento via webhook API:', [
+                            'transaction_id' => $transactionId,
+                            'error' => $e->getMessage(),
+                        ]);
+                        // Se já foi processado (idempotência), continuar normalmente
+                        $solicitacao->refresh();
+                        if ($solicitacao->status !== 'PAID_OUT') {
+                            throw $e;
+                        }
                     }
                 }
 

@@ -75,8 +75,15 @@ class AdminTransactionsController extends Controller
                 $idTransaction
             );
 
-            \App\Helpers\Helper::incrementAmount($user, $depositoLiquido, 'saldo');
+            // Usar BalanceService para operação thread-safe (já dentro de transação)
+            $balanceService = app(\App\Services\BalanceService::class);
+            $balanceService->incrementBalance($user, $depositoLiquido, 'saldo');
             \App\Helpers\Helper::calculaSaldoLiquido($user->user_id);
+            
+            // Registrar evento para auditoria
+            $eventService = app(\App\Services\PaymentEventService::class);
+            $balanceBefore = $user->saldo - $depositoLiquido;
+            $eventService->recordPaymentReceived($deposit, $user, $balanceBefore, $user->fresh()->saldo);
 
             DB::commit();
 
@@ -161,8 +168,15 @@ class AdminTransactionsController extends Controller
                 $idTransaction
             );
 
-            \App\Helpers\Helper::decrementAmount($user, $valorTotalDescontar, 'saldo');
+            // Usar BalanceService para operação thread-safe (já dentro de transação)
+            $balanceService = app(\App\Services\BalanceService::class);
+            $balanceBefore = $user->saldo;
+            $balanceService->decrementBalance($user, $valorTotalDescontar, 'saldo');
             \App\Helpers\Helper::calculaSaldoLiquido($user->user_id);
+            
+            // Registrar evento para auditoria
+            $eventService = app(\App\Services\PaymentEventService::class);
+            $eventService->recordPaymentSent($withdrawal, $user, $balanceBefore, $user->fresh()->saldo);
 
             DB::commit();
 

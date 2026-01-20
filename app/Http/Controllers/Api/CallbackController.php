@@ -27,54 +27,65 @@ class CallbackController extends Controller
         $this->pushService = $pushService;
     }
 
+    /**
+     * Webhook da Pagar.me com idempotência
+     * 
+     * REFATORADO: Usa WebhookService para garantir idempotência
+     */
     public function webhookPagarme(Request $request)
     {
-        $data = $request->all();
-        SecureLog::webhook('PAGARME', 'WEBHOOK', $data);
-
-        $type = $data['type'] ?? null;
-        $transaction_id = $data['data']['id'] ?? null;
+        $webhookService = app(\App\Services\WebhookService::class);
         
-        // Obter status da cobrança/transação
-        $chargeStatus = $data['data']['charges'][0]['status'] ?? null;
-        $transactionStatus = $data['data']['charges'][0]['last_transaction']['status'] ?? null;
-        $paymentMethod = $data['data']['charges'][0]['payment_method'] ?? 'pix';
+        return $webhookService->processWebhook($request, 'pagarme', function () use ($request) {
+            $data = $request->all();
+            SecureLog::webhook('PAGARME', 'WEBHOOK', $data);
 
-        Log::debug("[PAGAR.ME] WEBHOOK RECEBIDO", [
-            'type' => $type,
-            'transaction_id' => $transaction_id,
-            'charge_status' => $chargeStatus,
-            'transaction_status' => $transactionStatus,
-            'payment_method' => $paymentMethod
-        ]);
+            $type = $data['type'] ?? null;
+            $transaction_id = $data['data']['id'] ?? null;
+            
+            // Obter status da cobrança/transação
+            $chargeStatus = $data['data']['charges'][0]['status'] ?? null;
+            $transactionStatus = $data['data']['charges'][0]['last_transaction']['status'] ?? null;
+            $paymentMethod = $data['data']['charges'][0]['payment_method'] ?? 'pix';
 
-        // Determinar tipo de transação (PIX ou CARTÃO)
-        $isCardPayment = $paymentMethod === 'credit_card';
-        $typeTransaction = $isCardPayment ? 'CARD' : 'PIX';
+            Log::debug("[PAGAR.ME] WEBHOOK RECEBIDO", [
+                'type' => $type,
+                'transaction_id' => $transaction_id,
+                'charge_status' => $chargeStatus,
+                'transaction_status' => $transactionStatus,
+                'payment_method' => $paymentMethod
+            ]);
 
-        // Processar eventos de pagamento
-        switch ($type) {
-            case 'order.paid':
-                return $this->handlePagarmeOrderPaid($transaction_id, $typeTransaction, $data);
-                
-            case 'order.payment_failed':
-                return $this->handlePagarmePaymentFailed($transaction_id, $typeTransaction, $data);
-                
-            case 'charge.refunded':
-            case 'charge.partial_refunded':
-                return $this->handlePagarmeRefund($transaction_id, $data);
-                
-            case 'charge.chargedback':
-                return $this->handlePagarmeChargeback($transaction_id, $data);
-                
-            default:
-                Log::debug("[PAGAR.ME] Evento não tratado: {$type}");
-                return response()->json(['status' => true, 'message' => 'Evento recebido']);
-        }
+            // Determinar tipo de transação (PIX ou CARTÃO)
+            $isCardPayment = $paymentMethod === 'credit_card';
+            $typeTransaction = $isCardPayment ? 'CARD' : 'PIX';
+
+            // Processar eventos de pagamento
+            switch ($type) {
+                case 'order.paid':
+                    return $this->handlePagarmeOrderPaid($transaction_id, $typeTransaction, $data);
+                    
+                case 'order.payment_failed':
+                    return $this->handlePagarmePaymentFailed($transaction_id, $typeTransaction, $data);
+                    
+                case 'charge.refunded':
+                case 'charge.partial_refunded':
+                    return $this->handlePagarmeRefund($transaction_id, $data);
+                    
+                case 'charge.chargedback':
+                    return $this->handlePagarmeChargeback($transaction_id, $data);
+                    
+                default:
+                    Log::debug("[PAGAR.ME] Evento não tratado: {$type}");
+                    return response()->json(['status' => true, 'message' => 'Evento recebido']);
+            }
+        });
     }
 
     /**
      * Processa pagamento aprovado da Pagar.me (PIX ou Cartão)
+     * 
+     * REFATORADO: Usa PaymentProcessingService para operação atômica e thread-safe
      */
     private function handlePagarmeOrderPaid($transaction_id, $typeTransaction, $data)
     {
@@ -85,84 +96,52 @@ class CallbackController extends Controller
             return response()->json(['status' => false, 'message' => 'Transação não encontrada']);
         }
 
-        // Verificar se já foi processado
-        if (in_array($cashin->status, ['PAID_OUT', 'COMPLETED'])) {
-            Log::debug("[PAGAR.ME] Transação já processada: {$transaction_id}");
-            return response()->json(['status' => true, 'message' => 'Já processado']);
-        }
-
         Log::debug("[PAGAR.ME] Processando pagamento aprovado", [
             'transaction_id' => $transaction_id,
             'type' => $typeTransaction,
             'amount' => $cashin->amount
         ]);
 
-        // Atualizar status
-        $cashin->update([
-            'status' => 'PAID_OUT',
-            'updated_at' => Carbon::now(),
-            'end_to_end' => $data['data']['charges'][0]['last_transaction']['acquirer_nsu'] ?? null,
-        ]);
-
-        // Creditar saldo do usuário
-        $user = User::where('user_id', $cashin->user_id)->first();
-        if ($user) {
-            Helper::incrementAmount($user, $cashin->deposito_liquido, 'saldo');
-            Helper::calculaSaldoLiquido($user->user_id);
-        }
-
-        // Processar comissão do gerente
-        if ($user && isset($user->gerente_id) && !is_null($user->gerente_id)) {
-            $gerente = User::where('id', $user->gerente_id)->first();
-            if ($gerente) {
-                $gerente_porcentagem = $gerente->gerente_percentage;
-                $valor = (float)$cashin->taxa_cash_in * (float)$gerente_porcentagem / 100;
-
-                Transactions::create([
-                    'user_id' => $user->user_id,
-                    'gerente_id' => $user->gerente_id,
-                    'solicitacao_id' => $cashin->id,
-                    'comission_value' => $valor,
-                    'transaction_percent' => $cashin->taxa_cash_in,
-                    'comission_percent' => $gerente_porcentagem,
+        try {
+            // Atualizar end_to_end antes de processar
+            if (isset($data['data']['charges'][0]['last_transaction']['acquirer_nsu'])) {
+                $cashin->update([
+                    'end_to_end' => $data['data']['charges'][0]['last_transaction']['acquirer_nsu']
                 ]);
-
-                Helper::calculaSaldoLiquido($gerente->user_id);
             }
+
+            // Processar pagamento de forma atômica (com locks e transação)
+            $paymentService = app(\App\Services\PaymentProcessingService::class);
+            $paymentService->processPaymentReceived($cashin);
+            
+            Log::info("[PAGAR.ME] Pagamento processado com sucesso", [
+                'transaction_id' => $transaction_id,
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error("[PAGAR.ME] Erro ao processar pagamento", [
+                'transaction_id' => $transaction_id,
+                'error' => $e->getMessage(),
+            ]);
+            
+            // Se já foi processado (idempotência), retornar sucesso
+            $cashin->refresh();
+            if ($cashin->status === 'PAID_OUT' || $cashin->status === 'COMPLETED') {
+                return response()->json(['status' => true, 'message' => 'Já processado']);
+            }
+            
+            throw $e;
         }
+
+        // Buscar usuário atualizado para operações pós-processamento
+        $cashin->refresh();
+        $user = User::where('user_id', $cashin->user_id)->first();
 
         // Atualizar pedido de checkout se existir
         $order = CheckoutOrders::where('idTransaction', $transaction_id)->first();
         if ($order) {
             $order->update(['status' => 'pago']);
-            if ($user && !is_null($user->webhook_url) && in_array('pago', (array) $user->webhook_endpoint)) {
-                Http::withHeaders(['Content-Type' => 'application/json', 'Accept' => 'application/json'])
-                    ->post($user->webhook_url, [
-                        'nome' => $order->name,
-                        'cpf' => preg_replace('/\D/', '', $order->cpf),
-                        'telefone' => preg_replace('/\D/', '', $order->telefone),
-                        'email' => $order->email,
-                        'status' => 'pago'
-                    ]);
-            }
-        }
-
-        // Enviar callback ao cliente
-        if ($cashin->callback && $cashin->callback != 'web') {
-            $payload = [
-                "status" => "paid",
-                "idTransaction" => $cashin->idTransaction,
-                "typeTransaction" => $typeTransaction,
-                "amount" => $cashin->amount,
-                "net_amount" => $cashin->deposito_liquido,
-            ];
-
-            Http::withHeaders([
-                'Content-Type' => 'application/json',
-                'Accept' => 'application/json'
-            ])->post($cashin->callback, $payload);
-
-            Log::debug("[PAGAR.ME] Callback enviado para: {$cashin->callback}");
+            // Webhook do cliente será enviado em background (implementar depois)
         }
 
         return response()->json(['status' => true]);

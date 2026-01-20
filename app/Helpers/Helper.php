@@ -360,56 +360,37 @@ class Helper
     }
 
 
+    /**
+     * Incrementa saldo de forma thread-safe
+     * 
+     * REFATORADO: Agora usa BalanceService com locks pessimistas e transações atômicas
+     * 
+     * @param User $user
+     * @param float|string $valor
+     * @param string $campo
+     * @return User
+     */
     public static function incrementAmount(User $user, $valor, $campo)
-{
-    // ======================================================================
-    // LOG DE DEPURAÇÃO CRÍTICO - REMOVER DEPOIS DE ENCONTRAR O BUG
-    // ======================================================================
-    Log::warning("==== FUNÇÃO INCREMENTAMOUNT ACIONADA ====", [
-        'user_id' => $user->user_id,
-        'campo_afetado' => $campo,
-        'valor_incrementado' => $valor,
-        'saldo_anterior' => $user->$campo,
-        'trilha_de_execucao' => json_encode(debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 10)) // A "CAIXA PRETA"
-    ]);
-    // ======================================================================
+    {
+        $balanceService = app(\App\Services\BalanceService::class);
+        return $balanceService->incrementBalance($user, (float) $valor, $campo);
+    }
 
-    // (Aqui continua o resto do seu código original da função)
-    $usuario = $user->toArray();
-    $novovalor = $usuario[$campo] + (float)$valor;
-    $user->update([$campo => $novovalor]);
-    $user->save();
-}
-
+    /**
+     * Decrementa saldo de forma thread-safe
+     * 
+     * REFATORADO: Agora usa BalanceService com locks pessimistas e transações atômicas
+     * 
+     * @param User $user
+     * @param float|string $valor
+     * @param string $campo
+     * @return User
+     * @throws \Exception Se saldo insuficiente
+     */
     public static function decrementAmount(User $user, $valor, $campo)
     {
-        Log::info('=== HELPER::decrementAmount INICIADO ===', [
-            'user_id' => $user->user_id,
-            'valor' => $valor,
-            'campo' => $campo,
-            'valor_antes' => $user->$campo
-        ]);
-
-        $usuario = $user->toArray();
-        $novovalor = $usuario[$campo] - (float)$valor;
-        
-        Log::info('Helper::decrementAmount - Cálculo', [
-            'user_id' => $user->user_id,
-            'valor_antes' => $usuario[$campo],
-            'valor_decremento' => (float)$valor,
-            'novo_valor' => $novovalor
-        ]);
-        
-        $user->update([$campo => $novovalor]);
-        $user->save();
-        
-        Log::info('Helper::decrementAmount - Atualização concluída', [
-            'user_id' => $user->user_id,
-            'valor_final' => $user->fresh()->$campo,
-            'diferenca' => $usuario[$campo] - $user->fresh()->$campo
-        ]);
-        
-        Log::info('=== HELPER::decrementAmount FINALIZADO ===', ['user_id' => $user->user_id]);
+        $balanceService = app(\App\Services\BalanceService::class);
+        return $balanceService->decrementBalance($user, (float) $valor, $campo);
     }
 
     public static function getPendingAprove()

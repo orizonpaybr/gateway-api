@@ -280,10 +280,32 @@ class DepositController extends Controller
                 'charge_id' => $chargeId,
             ]);
 
-            // Se pagamento foi aprovado imediatamente, creditar saldo
+            // Se pagamento foi aprovado imediatamente, creditar saldo (thread-safe)
             if (in_array($chargeStatus, ['paid', 'captured'])) {
-                Helper::incrementAmount($user, $fees['net_amount'], 'saldo');
-                Helper::calculaSaldoLiquido($user->user_id);
+                // Buscar transação criada para processar de forma atômica
+                $solicitacao = Solicitacoes::where('idTransaction', $chargeId)->first();
+                
+                if ($solicitacao) {
+                    try {
+                        $paymentService = app(\App\Services\PaymentProcessingService::class);
+                        $paymentService->processPaymentReceived($solicitacao);
+                    } catch (\Exception $e) {
+                        Log::error('Erro ao processar pagamento aprovado imediatamente', [
+                            'charge_id' => $chargeId,
+                            'error' => $e->getMessage(),
+                        ]);
+                        // Se já foi processado, continuar normalmente
+                        $solicitacao->refresh();
+                        if ($solicitacao->status !== 'PAID_OUT') {
+                            throw $e;
+                        }
+                    }
+                } else {
+                    // Fallback: usar BalanceService diretamente se transação não encontrada
+                    $balanceService = app(\App\Services\BalanceService::class);
+                    $balanceService->incrementBalance($user, $fees['net_amount'], 'saldo');
+                    Helper::calculaSaldoLiquido($user->user_id);
+                }
             }
 
             // Salvar cartão se solicitado
