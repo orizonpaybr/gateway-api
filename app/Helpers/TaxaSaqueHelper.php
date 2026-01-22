@@ -4,6 +4,7 @@ namespace App\Helpers;
 
 use App\Models\App;
 use App\Models\User;
+use Illuminate\Support\Facades\Log;
 
 class TaxaSaqueHelper
 {
@@ -15,21 +16,36 @@ class TaxaSaqueHelper
      * @param User $user Usuário específico
      * @param bool $isInterfaceWeb Se é saque via interface web (true) ou API (false)
      * @param bool $taxaPorFora Se true, cliente recebe valor integral e taxa é descontada do saldo
-     * @return array ['taxa_cash_out' => float, 'saque_liquido' => float, 'descricao' => string, 'valor_total_descontar' => float]
+     * @param float $taxaAdquirente Taxa percentual da adquirente (ex: 5.00 para 5%)
+     * @return array ['taxa_cash_out' => float, 'saque_liquido' => float, 'descricao' => string, 'valor_total_descontar' => float, 'taxa_aplicacao' => float, 'taxa_adquirente' => float]
      */
-    public static function calcularTaxaSaque($amount, $setting, $user, $isInterfaceWeb = false, $taxaPorFora = false)
+    public static function calcularTaxaSaque($amount, $setting, $user, $isInterfaceWeb = false, $taxaPorFora = false, $taxaAdquirente = 0.00)
     {
-        \Log::info('=== TAXASAQUEHELPER::calcularTaxaSaque INICIADO ===', [
+        // Validação de entrada
+        if ($amount < 0) {
+            throw new \InvalidArgumentException('O valor do saque não pode ser negativo.');
+        }
+        
+        if (!$setting) {
+            throw new \InvalidArgumentException('Configurações do sistema são obrigatórias.');
+        }
+        
+        if (!$user) {
+            throw new \InvalidArgumentException('Usuário é obrigatório para cálculo de taxa de saque.');
+        }
+        
+        Log::info('=== TAXASAQUEHELPER::calcularTaxaSaque INICIADO ===', [
             'amount' => $amount,
             'user_id' => $user->user_id ?? 'N/A',
             'isInterfaceWeb' => $isInterfaceWeb,
             'taxaPorFora' => $taxaPorFora
         ]);
+        ;
 
         // Taxa fixa do usuário (prioridade máxima)
         $taxafixa = $user->taxa_cash_out_fixa ?? 0;
         
-        \Log::info('TaxaSaqueHelper: Taxa fixa do usuário', [
+        Log::info('TaxaSaqueHelper: Taxa fixa do usuário', [
             'user_id' => $user->user_id ?? 'N/A',
             'taxa_fixa_usuario' => $taxafixa
         ]);
@@ -59,27 +75,30 @@ class TaxaSaqueHelper
             }
         }
 
-        \Log::info('TaxaSaqueHelper: Taxa percentual selecionada', [
+        Log::info('TaxaSaqueHelper: Taxa percentual selecionada', [
             'user_id' => $user->user_id ?? 'N/A',
             'isInterfaceWeb' => $isInterfaceWeb,
             'taxa_percentual' => $taxaPercentual,
             'descricao' => $descricao
         ]);
 
+        // Validação e sanitização de taxa percentual
+        $taxaPercentual = max(0, min(100, (float) $taxaPercentual)); // Limitar a 100%
+        
         // Calcular taxa percentual
         $taxaPercentualValor = ($amount * $taxaPercentual) / 100;
         
         // Taxa mínima e taxa fixa PIX - usar personalizadas se disponíveis
         if ($user && isset($user->taxas_personalizadas_ativas) && $user->taxas_personalizadas_ativas) {
-            $taxaMinima = $user->taxa_minima_pix ?? 0; // Não usar fallback global se personalizadas estão ativas
-            $taxaFixaPix = $user->taxa_fixa_pix ?? 0; // Não usar fallback global se personalizadas estão ativas
+            $taxaMinima = max(0, (float) ($user->taxa_minima_pix ?? 0)); // Não usar fallback global se personalizadas estão ativas
+            $taxaFixaPix = max(0, (float) ($user->taxa_fixa_pix ?? 0)); // Não usar fallback global se personalizadas estão ativas
         } else {
             // CORREÇÃO: Usar taxa_minima_pix global em vez do baseline para saques
-            $taxaMinima = $setting->taxa_minima_pix ?? 0;
-            $taxaFixaPix = $setting->taxa_fixa_pix ?? 0;
+            $taxaMinima = max(0, (float) ($setting->taxa_minima_pix ?? 0));
+            $taxaFixaPix = max(0, (float) ($setting->taxa_fixa_pix ?? 0));
         }
         
-        \Log::info('TaxaSaqueHelper: Cálculos de taxa', [
+        Log::info('TaxaSaqueHelper: Cálculos de taxa', [
             'user_id' => $user->user_id ?? 'N/A',
             'amount' => $amount,
             'taxa_percentual' => $taxaPercentual,
@@ -91,25 +110,35 @@ class TaxaSaqueHelper
         // Taxa principal = maior entre taxa percentual e taxa mínima
         $taxaPrincipal = max($taxaPercentualValor, $taxaMinima);
         
-        // Taxa total = taxa principal + taxa fixa PIX (se > 0)
-        $taxaTotal = $taxaPrincipal + $taxaFixaPix;
+        // Taxa da aplicação = taxa principal + taxa fixa PIX (se > 0)
+        $taxaAplicacao = $taxaPrincipal + $taxaFixaPix;
         
-        \Log::info('TaxaSaqueHelper: Taxa total calculada', [
+        // Calcular taxa da adquirente (percentual sobre o valor solicitado)
+        $taxaAdquirente = max(0, min(100, (float) $taxaAdquirente)); // Limitar a 100%
+        $taxaAdquirenteValor = ($amount * $taxaAdquirente) / 100;
+        
+        // Taxa total = taxa aplicação + taxa adquirente
+        $taxaTotal = $taxaAplicacao + $taxaAdquirenteValor;
+        
+        Log::info('TaxaSaqueHelper: Taxa total calculada', [
             'user_id' => $user->user_id ?? 'N/A',
             'taxa_percentual_valor' => $taxaPercentualValor,
             'taxa_minima' => $taxaMinima,
             'taxa_principal' => $taxaPrincipal,
             'taxa_fixa_pix' => $taxaFixaPix,
+            'taxa_aplicacao' => $taxaAplicacao,
+            'taxa_adquirente_percentual' => $taxaAdquirente,
+            'taxa_adquirente_valor' => $taxaAdquirenteValor,
             'taxa_total' => $taxaTotal,
             'maior_entre_eles' => $taxaPercentualValor > $taxaMinima ? 'PERCENTUAL' : 'MINIMA'
         ]);
         
         // NOVA LÓGICA: Cliente sempre recebe o valor solicitado, taxa é descontada do saldo
         $saque_liquido = $amount; // Cliente recebe exatamente o que solicitou
-        $taxa_cash_out = $taxaTotal; // Taxa total a ser descontada
+        $taxa_cash_out = $taxaTotal; // Taxa total a ser descontada (aplicação + adquirente)
         $valor_total_descontar = $amount + $taxaTotal; // Total a ser descontado do saldo
 
-        \Log::info('TaxaSaqueHelper: Valores finais calculados', [
+        Log::info('TaxaSaqueHelper: Valores finais calculados', [
             'user_id' => $user->user_id ?? 'N/A',
             'amount_solicitado' => $amount,
             'saque_liquido' => $saque_liquido,
@@ -141,7 +170,7 @@ class TaxaSaqueHelper
             ]
         );
 
-        \Log::info('=== TAXASAQUEHELPER::calcularTaxaSaque FINALIZADO ===', [
+        Log::info('=== TAXASAQUEHELPER::calcularTaxaSaque FINALIZADO ===', [
             'user_id' => $user->user_id ?? 'N/A',
             'resultado' => [
                 'taxa_cash_out' => $taxa_cash_out,
@@ -151,7 +180,9 @@ class TaxaSaqueHelper
         ]);
 
         return [
-            'taxa_cash_out' => $taxa_cash_out,
+            'taxa_cash_out' => $taxa_cash_out, // Total de todas as taxas
+            'taxa_aplicacao' => $taxaAplicacao, // Taxa da aplicação apenas
+            'taxa_adquirente' => $taxaAdquirenteValor, // Taxa da adquirente apenas
             'saque_liquido' => $saque_liquido,
             'descricao' => $descricao,
             'valor_total_descontar' => $valor_total_descontar

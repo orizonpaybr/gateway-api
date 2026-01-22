@@ -117,8 +117,8 @@ trait UserRequestTrait
             'taxa_fixa_pix' => 'nullable|numeric|min:0',
             'valor_minimo_saque' => 'nullable|numeric|min:0',
             'limite_mensal_pf' => 'nullable|numeric|min:0',
-            'taxa_saque_api' => 'nullable|numeric|min:0',
-            'taxa_saque_crypto' => 'nullable|numeric|min:0',
+            'taxa_saque_api' => 'nullable|numeric|min:0|max:100',
+            'taxa_saque_crypto' => 'nullable|numeric|min:0|max:100',
         ];
     }
     

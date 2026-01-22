@@ -1035,8 +1035,43 @@ class AdminDashboardController extends Controller
     public function updateUser(UpdateUserRequest $request, int $id)
     {
         try {
+            $validatedData = $request->validated();
+            
+            // Validar taxas individuais se estiverem presentes
+            $taxFields = [
+                'taxas_personalizadas_ativas', 'taxa_percentual_deposito', 'taxa_fixa_deposito',
+                'valor_minimo_deposito', 'taxa_percentual_pix', 'taxa_minima_pix', 'taxa_fixa_pix',
+                'valor_minimo_saque', 'limite_mensal_pf', 'taxa_saque_api', 'taxa_saque_crypto',
+                'sistema_flexivel_ativo', 'valor_minimo_flexivel', 'taxa_fixa_baixos', 'taxa_percentual_altos'
+            ];
+            
+            $hasTaxFields = false;
+            foreach ($taxFields as $field) {
+                if (array_key_exists($field, $validatedData)) {
+                    $hasTaxFields = true;
+                    break;
+                }
+            }
+            
+            if ($hasTaxFields) {
+                // Validar taxas individuais
+                $taxValidator = \App\Services\TaxValidationService::validateIndividualTaxes($validatedData);
+                if ($taxValidator->fails()) {
+                    return $this->errorResponse('Erro de validação nas taxas: ' . $taxValidator->errors()->first(), 422);
+                }
+                
+                // Validar consistência das taxas
+                $consistencyCheck = \App\Services\TaxValidationService::validateTaxConsistency($validatedData);
+                if (!$consistencyCheck['valid']) {
+                    return $this->errorResponse('Inconsistência nas taxas: ' . implode(' ', $consistencyCheck['errors']), 422);
+                }
+                
+                // Sanitizar dados de taxas
+                $validatedData = \App\Services\TaxValidationService::sanitizeTaxData($validatedData);
+            }
+            
             // Verificação de admin ou gerente feita pelo middleware 'ensure.admin_or_manager'
-            $user = $this->userService->updateUser($id, $request->validated());
+            $user = $this->userService->updateUser($id, $validatedData);
             
             return $this->successResponse([
                 'message' => 'Usuário atualizado com sucesso',

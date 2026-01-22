@@ -547,26 +547,17 @@ class DepositController extends Controller
             $amount = (float) $request->amount;
             $description = $request->input('description', 'Depósito via PIX');
             
-            // Calcular taxas
-            $taxaPercentual = (float) ($user->taxa_cash_in ?? $treealConfig->taxa_pix_cash_in ?? 0);
-            $taxaFixa = (float) ($user->taxa_cash_in_fixa ?? 0);
-            $baseline = (float) ($setting->baseline ?? 0);
-
-            // Calcular taxa total (percentual)
-            $taxaTotal = ($amount * $taxaPercentual) / 100;
-            $depositoLiquido = $amount - $taxaTotal;
-            $descricaoTaxa = 'PORCENTAGEM';
-
-            // Se taxa calculada for menor que baseline, usar baseline
-            if ($taxaTotal < $baseline && $baseline > 0) {
-                $depositoLiquido = $amount - $baseline;
-                $taxaTotal = $baseline;
-                $descricaoTaxa = 'FIXA';
-            }
-
-            // Adicionar taxa fixa do usuário
-            $depositoLiquido = $depositoLiquido - $taxaFixa;
-            $taxaTotal = $taxaTotal + $taxaFixa;
+            // Obter taxa da TREEAL
+            $taxaTreeal = $treealConfig->taxa_pix_cash_in ?? 0.00;
+            
+            // Calcular taxas usando o Helper centralizado (garante consistência)
+            // Agora considera também a taxa da adquirente (TREEAL)
+            $taxaCalculada = \App\Helpers\TaxaFlexivelHelper::calcularTaxaDeposito($amount, $setting, $user, $taxaTreeal);
+            $depositoLiquido = $taxaCalculada['deposito_liquido'];
+            $taxaTotal = $taxaCalculada['taxa_cash_in'];
+            $taxaAplicacao = $taxaCalculada['taxa_aplicacao'] ?? $taxaTotal;
+            $taxaAdquirente = $taxaCalculada['taxa_adquirente'] ?? 0.00;
+            $descricaoTaxa = $taxaCalculada['descricao'];
 
             // Gerar QR Code usando TreealService
             $qrCodeResult = $treealService->generateQRCode(
@@ -610,9 +601,9 @@ class DepositController extends Controller
                 'paymentCodeBase64' => $qrCode,
                 'adquirente_ref' => 'Treeal',
                 'executor_ordem' => 'Treeal',
-                'taxa_cash_in' => $taxaTotal,
-                'taxa_pix_cash_in_adquirente' => $treealConfig->taxa_pix_cash_in ?? 0,
-                'taxa_pix_cash_in_valor_fixo' => $taxaFixa,
+                'taxa_cash_in' => $taxaTotal, // Total de todas as taxas (aplicação + TREEAL)
+                'taxa_pix_cash_in_adquirente' => $taxaAdquirente, // Taxa da TREEAL (valor calculado)
+                'taxa_pix_cash_in_valor_fixo' => $user->taxa_fixa_deposito ?? 0,
                 'descricao_transacao' => $descricaoTaxa,
                 'callback' => $request->postback ?? null,
                 'split_email' => $request->split_email ?? null,

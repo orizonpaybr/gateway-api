@@ -240,18 +240,25 @@ class SaqueController extends Controller
             $pixKeyType = $request->pixKeyType;
             $description = $request->input('description', 'Saque via PIX');
 
-            // Calcular taxas
-            $taxaPercentual = (float) ($user->taxa_cash_out ?? $treealConfig->taxa_pix_cash_out ?? 0);
-            $taxaFixa = (float) ($user->taxa_cash_out_fixa ?? 0);
+            // Obter taxa da TREEAL
+            $taxaTreeal = $treealConfig->taxa_pix_cash_out ?? 0.00;
             
-            $taxaTotal = ($amount * $taxaPercentual) / 100 + $taxaFixa;
-            $cashOutLiquido = $amount - $taxaTotal;
+            // Calcular taxas usando o Helper centralizado (garante consistência)
+            // Agora considera também a taxa da adquirente (TREEAL)
+            // isInterfaceWeb = true para saques via dashboard, false para API
+            $isInterfaceWeb = !$request->has('api_key'); // Se não tem api_key, é interface web
+            $taxaCalculada = \App\Helpers\TaxaSaqueHelper::calcularTaxaSaque($amount, $setting, $user, $isInterfaceWeb, false, $taxaTreeal);
+            $taxaTotal = $taxaCalculada['taxa_cash_out'];
+            $taxaAplicacao = $taxaCalculada['taxa_aplicacao'] ?? $taxaTotal;
+            $taxaAdquirente = $taxaCalculada['taxa_adquirente'] ?? 0.00;
+            $cashOutLiquido = $taxaCalculada['saque_liquido'];
+            $valorTotalDescontar = $taxaCalculada['valor_total_descontar'];
 
-            // Verificar saldo disponível (já verificado antes, mas garantir)
-            if ($user->saldo < $amount) {
+            // Verificar saldo disponível considerando a taxa total a ser descontada
+            if ($user->saldo < $valorTotalDescontar) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Saldo insuficiente.'
+                    'message' => 'Saldo insuficiente. Valor necessário: R$ ' . number_format($valorTotalDescontar, 2, ',', '.') . ' (incluindo taxa de R$ ' . number_format($taxaTotal, 2, ',', '.') . ')'
                 ], 401);
             }
 
@@ -302,8 +309,9 @@ class SaqueController extends Controller
                 ]);
 
                 // Debitar saldo do usuário (thread-safe)
+                // Descontar o valor total (valor solicitado + taxa)
                 $balanceService = app(\App\Services\BalanceService::class);
-                $balanceService->decrementBalance($user, $amount, 'saldo');
+                $balanceService->decrementBalance($user, $valorTotalDescontar, 'saldo');
                 Helper::calculaSaldoLiquido($user->user_id);
 
                 Log::info('SaqueController::processTreealWithdrawal - Saque automático criado', [

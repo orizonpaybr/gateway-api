@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Services\GatewaySettingsService;
+use App\Services\TaxValidationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
@@ -67,10 +68,10 @@ class GatewaySettingsController extends Controller
     public function updateSettings(Request $request)
     {
         try {
-            $validator = Validator::make(
-                $request->all(), 
-                GatewaySettingsService::getValidationRules()
-            );
+            // Validar taxas globais
+        Log::info('Estou batendo aqui');
+
+            $validator = TaxValidationService::validateGlobalTaxes($request->all());
             
             if ($validator->fails()) {
                 return response()->json([
@@ -80,7 +81,20 @@ class GatewaySettingsController extends Controller
                 ], 422);
             }
             
-            $settings = $this->service->updateSettings($request->all());
+            // Validar consistência das taxas
+            $consistencyCheck = TaxValidationService::validateTaxConsistency($request->all());
+            if (!$consistencyCheck['valid']) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Inconsistência nas configurações de taxas.',
+                    'errors' => $consistencyCheck['errors'],
+                ], 422);
+            }
+            
+            // Sanitizar dados antes de salvar
+            $sanitizedData = TaxValidationService::sanitizeTaxData($request->all());
+            
+            $settings = $this->service->updateSettings($sanitizedData);
             
             return response()->json([
                 'success' => true,

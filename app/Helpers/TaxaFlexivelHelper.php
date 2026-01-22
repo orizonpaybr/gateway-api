@@ -12,12 +12,25 @@ class TaxaFlexivelHelper
      * @param float $amount Valor do depósito
      * @param App $setting Configurações do sistema
      * @param User|null $user Usuário específico (opcional)
-     * @return array ['taxa_cash_in' => float, 'deposito_liquido' => float, 'descricao' => string]
+     * @param float $taxaAdquirente Taxa percentual da adquirente (ex: 5.00 para 5%)
+     * @return array ['taxa_cash_in' => float, 'deposito_liquido' => float, 'descricao' => string, 'taxa_aplicacao' => float, 'taxa_adquirente' => float]
      */
-    public static function calcularTaxaDeposito($amount, $setting, $user = null)
+    public static function calcularTaxaDeposito($amount, $setting, $user = null, $taxaAdquirente = 0.00)
     {
+        // Validação de entrada
+        if ($amount < 0) {
+            throw new \InvalidArgumentException('O valor do depósito não pode ser negativo.');
+        }
+        
+        if (!$setting) {
+            throw new \InvalidArgumentException('Configurações do sistema são obrigatórias.');
+        }
+        
         // Verificar se as taxas personalizadas estão ativas
         $taxasPersonalizadasAtivas = $user && isset($user->taxas_personalizadas_ativas) && $user->taxas_personalizadas_ativas;
+        
+        // Calcular taxa da aplicação primeiro
+        $resultadoAplicacao = null;
         
         if ($taxasPersonalizadasAtivas) {
             // MODO PERSONALIZADO: Usuário tem taxas personalizadas ativas
@@ -28,10 +41,10 @@ class TaxaFlexivelHelper
                 $taxaPercentualAlto = $user->taxa_percentual_altos ?? $setting->taxa_flexivel_percentual_alto;
                 $descricao = "FLEXIVEL_USUARIO";
                 
-                return self::calcularTaxaFlexivel($amount, $valorMinimo, $taxaFixaBaixo, $taxaPercentualAlto, $descricao);
+                $resultadoAplicacao = self::calcularTaxaFlexivel($amount, $valorMinimo, $taxaFixaBaixo, $taxaPercentualAlto, $descricao);
             } else {
                 // PRIORIDADE 2: Configurações básicas personalizadas (se flexível não ativo)
-                return self::calcularTaxaBasica($amount, $setting, $user, "PERSONALIZADA");
+                $resultadoAplicacao = self::calcularTaxaBasica($amount, $setting, $user, "PERSONALIZADA");
             }
         } else {
             // MODO GLOBAL: Usuário não tem taxas personalizadas, usar configurações globais
@@ -42,12 +55,30 @@ class TaxaFlexivelHelper
                 $taxaPercentualAlto = $setting->taxa_flexivel_percentual_alto;
                 $descricao = "FLEXIVEL_GLOBAL";
                 
-                return self::calcularTaxaFlexivel($amount, $valorMinimo, $taxaFixaBaixo, $taxaPercentualAlto, $descricao);
+                $resultadoAplicacao = self::calcularTaxaFlexivel($amount, $valorMinimo, $taxaFixaBaixo, $taxaPercentualAlto, $descricao);
             } else {
                 // PRIORIDADE 2: Configurações básicas globais (se flexível não ativo)
-                return self::calcularTaxaBasica($amount, $setting, null, "GLOBAL");
+                $resultadoAplicacao = self::calcularTaxaBasica($amount, $setting, null, "GLOBAL");
             }
         }
+        
+        // Calcular taxa da adquirente (percentual sobre o valor bruto)
+        $taxaAdquirente = max(0, min(100, (float) $taxaAdquirente)); // Limitar a 100%
+        $taxaAdquirenteValor = ($amount * $taxaAdquirente) / 100;
+        
+        // Taxa total = taxa aplicação + taxa adquirente
+        $taxaTotal = $resultadoAplicacao['taxa_cash_in'] + $taxaAdquirenteValor;
+        
+        // Depósito líquido = valor bruto - taxa total
+        $depositoLiquido = max(0, $amount - $taxaTotal);
+        
+        return [
+            'taxa_cash_in' => $taxaTotal, // Total de todas as taxas
+            'taxa_aplicacao' => $resultadoAplicacao['taxa_cash_in'], // Taxa da aplicação apenas
+            'taxa_adquirente' => $taxaAdquirenteValor, // Taxa da adquirente apenas
+            'deposito_liquido' => $depositoLiquido,
+            'descricao' => $resultadoAplicacao['descricao']
+        ];
     }
 
     /**
@@ -62,15 +93,20 @@ class TaxaFlexivelHelper
      */
     private static function calcularTaxaFlexivel($amount, $valorMinimo, $taxaFixaBaixo, $taxaPercentualAlto, $descricao)
     {
+        // Validação de valores
+        $taxaFixaBaixo = max(0, (float) $taxaFixaBaixo);
+        $taxaPercentualAlto = max(0, min(100, (float) $taxaPercentualAlto)); // Limitar a 100%
+        $valorMinimo = max(0, (float) $valorMinimo);
+        
         if ($amount < $valorMinimo) {
             // Depósitos abaixo do valor mínimo: taxa fixa
             $taxa_cash_in = $taxaFixaBaixo;
-            $deposito_liquido = $amount - $taxa_cash_in;
+            $deposito_liquido = max(0, $amount - $taxa_cash_in); // Garantir que não seja negativo
             $descricao .= "_FIXA";
         } else {
             // Depósitos acima do valor mínimo: taxa percentual
             $taxa_cash_in = ($amount * $taxaPercentualAlto) / 100;
-            $deposito_liquido = $amount - $taxa_cash_in;
+            $deposito_liquido = max(0, $amount - $taxa_cash_in); // Garantir que não seja negativo
             $descricao .= "_PERCENTUAL";
         }
 
@@ -104,10 +140,14 @@ class TaxaFlexivelHelper
             $descricao = "GLOBAL_BASICA";
         }
         
+        // Validação e sanitização
+        $taxaPercentual = max(0, min(100, (float) $taxaPercentual)); // Limitar a 100%
+        $taxaFixaAdicional = max(0, (float) $taxaFixaAdicional);
+        
         // Calcular taxa: APENAS percentual + fixa (sem taxa mínima)
         $taxaPercentualCalculada = ($amount * $taxaPercentual) / 100;
         $taxa_cash_in = $taxaPercentualCalculada + $taxaFixaAdicional;
-        $deposito_liquido = $amount - $taxa_cash_in;
+        $deposito_liquido = max(0, $amount - $taxa_cash_in); // Garantir que não seja negativo
         $descricao .= "_PERCENTUAL_FIXA";
 
         return [
