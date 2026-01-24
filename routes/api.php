@@ -14,125 +14,23 @@ use App\Http\Controllers\Api\PixInfracoesController;
 use App\Http\Controllers\Api\PixKeyController;
 use App\Http\Controllers\Api\AdminTransactionsController;
 
-/* AUTHENTICATION ROUTES */
-Route::options('auth/login', function () {
-    return response('', 200)
-        ->header('Access-Control-Allow-Origin', '*')
-        ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
-        ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-});
-Route::options('auth/register', function () {
-    return response('', 200)
-        ->header('Access-Control-Allow-Origin', '*')
-        ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
-        ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-});
-Route::options('auth/verify-2fa', function () {
-    return response('', 200)
-        ->header('Access-Control-Allow-Origin', '*')
-        ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
-        ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-});
-Route::options('auth/validate-registration', function () {
-    return response('', 200)
-        ->header('Access-Control-Allow-Origin', '*')
-        ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
-        ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-});
-Route::options('auth/change-password', function () {
-    return response('', 200)
-        ->header('Access-Control-Allow-Origin', '*')
-        ->header('Access-Control-Allow-Methods', 'POST, OPTIONS')
-        ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-});
+/*
+|--------------------------------------------------------------------------
+| API Routes
+|--------------------------------------------------------------------------
+|
+| IMPORTANTE: CORS é gerenciado pelo middleware SecureCors globalmente.
+| NÃO adicionar headers Access-Control-Allow-Origin manualmente nas rotas.
+| Configurar FRONTEND_URL no .env para permitir origens específicas.
+|
+*/
+
+/* AUTHENTICATION ROUTES (públicas) */
 Route::post('auth/login', [AuthController::class, 'login']);
 Route::post('auth/register', [AuthController::class, 'register']);
 Route::post('auth/verify-2fa', [AuthController::class, 'verify2FA']);
 Route::post('auth/validate-registration', [AuthController::class, 'validateRegistrationData']);
-Route::post('auth/logout', [AuthController::class, 'logout']); // Logout não precisa de autenticação
-
-/* USER ROUTES */
-Route::options('balance', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('transactions', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('transactions/{id}', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('user/profile', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('pix/generate-qr', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('extrato', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('notifications', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('notifications/register-token', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('notifications/{id}/read', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('notifications/mark-all-read', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('notifications/stats', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('notification-preferences', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('notification-preferences/toggle/{type}', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('notification-preferences/disable-all', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('notification-preferences/enable-all', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('dashboard/stats', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('dashboard/interactive-movement', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('dashboard/transaction-summary', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('pix/infracoes', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('qrcodes', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('pix/keys', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('pix/keys/{id}', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('pix/keys/{id}/set-default', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('pix/withdraw-with-key', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('admin/dashboard/stats', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('admin/dashboard/users', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
-Route::options('admin/dashboard/transactions', function () {
-    return response('', 200)->header('Access-Control-Allow-Origin', '*');
-});
+Route::post('auth/logout', [AuthController::class, 'logout']);
 
 // Rotas protegidas com JWT (para frontend)
 Route::middleware(['verify.jwt'])->group(function () {
@@ -167,9 +65,7 @@ Route::middleware(['verify.jwt'])->group(function () {
     Route::get('qrcodes', [App\Http\Controllers\Api\QRCodeController::class, 'index']);
     
     // Dashboard Administrativo (apenas para admins - permission == 3)
-    // MELHORIA: Usar middleware para evitar código duplicado
-    // IMPORTANTE: verify.jwt deve vir antes de ensure.admin para autenticar o usuário
-    Route::middleware(['verify.jwt', 'ensure.admin'])->group(function () {
+    Route::middleware(['ensure.admin'])->group(function () {
         Route::get('admin/dashboard/stats', [App\Http\Controllers\Api\AdminDashboardController::class, 'getDashboardStats']);
         Route::get('admin/dashboard/transactions', [App\Http\Controllers\Api\AdminDashboardController::class, 'getRecentTransactions']);
         Route::get('admin/dashboard/cache-metrics', [App\Http\Controllers\Api\AdminDashboardController::class, 'getCacheMetrics']);
@@ -210,7 +106,6 @@ Route::middleware(['verify.jwt'])->group(function () {
         Route::put('admin/settings', [App\Http\Controllers\Api\GatewaySettingsController::class, 'updateSettings']);
         
         // Rotas de gerenciamento de níveis de gamificação (Admin)
-        // Observação: o painel atual permite apenas listar e editar níveis existentes.
         Route::get('admin/levels', [App\Http\Controllers\Api\AdminLevelsController::class, 'index']);
         Route::get('admin/levels/{id}', [App\Http\Controllers\Api\AdminLevelsController::class, 'show'])->where('id', '[0-9]+');
         Route::put('admin/levels/{id}', [App\Http\Controllers\Api\AdminLevelsController::class, 'update'])->where('id', '[0-9]+');
@@ -218,7 +113,7 @@ Route::middleware(['verify.jwt'])->group(function () {
     });
     
     // Rotas compartilhadas entre Admin (3) e Gerente (2)
-    Route::middleware(['verify.jwt', 'ensure.admin_or_manager'])->group(function () {
+    Route::middleware(['ensure.admin_or_manager'])->group(function () {
         // Lista de usuários
         Route::get('admin/dashboard/users', [App\Http\Controllers\Api\AdminDashboardController::class, 'getUsers']);
         
@@ -244,7 +139,6 @@ Route::middleware(['verify.jwt'])->group(function () {
         Route::post('admin/users/{id}/affiliate-settings', [App\Http\Controllers\Api\AdminDashboardController::class, 'saveAffiliateSettings']);
         
         // Rotas de gerenciamento de saques (Admin e Gerente)
-        // Rotas específicas devem vir antes da rota com {id} para evitar colisão ('stats' sendo interpretado como {id})
         Route::get('admin/withdrawals', [App\Http\Controllers\Api\WithdrawalController::class, 'index']);
         Route::get('admin/withdrawals/stats', [App\Http\Controllers\Api\WithdrawalController::class, 'stats']);
         Route::get('admin/withdrawals/config', [App\Http\Controllers\Api\WithdrawalController::class, 'getConfig']);
@@ -265,7 +159,6 @@ Route::middleware(['verify.jwt'])->group(function () {
     
     // Rotas de preferências de notificação (com rate limiting mais permissivo)
     Route::middleware('throttle:30,1')->group(function () {
-        // Aceita GET e POST para compatibilidade com o front (POST carrega token/secret no body)
         Route::get('notification-preferences', [App\Http\Controllers\Api\NotificationPreferenceController::class, 'getPreferences']);
         Route::post('notification-preferences', [App\Http\Controllers\Api\NotificationPreferenceController::class, 'getPreferences']);
         Route::put('notification-preferences', [App\Http\Controllers\Api\NotificationPreferenceController::class, 'updatePreferences']);
@@ -282,17 +175,18 @@ Route::middleware(['verify.jwt'])->group(function () {
     Route::post('2fa/disable', [App\Http\Controllers\TwoFactorAuthController::class, 'disable']);
     
     // Rotas de segurança e conta
-    // Rate limiting: 3 tentativas por hora (implementado no controller com Redis)
     Route::post('auth/change-password', [UserController::class, 'changePassword']);
     
     // Integração de API - Credenciais e IPs autorizados
-    // Rate limiting: GET credentials (60 req/min), POST regenerate-secret (5 req/min), IP management (20 req/min)
-    // CORS seguro: middleware 'secure.cors' controla origens permitidas via FRONTEND_URL
-    Route::get('integration/credentials', [App\Http\Controllers\Api\IntegrationController::class, 'getCredentials'])->middleware(['secure.cors', 'throttle:60,1']);
-    Route::post('integration/regenerate-secret', [App\Http\Controllers\Api\IntegrationController::class, 'regenerateSecret'])->middleware(['secure.cors', 'throttle:5,1']);
-    Route::get('integration/allowed-ips', [App\Http\Controllers\Api\IntegrationController::class, 'getAllowedIPs'])->middleware(['secure.cors', 'throttle:60,1']);
-    Route::post('integration/allowed-ips', [App\Http\Controllers\Api\IntegrationController::class, 'addAllowedIP'])->middleware(['secure.cors', 'throttle:20,1']);
-    Route::delete('integration/allowed-ips/{ip}', [App\Http\Controllers\Api\IntegrationController::class, 'removeAllowedIP'])->middleware(['secure.cors', 'throttle:20,1']);
+    Route::middleware(['throttle:60,1'])->group(function () {
+        Route::get('integration/credentials', [App\Http\Controllers\Api\IntegrationController::class, 'getCredentials']);
+        Route::get('integration/allowed-ips', [App\Http\Controllers\Api\IntegrationController::class, 'getAllowedIPs']);
+    });
+    Route::middleware(['throttle:5,1'])->post('integration/regenerate-secret', [App\Http\Controllers\Api\IntegrationController::class, 'regenerateSecret']);
+    Route::middleware(['throttle:20,1'])->group(function () {
+        Route::post('integration/allowed-ips', [App\Http\Controllers\Api\IntegrationController::class, 'addAllowedIP']);
+        Route::delete('integration/allowed-ips/{ip}', [App\Http\Controllers\Api\IntegrationController::class, 'removeAllowedIP']);
+    });
 });
 
 // Rotas protegidas com token + secret (para integrações externas e APIs)
@@ -300,9 +194,10 @@ Route::middleware(['check.token.secret'])->group(function () {
     // Essas rotas ainda podem usar token + secret para compatibilidade com integrações externas
 });
 
+// Rota de utilitário (apenas ambiente local, autenticado)
 Route::get('/link-storage', function (Request $request) {
-    // Verificar se está em ambiente local e se o usuário está autenticado
-    if (!app()->environment('local') || !$request->user()) {
+    // Verificar se está em ambiente local
+    if (!app()->environment('local')) {
         abort(403, 'Acesso não autorizado.');
     }
     

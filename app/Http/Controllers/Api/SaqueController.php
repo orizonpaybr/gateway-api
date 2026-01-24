@@ -397,15 +397,34 @@ class SaqueController extends Controller
 
     /**
      * Mapeia status da Treeal para status interno
+     * 
+     * Status TREEAL (Cash Out - API ONZ):
+     * - PROCESSING: Transação em processamento
+     * - LIQUIDATED: Transação liquidada com sucesso
+     * - CANCELED: Transação cancelada
+     * - REFUNDED: Transação estornada
+     * - PARTIALLY_REFUNDED: Transação parcialmente estornada
      */
     private function mapTreealStatusToInternal(string $treealStatus): string
     {
         $statusMap = [
+            // Status de processamento
             'PROCESSING' => 'PROCESSING',
+            'EM_PROCESSAMENTO' => 'PROCESSING',
+            
+            // Status de sucesso (liquidação)
+            'LIQUIDATED' => 'PAID_OUT',
             'COMPLETED' => 'PAID_OUT',
             'CONFIRMED' => 'PAID_OUT',
+            
+            // Status de falha/cancelamento
             'FAILED' => 'FAILED',
             'CANCELLED' => 'CANCELLED',
+            'CANCELED' => 'CANCELLED',
+            
+            // Status de estorno
+            'REFUNDED' => 'REFUNDED',
+            'PARTIALLY_REFUNDED' => 'PARTIALLY_REFUNDED',
         ];
 
         return $statusMap[strtoupper($treealStatus)] ?? 'PENDING';

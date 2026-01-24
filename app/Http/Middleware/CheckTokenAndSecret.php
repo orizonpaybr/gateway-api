@@ -22,11 +22,11 @@ class CheckTokenAndSecret
             return Response::json([
                 'error' => 'Token ou Secret ausentes',
                 'message' => 'Você precisa fornecer tanto o token quanto o secret.'
-            ], 400); // Retorna um erro 400 se os parâmetros não forem fornecidos
+            ], 400);
         }
 
-        // Verifique se existe um usuário com esse token e secret
-        $chaves = UsersKey::where('token', $token)->where('secret', $secret)->first();
+        // Buscar chaves usando o novo método otimizado (suporta criptografia)
+        $chaves = UsersKey::findByCredentials($token, $secret);
         
         // Log de segurança (sem expor dados sensíveis)
         Log::info('CheckTokenAndSecret - Tentativa de autenticação', [
@@ -46,19 +46,28 @@ class CheckTokenAndSecret
             return Response::json([
                 'status' => "error",
                 'message' => 'Token ou Secret inválidos'
-            ], 401); // Retorna um erro 401 se o token ou secret não forem válidos
+            ], 401);
         }
 
         $user = User::where('username', $chaves->user_id)->first();
         
-        // Log de autenticação bem-sucedida (sem dados sensíveis)
-        if ($user) {
-            Log::info('CheckTokenAndSecret - Autenticação bem-sucedida', [
-                'user_id' => $user->id,
+        if (!$user) {
+            Log::warning('CheckTokenAndSecret - Usuário não encontrado para chave válida', [
+                'user_id' => $chaves->user_id,
                 'ip' => $request->ip(),
-                'timestamp' => now()
             ]);
+            return Response::json([
+                'status' => "error",
+                'message' => 'Usuário não encontrado'
+            ], 401);
         }
+        
+        // Log de autenticação bem-sucedida (sem dados sensíveis)
+        Log::info('CheckTokenAndSecret - Autenticação bem-sucedida', [
+            'user_id' => $user->id,
+            'ip' => $request->ip(),
+            'timestamp' => now()
+        ]);
         
         // Bloquear apenas usuários inativos (status = 0) ou banidos
         // Usuários pendentes (status = 2) podem acessar todas as APIs (exceto integração)
@@ -66,7 +75,7 @@ class CheckTokenAndSecret
             return Response::json([
                 'status' => "error",
                 'message' => 'Conta inativa ou bloqueada. Entre em contato com o suporte.'
-            ], 403)->header('Access-Control-Allow-Origin', '*');
+            ], 403);
         }
         
         // Se o usuário for encontrado, defina o usuário na requisição usando setUserResolver

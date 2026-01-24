@@ -394,6 +394,13 @@ class CallbackController extends Controller
 
     /**
      * Processa webhook de saque PIX (Cash Out) da Treeal
+     * 
+     * Status possíveis da TREEAL (API ONZ):
+     * - PROCESSING: Em processamento
+     * - LIQUIDATED: Transação liquidada com sucesso
+     * - CANCELED: Transação cancelada
+     * - REFUNDED: Transação estornada
+     * - PARTIALLY_REFUNDED: Parcialmente estornada
      */
     private function handleTreealCashOutWebhook($transactionId, $status, $data)
     {
@@ -402,35 +409,79 @@ class CallbackController extends Controller
             return response()->json(['status' => false, 'message' => 'transactionId não encontrado'], 400);
         }
 
+        // Tentar buscar também pelo endToEndId se disponível
+        $endToEndId = $data['endToEndId'] ?? $data['end_to_end_id'] ?? null;
+        
         $cashOut = SolicitacoesCashOut::where('idTransaction', $transactionId)
             ->orWhere('externalreference', $transactionId)
+            ->when($endToEndId, function($query) use ($endToEndId) {
+                $query->orWhere('end_to_end', $endToEndId);
+            })
             ->first();
 
         if (!$cashOut) {
-            Log::warning('[TREEAL] Saque não encontrado', ['transaction_id' => $transactionId]);
+            Log::warning('[TREEAL] Saque não encontrado', [
+                'transaction_id' => $transactionId,
+                'end_to_end_id' => $endToEndId
+            ]);
             return response()->json(['status' => false, 'message' => 'Saque não encontrado'], 404);
         }
 
         Log::info('[TREEAL] Processando webhook Cash Out', [
             'transaction_id' => $transactionId,
             'status' => $status,
-            'current_status' => $cashOut->status
+            'current_status' => $cashOut->status,
+            'end_to_end_id' => $endToEndId
         ]);
 
         // Mapear status da Treeal para status interno
         $internalStatus = $this->mapTreealStatusToInternal($status);
+        $statusUpper = strtoupper($status ?? '');
 
-        // Atualizar status
+        // Preparar dados para atualização
+        $updateData = [];
+        
+        // Salvar endToEndId se disponível
+        if ($endToEndId && empty($cashOut->end_to_end)) {
+            $updateData['end_to_end'] = $endToEndId;
+        }
+
+        // Atualizar status se diferente
         if ($cashOut->status !== $internalStatus) {
-            $cashOut->update(['status' => $internalStatus]);
+            $updateData['status'] = $internalStatus;
             
-            // Log do endToEndId se disponível (para auditoria)
-            if (isset($data['endToEndId'])) {
-                Log::info('[TREEAL] Webhook Cash Out - endToEndId recebido', [
+            // Se foi estornado, registrar informações adicionais
+            if (in_array($statusUpper, ['REFUNDED', 'PARTIALLY_REFUNDED'])) {
+                Log::warning('[TREEAL] Saque estornado', [
                     'transaction_id' => $transactionId,
-                    'end_to_end_id' => $data['endToEndId']
+                    'status' => $status,
+                    'end_to_end_id' => $endToEndId,
+                    'data' => $data
+                ]);
+                
+                // TODO: Implementar lógica de estorno se necessário
+                // - Reverter saldo do usuário
+                // - Notificar usuário
+                // - Registrar em tabela de estornos
+            }
+            
+            // Se foi cancelado
+            if (in_array($statusUpper, ['CANCELED', 'CANCELLED'])) {
+                Log::warning('[TREEAL] Saque cancelado', [
+                    'transaction_id' => $transactionId,
+                    'reason' => $data['message'] ?? $data['errorCode'] ?? 'Não informado'
                 ]);
             }
+        }
+
+        // Aplicar atualizações se houver
+        if (!empty($updateData)) {
+            $cashOut->update($updateData);
+            
+            Log::info('[TREEAL] Saque atualizado', [
+                'transaction_id' => $transactionId,
+                'updates' => array_keys($updateData)
+            ]);
         }
 
         return response()->json(['status' => true, 'message' => 'Webhook processado']);
@@ -438,20 +489,44 @@ class CallbackController extends Controller
 
     /**
      * Mapeia status da Treeal para status interno
+     * 
+     * Status TREEAL (Cash In - API QRCodes):
+     * - ATIVA: Cobrança ativa aguardando pagamento
+     * - CONCLUIDA: Cobrança paga
+     * - REMOVIDA_PELO_USUARIO_RECEBEDOR: Cobrança removida/cancelada
+     * - EM_PROCESSAMENTO: Em processamento
+     * - NAO_REALIZADO: Não realizado/falhou
+     * 
+     * Status TREEAL (Cash Out - API ONZ):
+     * - PROCESSING: Em processamento
+     * - LIQUIDATED: Liquidado com sucesso
+     * - CANCELED: Cancelado
+     * - REFUNDED: Estornado
      */
     private function mapTreealStatusToInternal(string $status): string
     {
         $statusUpper = strtoupper($status);
         
         $statusMap = [
+            // Cash In - Status de cobrança
             'ATIVA' => 'WAITING_FOR_APPROVAL',
             'CONCLUIDA' => 'PAID_OUT',
+            'REMOVIDA_PELO_USUARIO_RECEBEDOR' => 'CANCELLED',
+            'EM_PROCESSAMENTO' => 'PROCESSING',
+            'NAO_REALIZADO' => 'FAILED',
+            
+            // Status genéricos (Cash In e Cash Out)
             'PAID' => 'PAID_OUT',
             'COMPLETED' => 'PAID_OUT',
             'PROCESSING' => 'PROCESSING',
             'FAILED' => 'FAILED',
             'CANCELLED' => 'CANCELLED',
             'CANCELED' => 'CANCELLED',
+            
+            // Cash Out - Status específicos
+            'LIQUIDATED' => 'PAID_OUT',
+            'REFUNDED' => 'REFUNDED',
+            'PARTIALLY_REFUNDED' => 'PARTIALLY_REFUNDED',
         ];
 
         return $statusMap[$statusUpper] ?? 'PENDING';

@@ -5,11 +5,20 @@ namespace App\Http\Middleware;
 use Closure;
 use Illuminate\Http\Request;
 use App\Models\User;
+use App\Services\JWTService;
 use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Log;
+use Exception;
 
 class VerifyJWT
 {
+    private JWTService $jwtService;
+    
+    public function __construct(JWTService $jwtService)
+    {
+        $this->jwtService = $jwtService;
+    }
+    
     public function handle(Request $request, Closure $next)
     {
         try {
@@ -26,45 +35,66 @@ class VerifyJWT
             if (!$token) {
                 Log::warning('VerifyJWT - Token não fornecido', [
                     'path' => $request->path(),
-                    'headers' => $request->headers->all()
+                    'ip' => $request->ip(),
                 ]);
                 return Response::json([
                     'success' => false,
                     'message' => 'Token não fornecido'
-                ], 401)->header('Access-Control-Allow-Origin', '*');
+                ], 401);
             }
 
-            // Decodificar o token JWT
-            $decoded = json_decode(base64_decode($token), true);
+            // Validar o token JWT usando o serviço
+            $decoded = $this->jwtService->validateToken($token);
             
-            Log::info('VerifyJWT - Token decodificado', [
-                'decoded_success' => !empty($decoded),
-                'has_user_id' => isset($decoded['user_id']),
-                'has_expires_at' => isset($decoded['expires_at']),
-                'user_id' => $decoded['user_id'] ?? null,
-                'expires_at' => $decoded['expires_at'] ?? null,
-                'now' => now()->timestamp
-            ]);
-            
-            // Verificar se o token é válido e não expirou
-            if (!$decoded || !isset($decoded['user_id']) || !isset($decoded['expires_at']) || $decoded['expires_at'] < now()->timestamp) {
+            if (!$decoded) {
                 Log::warning('VerifyJWT - Token inválido ou expirado', [
-                    'decoded' => $decoded,
-                    'has_user_id' => isset($decoded['user_id']),
-                    'has_expires_at' => isset($decoded['expires_at']),
-                    'expires_at' => $decoded['expires_at'] ?? null,
-                    'now' => now()->timestamp
+                    'ip' => $request->ip(),
+                    'path' => $request->path(),
                 ]);
                 return Response::json([
                     'success' => false,
                     'message' => 'Token inválido ou expirado'
-                ], 401)->header('Access-Control-Allow-Origin', '*');
+                ], 401);
             }
+            
+            // Verificar se não é um token temporário (2FA)
+            if (isset($decoded->temp) && $decoded->temp === true) {
+                Log::warning('VerifyJWT - Tentativa de uso de token temporário', [
+                    'ip' => $request->ip(),
+                    'path' => $request->path(),
+                ]);
+                return Response::json([
+                    'success' => false,
+                    'message' => 'Token temporário não é válido para esta operação'
+                ], 401);
+            }
+            
+            // Extrair user_id do token (claim 'sub')
+            $userId = $decoded->sub ?? null;
+            
+            if (!$userId) {
+                Log::warning('VerifyJWT - Token sem user_id', [
+                    'ip' => $request->ip(),
+                ]);
+                return Response::json([
+                    'success' => false,
+                    'message' => 'Token inválido'
+                ], 401);
+            }
+            
+            Log::info('VerifyJWT - Token decodificado', [
+                'user_id' => $userId,
+                'expires_at' => isset($decoded->exp) ? date('Y-m-d H:i:s', $decoded->exp) : null,
+            ]);
 
             // Buscar o usuário
-            $user = User::where('username', $decoded['user_id'])->first();
+            $user = User::where('username', $userId)->first();
             
             if (!$user) {
+                Log::warning('VerifyJWT - Usuário não encontrado', [
+                    'user_id' => $userId,
+                    'ip' => $request->ip(),
+                ]);
                 return Response::json([
                     'success' => false,
                     'message' => 'Usuário não encontrado'
@@ -81,10 +111,15 @@ class VerifyJWT
             // Bloquear apenas usuários inativos (status = 0) ou banidos
             // Usuários pendentes (status = 2) podem acessar todas as APIs (exceto integração)
             if ($user->status == 0 || ($user->banido ?? false)) {
+                Log::warning('VerifyJWT - Conta inativa ou bloqueada', [
+                    'user_id' => $user->id,
+                    'status' => $user->status,
+                    'banido' => $user->banido,
+                ]);
                 return Response::json([
                     'success' => false,
                     'message' => 'Conta inativa ou bloqueada. Entre em contato com o suporte.'
-                ], 403)->header('Access-Control-Allow-Origin', '*');
+                ], 403);
             }
 
             // Definir o usuário na requisição
@@ -98,7 +133,7 @@ class VerifyJWT
             // Prosseguir com a requisição
             return $next($request);
             
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             Log::error('VerifyJWT - Erro na verificação do token', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
@@ -111,4 +146,3 @@ class VerifyJWT
         }
     }
 }
-

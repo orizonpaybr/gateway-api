@@ -38,6 +38,12 @@ return Application::configure(basePath: dirname(__DIR__))
             'secure.cors' => \App\Http\Middleware\SecureCors::class,
         ]);
         
+        // Aplicar CORS seguro globalmente nas rotas API
+        // IMPORTANTE: Nunca usar Access-Control-Allow-Origin: * em produção
+        $middleware->prependToGroup('api', [
+            \App\Http\Middleware\SecureCors::class,
+        ]);
+        
         // Aplicar middleware de segurança globalmente
         $middleware->append([
             \App\Http\Middleware\SecurityMiddleware::class,

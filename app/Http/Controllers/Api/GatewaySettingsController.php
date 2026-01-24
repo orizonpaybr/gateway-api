@@ -69,8 +69,6 @@ class GatewaySettingsController extends Controller
     {
         try {
             // Validar taxas globais
-        Log::info('Estou batendo aqui');
-
             $validator = TaxValidationService::validateGlobalTaxes($request->all());
             
             if ($validator->fails()) {

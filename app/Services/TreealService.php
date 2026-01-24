@@ -36,6 +36,12 @@ class TreealService
     // Cache TTL para tokens OAuth (normalmente expiram em 1 hora)
     private const TOKEN_CACHE_TTL = 3600;
     
+    // Configurações de retry
+    private int $maxRetries;
+    private int $retryDelayMs;
+    private int $timeout;
+    private int $connectTimeout;
+    
     public function __construct()
     {
         // Carregar configuração do banco (URLs, taxas, status)
@@ -49,6 +55,12 @@ class TreealService
         $this->qrcodesClientId = config('treeal.qrcodes_client_id');
         $this->qrcodesClientSecret = config('treeal.qrcodes_client_secret');
         $this->pixKeySecondary = config('treeal.pix_key_secondary');
+        
+        // Configurações de retry
+        $this->maxRetries = config('treeal.max_retries', 3);
+        $this->retryDelayMs = config('treeal.retry_delay_ms', 1000);
+        $this->timeout = config('treeal.timeout', 30);
+        $this->connectTimeout = config('treeal.connect_timeout', 10);
         
         // URLs e ambiente podem vir do .env ou banco (prioridade: .env)
         $this->config->environment = config('treeal.environment') 
@@ -1020,5 +1032,135 @@ class TreealService
     {
         $cacheKey = "treeal:oauth_token:{$this->config->id}";
         Cache::forget($cacheKey);
+    }
+    
+    /**
+     * Executa uma chamada HTTP com retry automático
+     * 
+     * @param callable $httpCall Função que faz a chamada HTTP e retorna Response
+     * @param string $operation Nome da operação para logs
+     * @param array $context Contexto adicional para logs
+     * @return \Illuminate\Http\Client\Response
+     * @throws \Exception Se todas as tentativas falharem
+     */
+    private function executeWithRetry(callable $httpCall, string $operation, array $context = []): \Illuminate\Http\Client\Response
+    {
+        $lastException = null;
+        $lastResponse = null;
+        
+        for ($attempt = 1; $attempt <= $this->maxRetries; $attempt++) {
+            try {
+                Log::debug("TreealService::{$operation} - Tentativa {$attempt}/{$this->maxRetries}", $context);
+                
+                $response = $httpCall();
+                
+                // Se a resposta foi bem sucedida, retornar
+                if ($response->successful()) {
+                    if ($attempt > 1) {
+                        Log::info("TreealService::{$operation} - Sucesso na tentativa {$attempt}", $context);
+                    }
+                    return $response;
+                }
+                
+                // Se for erro de cliente (4xx), não fazer retry (exceto 429 - rate limit)
+                if ($response->status() >= 400 && $response->status() < 500 && $response->status() !== 429) {
+                    Log::warning("TreealService::{$operation} - Erro de cliente, sem retry", [
+                        'status' => $response->status(),
+                        'attempt' => $attempt,
+                        ...$context,
+                    ]);
+                    return $response;
+                }
+                
+                $lastResponse = $response;
+                
+                Log::warning("TreealService::{$operation} - Erro na tentativa {$attempt}", [
+                    'status' => $response->status(),
+                    'body_preview' => substr($response->body(), 0, 200),
+                    ...$context,
+                ]);
+                
+            } catch (\Illuminate\Http\Client\ConnectionException $e) {
+                $lastException = $e;
+                Log::warning("TreealService::{$operation} - Erro de conexão na tentativa {$attempt}", [
+                    'error' => $e->getMessage(),
+                    ...$context,
+                ]);
+            } catch (\Exception $e) {
+                $lastException = $e;
+                Log::warning("TreealService::{$operation} - Exceção na tentativa {$attempt}", [
+                    'error' => $e->getMessage(),
+                    'type' => get_class($e),
+                    ...$context,
+                ]);
+            }
+            
+            // Se não é a última tentativa, aguardar com backoff exponencial
+            if ($attempt < $this->maxRetries) {
+                $delay = $this->retryDelayMs * pow(2, $attempt - 1);
+                $jitter = rand(0, (int)($delay * 0.1)); // 10% de jitter
+                $totalDelay = $delay + $jitter;
+                
+                Log::debug("TreealService::{$operation} - Aguardando {$totalDelay}ms antes da próxima tentativa");
+                usleep($totalDelay * 1000); // converter para microsegundos
+            }
+        }
+        
+        // Todas as tentativas falharam
+        Log::error("TreealService::{$operation} - Todas as tentativas falharam", [
+            'max_retries' => $this->maxRetries,
+            'last_error' => $lastException ? $lastException->getMessage() : null,
+            'last_status' => $lastResponse ? $lastResponse->status() : null,
+            ...$context,
+        ]);
+        
+        // Se temos uma resposta (mesmo com erro), retornar para processamento
+        if ($lastResponse) {
+            return $lastResponse;
+        }
+        
+        // Se não temos resposta, lançar a última exceção
+        if ($lastException) {
+            throw $lastException;
+        }
+        
+        throw new \Exception("Todas as {$this->maxRetries} tentativas falharam para {$operation}");
+    }
+    
+    /**
+     * Verifica se um erro HTTP é recuperável (deve fazer retry)
+     * 
+     * @param int $statusCode Código HTTP
+     * @return bool
+     */
+    private function isRetryableError(int $statusCode): bool
+    {
+        // Erros de servidor (5xx) são recuperáveis
+        if ($statusCode >= 500) {
+            return true;
+        }
+        
+        // Rate limit (429) é recuperável
+        if ($statusCode === 429) {
+            return true;
+        }
+        
+        // Timeout gateway (504) é recuperável
+        if ($statusCode === 504) {
+            return true;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Cria cliente HTTP configurado com timeout e retry
+     * 
+     * @return \Illuminate\Http\Client\PendingRequest
+     */
+    private function createHttpClient(): \Illuminate\Http\Client\PendingRequest
+    {
+        return Http::timeout($this->timeout)
+            ->connectTimeout($this->connectTimeout);
     }
 }

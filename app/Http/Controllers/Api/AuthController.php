@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Models\UsersKey;
 use App\Constants\UserStatus;
 use App\Helpers\{UserStatusHelper, AppSettingsHelper};
+use App\Services\JWTService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
@@ -16,15 +17,19 @@ use PragmaRX\Google2FA\Google2FA;
 
 class AuthController extends Controller
 {
+    private JWTService $jwtService;
+    
+    public function __construct(JWTService $jwtService)
+    {
+        $this->jwtService = $jwtService;
+    }
+    
     /**
      * Login do usuário via API
      */
     public function login(Request $request)
     {
         try {
-            // Headers CORS para permitir requisições do app mobile
-            $response = response();
-            
             // Validar dados de entrada
             $validator = Validator::make($request->all(), [
                 'username' => 'required|string',
@@ -32,13 +37,11 @@ class AuthController extends Controller
             ]);
 
             if ($validator->fails()) {
-                return $response->json([
+                return response()->json([
                     'success' => false,
                     'message' => 'Dados inválidos',
                     'errors' => $validator->errors()
-                ], 400)->header('Access-Control-Allow-Origin', '*')
-                  ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
-                  ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+                ], 400);
             }
 
             $username = $request->input('username');
@@ -86,33 +89,25 @@ class AuthController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Sua conta foi desativada ou bloqueada. Entre em contato com o suporte.'
-                ], 403)->header('Access-Control-Allow-Origin', '*')
-                  ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
-                  ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+                ], 403);
             }
 
             // Verificar se o usuário tem 2FA ativo (PIN-based)
             if ($user->twofa_enabled && $user->twofa_pin) {
-                // Gerar token temporário para verificação 2FA
-                $tempToken = base64_encode(json_encode([
-                    'user_id' => $user->username,
-                    'temp' => true,
-                    'expires_at' => now()->addMinutes(5)->timestamp
-                ]));
+                // Gerar token temporário para verificação 2FA (usando JWT real)
+                $tempToken = $this->jwtService->generate2FAToken($user->username);
 
                 Log::info('Login requer verificação 2FA', [
                     'username' => $username,
                     'ip' => $request->ip()
                 ]);
 
-                return $response->json([
+                return response()->json([
                     'success' => false,
                     'requires_2fa' => true,
                     'message' => 'Digite o código de 6 dígitos do seu app autenticador',
                     'temp_token' => $tempToken
-                ], 200)->header('Access-Control-Allow-Origin', '*')
-                  ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
-                  ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+                ], 200);
             }
 
             // Buscar as chaves do usuário
@@ -130,20 +125,18 @@ class AuthController extends Controller
                 ], 401);
             }
 
-            // Gerar token JWT simples (você pode usar uma biblioteca JWT real)
-            $token = base64_encode(json_encode([
-                'user_id' => $user->username,
-                'token' => $userKeys->token,
-                'secret' => $userKeys->secret,
-                'expires_at' => now()->addHours(24)->timestamp
-            ]));
+            // Gerar token JWT real com assinatura criptográfica
+            // Não incluímos dados sensíveis (token/secret) no JWT!
+            $token = $this->jwtService->generateToken($user->username, [
+                'permission' => $user->permission,
+            ]);
 
             Log::info('Login bem-sucedido via API', [
                 'username' => $username,
                 'ip' => $request->ip()
             ]);
 
-            return $response->json([
+            return response()->json([
                 'success' => true,
                 'message' => 'Login realizado com sucesso',
                 'data' => [
@@ -160,9 +153,7 @@ class AuthController extends Controller
                     'api_token' => $userKeys->token,
                     'api_secret' => $userKeys->secret,
                 ]
-            ])->header('Access-Control-Allow-Origin', '*')
-              ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
-              ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+            ]);
 
         } catch (\Exception $e) {
             Log::error('Erro no login da API', [
@@ -194,31 +185,39 @@ class AuthController extends Controller
                     'success' => false,
                     'message' => 'Dados inválidos',
                     'errors' => $validator->errors()
-                ], 400)->header('Access-Control-Allow-Origin', '*');
+                ], 400);
             }
 
             $tempToken = $request->input('temp_token');
             $code = $request->input('code');
 
-            // Decodificar token temporário
-            $decoded = json_decode(base64_decode($tempToken), true);
+            // Validar token temporário usando JWT real
+            $decoded = $this->jwtService->validateToken($tempToken);
             
-            if (!$decoded || !isset($decoded['temp']) || !$decoded['temp'] || 
-                !isset($decoded['expires_at']) || $decoded['expires_at'] < now()->timestamp) {
+            if (!$decoded) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Token temporário expirado ou inválido'
-                ], 401)->header('Access-Control-Allow-Origin', '*');
+                ], 401);
+            }
+            
+            // Verificar se é realmente um token temporário para 2FA
+            if (!isset($decoded->temp) || $decoded->temp !== true || 
+                !isset($decoded->purpose) || $decoded->purpose !== '2fa_verification') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Token temporário inválido'
+                ], 401);
             }
 
             // Buscar usuário
-            $user = User::where('username', $decoded['user_id'])->first();
+            $user = User::where('username', $decoded->sub)->first();
             
             if (!$user || !$user->twofa_enabled || !$user->twofa_pin) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Usuário não encontrado ou 2FA não configurado'
-                ], 401)->header('Access-Control-Allow-Origin', '*');
+                ], 401);
             }
 
             // Verificar se usuário pode fazer login
@@ -233,7 +232,7 @@ class AuthController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Sua conta foi desativada ou bloqueada. Entre em contato com o suporte.'
-                ], 403)->header('Access-Control-Allow-Origin', '*');
+                ], 403);
             }
 
             // Verificar PIN 2FA
@@ -248,7 +247,7 @@ class AuthController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Código inválido'
-                ], 400)->header('Access-Control-Allow-Origin', '*');
+                ], 400);
             }
 
             // Buscar as chaves do usuário
@@ -258,16 +257,13 @@ class AuthController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Usuário sem chaves de API configuradas'
-                ], 401)->header('Access-Control-Allow-Origin', '*');
+                ], 401);
             }
 
-            // Gerar token final
-            $token = base64_encode(json_encode([
-                'user_id' => $user->username,
-                'token' => $userKeys->token,
-                'secret' => $userKeys->secret,
-                'expires_at' => now()->addHours(24)->timestamp
-            ]));
+            // Gerar token JWT final (sem dados sensíveis!)
+            $token = $this->jwtService->generateToken($user->username, [
+                'permission' => $user->permission,
+            ]);
 
             Log::info('Login 2FA bem-sucedido via API', [
                 'username' => $user->username,
@@ -291,9 +287,7 @@ class AuthController extends Controller
                     'api_token' => $userKeys->token,
                     'api_secret' => $userKeys->secret,
                 ]
-            ])->header('Access-Control-Allow-Origin', '*')
-              ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
-              ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+            ]);
 
         } catch (\Exception $e) {
             Log::error('Erro na verificação 2FA da API', [
@@ -304,7 +298,7 @@ class AuthController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Erro interno do servidor'
-            ], 500)->header('Access-Control-Allow-Origin', '*');
+            ], 500);
         }
     }
 
@@ -376,15 +370,18 @@ class AuthController extends Controller
      */
     public function logout(Request $request)
     {
-        // Com token simples, não há muito o que fazer no logout
-        // Em uma implementação JWT real, você invalidaria o token
+        // Com JWT stateless, não há como invalidar o token no servidor
+        // Para uma implementação completa, seria necessário uma blacklist em cache/banco
+        // Por enquanto, o frontend deve remover o token localmente
+        
+        Log::info('Logout realizado', [
+            'ip' => $request->ip(),
+        ]);
         
         return response()->json([
             'success' => true,
             'message' => 'Logout realizado com sucesso'
-        ])->header('Access-Control-Allow-Origin', '*')
-          ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
-          ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        ]);
     }
 
     /**
@@ -393,7 +390,6 @@ class AuthController extends Controller
     public function register(RegisterUserRequest $request)
     {
         try {
-
 
             $senhaHash = Hash::make($request->password);
 
@@ -482,14 +478,14 @@ class AuthController extends Controller
             ]);
 
             // Criar chaves de API para o usuário
-            $token = \Illuminate\Support\Str::uuid()->toString();
-            $secret = \Illuminate\Support\Str::uuid()->toString();
+            $apiToken = \Illuminate\Support\Str::uuid()->toString();
+            $apiSecret = \Illuminate\Support\Str::uuid()->toString();
             $user_id = $user->user_id;
 
             UsersKey::create([
                 'user_id' => $user_id,
-                'token' => $token,
-                'secret' => $secret,
+                'token' => $apiToken,
+                'secret' => $apiSecret,
                 'status' => 'active' // Campo obrigatório na tabela users_key
             ]);
 
@@ -570,13 +566,10 @@ class AuthController extends Controller
             // Buscar as chaves criadas
             $userKeys = UsersKey::where('user_id', $user->user_id)->first();
 
-            // Gerar token de autenticação
-            $authToken = base64_encode(json_encode([
-                'user_id' => $user->username,
-                'token' => $userKeys->token,
-                'secret' => $userKeys->secret,
-                'expires_at' => now()->addHours(24)->timestamp
-            ]));
+            // Gerar token JWT de autenticação (sem dados sensíveis!)
+            $authToken = $this->jwtService->generateToken($user->username, [
+                'permission' => $user->permission,
+            ]);
 
             return response()->json([
                 'success' => true,
@@ -596,9 +589,7 @@ class AuthController extends Controller
                     'api_secret' => $userKeys->secret,
                     'pending_approval' => true
                 ]
-            ], 201)->header('Access-Control-Allow-Origin', '*')
-              ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
-              ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+            ], 201);
 
         } catch (\Exception $e) {
             Log::error('Erro no registro via API', [
@@ -617,7 +608,7 @@ class AuthController extends Controller
                 'success' => false,
                 'message' => 'Erro interno do servidor',
                 'error' => app()->environment('local') ? $e->getMessage() : null
-            ], 500)->header('Access-Control-Allow-Origin', '*');
+            ], 500);
         }
     }
 
@@ -662,9 +653,7 @@ class AuthController extends Controller
                     'success' => false,
                     'message' => 'Dados já existentes',
                     'errors' => $errorMessages
-                ], 422)->header('Access-Control-Allow-Origin', '*')
-                  ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
-                  ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+                ], 422);
             }
 
             return response()->json([
@@ -676,9 +665,7 @@ class AuthController extends Controller
                     'telefone_available' => !$request->has('telefone') || $request->telefone === '',
                     'cpf_cnpj_available' => !$request->has('cpf_cnpj') || $request->cpf_cnpj === ''
                 ]
-            ])->header('Access-Control-Allow-Origin', '*')
-              ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
-              ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+            ]);
 
         } catch (\Exception $e) {
             Log::error('Erro na validação de dados únicos', [
@@ -689,7 +676,7 @@ class AuthController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Erro interno do servidor'
-            ], 500)->header('Access-Control-Allow-Origin', '*');
+            ], 500);
         }
     }
 }

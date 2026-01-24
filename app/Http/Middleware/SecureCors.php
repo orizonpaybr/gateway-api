@@ -16,6 +16,8 @@ use Symfony\Component\HttpFoundation\Response;
  * Configuração (.env):
  * FRONTEND_URL=http://localhost:3000 (desenvolvimento)
  * FRONTEND_URL=https://app.orizon.com (produção)
+ * 
+ * IMPORTANTE: Em produção, NUNCA usar Access-Control-Allow-Origin: *
  */
 class SecureCors
 {
@@ -49,30 +51,31 @@ class SecureCors
         
         // Em produção, usar apenas a URL configurada
         if (app()->environment('production')) {
-            return [$frontendUrl];
+            return array_filter([$frontendUrl]);
         }
 
         // Em desenvolvimento, permitir localhost em várias portas
         $origins = [$frontendUrl];
         
-        // Adicionar variações comuns de localhost
-        if (str_contains($frontendUrl, 'localhost')) {
-            $origins[] = 'http://localhost:3000';
-            $origins[] = 'http://localhost:3001';
-            $origins[] = 'http://127.0.0.1:3000';
-            $origins[] = 'http://127.0.0.1:3001';
-        }
+        // Adicionar variações comuns de localhost apenas em dev
+        $origins[] = 'http://localhost:3000';
+        $origins[] = 'http://localhost:3001';
+        $origins[] = 'http://localhost:5173'; // Vite default
+        $origins[] = 'http://127.0.0.1:3000';
+        $origins[] = 'http://127.0.0.1:3001';
+        $origins[] = 'http://127.0.0.1:5173';
 
-        return array_unique($origins);
+        return array_unique(array_filter($origins));
     }
 
     /**
      * Verificar se a origem é permitida
      */
-    private function isOriginAllowed(string $origin, array $allowedOrigins): bool
+    private function isOriginAllowed(?string $origin, array $allowedOrigins): bool
     {
         if (empty($origin)) {
-            return false;
+            // Requisições sem Origin (ex: Postman, curl) - permitir em dev
+            return !app()->environment('production');
         }
 
         foreach ($allowedOrigins as $allowed) {
@@ -89,17 +92,37 @@ class SecureCors
      */
     private function handlePreflight(array $allowedOrigins, ?string $origin): Response
     {
-        $originHeader = '*';
+        // Verificar se a origem é permitida
+        if (!$this->isOriginAllowed($origin, $allowedOrigins)) {
+            // Em produção, retornar 403 para origens não permitidas
+            if (app()->environment('production')) {
+                Log::warning('[CORS] Preflight rejeitado - Origem não permitida', [
+                    'origin' => $origin,
+                    'allowed_origins' => $allowedOrigins,
+                    'ip' => request()->ip(),
+                ]);
+                
+                return response()->json([
+                    'error' => 'Origin not allowed'
+                ], 403);
+            }
+        }
+
+        // Usar a origem específica, nunca '*' em produção
+        $originHeader = $origin ?: (app()->environment('production') ? '' : '*');
         
-        // Se a origem é permitida, usar ela no header
-        if ($origin && $this->isOriginAllowed($origin, $allowedOrigins)) {
-            $originHeader = $origin;
+        // Se não há origem válida em produção, não adicionar header
+        if (app()->environment('production') && empty($origin)) {
+            return response('', 200)
+                ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS')
+                ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept')
+                ->header('Access-Control-Max-Age', '86400');
         }
 
         return response('', 200)
             ->header('Access-Control-Allow-Origin', $originHeader)
             ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS')
-            ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With')
+            ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept')
             ->header('Access-Control-Allow-Credentials', 'true')
             ->header('Access-Control-Max-Age', '86400'); // Cache por 24 horas
     }
@@ -109,22 +132,28 @@ class SecureCors
      */
     private function addCorsHeaders(Response $response, array $allowedOrigins, ?string $origin): Response
     {
-        // Se não há origem na requisição, não adicionar headers CORS
-        if (empty($origin)) {
+        // Se não há origem na requisição em produção, não adicionar headers CORS
+        if (app()->environment('production') && empty($origin)) {
             return $response;
         }
 
         // Se a origem é permitida, adicionar header com a origem específica
         if ($this->isOriginAllowed($origin, $allowedOrigins)) {
-            $response->headers->set('Access-Control-Allow-Origin', $origin);
-            $response->headers->set('Access-Control-Allow-Credentials', 'true');
+            // Usar origem específica, nunca '*'
+            $originToUse = $origin ?: (app()->environment('production') ? '' : '*');
+            
+            if (!empty($originToUse)) {
+                $response->headers->set('Access-Control-Allow-Origin', $originToUse);
+                $response->headers->set('Access-Control-Allow-Credentials', 'true');
+            }
         } else {
-            // Em produção, rejeitar origens não permitidas (log para auditoria)
-            if (app()->environment('production')) {
+            // Em produção, logar origens não permitidas
+            if (app()->environment('production') && !empty($origin)) {
                 Log::warning('[CORS] Origem não permitida', [
                     'origin' => $origin,
                     'allowed_origins' => $allowedOrigins,
                     'ip' => request()->ip(),
+                    'path' => request()->path(),
                 ]);
             }
         }
