@@ -32,7 +32,7 @@ class GatewaySettingsService
                     'taxa_fixa_pix' => 1.00,
                     'taxa_fixa_padrao_cash_out' => 0.00,
                     'saque_minimo' => 5.00,
-                    'limite_saque_mensal' => 50000.00,
+                    'limite_saque_mensal' => 10000000.00, // 10 milhões de reais
                 ]);
             }
             
@@ -96,7 +96,7 @@ class GatewaySettingsService
             
             // Taxas de Saque PIX (apenas fixa em centavos)
             'taxa_fixa_pix' => (float) ($settings->taxa_fixa_pix ?? 1.00),
-            'limite_mensal_pf' => (float) ($settings->limite_saque_mensal ?? 50000.00),
+            'limite_mensal_pf' => (float) ($settings->limite_saque_mensal ?? 10000000.00), // 10 milhões de reais
             
             // Personalização de Relatórios - Entradas
             'relatorio_entradas_mostrar_meio' => (bool) ($settings->relatorio_entradas_mostrar_meio ?? true),

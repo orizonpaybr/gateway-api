@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::table('app', function (Blueprint $table) {
             if (!Schema::hasColumn('app', 'limite_saque_mensal')) {
                 $table->decimal('limite_saque_mensal', 12, 2)
-                    ->default(50000.00)
+                    ->default(10000000.00) // 10 milhões de reais
                     ->after('saque_minimo')
                     ->comment('Limite máximo de saques mensais para pessoa física');
             }

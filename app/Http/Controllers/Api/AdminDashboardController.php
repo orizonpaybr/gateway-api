@@ -897,7 +897,7 @@ class AdminDashboardController extends Controller
                 // Limites
                 'limite_mensal_pf' => (float) ($user->limite_mensal_pf !== null
                     ? $user->limite_mensal_pf 
-                    : ($setting->limite_saque_mensal ?? 50000.00)),
+                    : ($setting->limite_saque_mensal ?? 10000000.00)), // 10 milhões de reais
                 // Afiliados
                 'is_affiliate' => (bool) ($user->is_affiliate ?? false),
                 'affiliate_percentage' => (float) ($user->affiliate_percentage ?? 0),
@@ -942,7 +942,7 @@ class AdminDashboardController extends Controller
                 // Taxa fixa de saque
                 'taxa_fixa_pix' => (float) ($setting->taxa_fixa_pix ?? 0.00),
                 // Limites
-                'limite_mensal_pf' => (float) ($setting->limite_saque_mensal ?? 50000.00),
+                'limite_mensal_pf' => (float) ($setting->limite_saque_mensal ?? 10000000.00), // 10 milhões de reais
             ];
             
             return $this->successResponse(['fees' => $defaultFees]);

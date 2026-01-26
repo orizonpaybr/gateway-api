@@ -40,7 +40,7 @@ class DashboardDataSeeder extends Seeder
                 'deposito_minimo' => 10.00,
                 'saque_minimo' => 50.00,
                 'taxa_fixa_padrao_cash_out' => 2.50,
-                'limite_saque_mensal' => 50000.00,
+                'limite_saque_mensal' => 10000000.00, // 10 milhões de reais
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
