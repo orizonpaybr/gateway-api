@@ -114,16 +114,6 @@ class SaqueController extends Controller
             ], 422); // Status code 422 para erros de validação
         }
 
-        // Verificar valor mínimo de saque - priorizar configuração específica do usuário
-        $valorMinimoSaque = $user->valor_minimo_saque ?? $setting->saque_minimo;
-        
-        if ($request->amount < $valorMinimoSaque) {
-            $saqueminimo = "R$ " . number_format($valorMinimoSaque, '2', ',', '.');
-            return response()->json([
-                'status' => 'error',
-                'message' => "O saque mínimo é de $saqueminimo.",
-            ], 401);
-        }
 
         // Verificar se o saque automático está ativo
         if ($setting->saque_automatico) {
@@ -239,18 +229,15 @@ class SaqueController extends Controller
             $pixKey = $request->pixKey;
             $pixKeyType = $request->pixKeyType;
             $description = $request->input('description', 'Saque via PIX');
-
-            // Obter taxa da TREEAL
-            $taxaTreeal = $treealConfig->taxa_pix_cash_out ?? 0.00;
             
-            // Calcular taxas usando o Helper centralizado (garante consistência)
-            // Agora considera também a taxa da adquirente (TREEAL)
+            // Calcular taxas usando o Helper centralizado
+            // O helper obtém o custo da TREEAL automaticamente do config
             // isInterfaceWeb = true para saques via dashboard, false para API
             $isInterfaceWeb = !$request->has('api_key'); // Se não tem api_key, é interface web
-            $taxaCalculada = \App\Helpers\TaxaSaqueHelper::calcularTaxaSaque($amount, $setting, $user, $isInterfaceWeb, false, $taxaTreeal);
-            $taxaTotal = $taxaCalculada['taxa_cash_out'];
-            $taxaAplicacao = $taxaCalculada['taxa_aplicacao'] ?? $taxaTotal;
-            $taxaAdquirente = $taxaCalculada['taxa_adquirente'] ?? 0.00;
+            $taxaCalculada = \App\Helpers\TaxaSaqueHelper::calcularTaxaSaque($amount, $setting, $user, $isInterfaceWeb);
+            $taxaTotal = $taxaCalculada['taxa_cash_out'];          // Taxa total cobrada do cliente
+            $taxaAplicacao = $taxaCalculada['taxa_aplicacao'];     // Lucro líquido da aplicação
+            $taxaAdquirente = $taxaCalculada['taxa_adquirente'];   // Custo da TREEAL
             $cashOutLiquido = $taxaCalculada['saque_liquido'];
             $valorTotalDescontar = $taxaCalculada['valor_total_descontar'];
 

@@ -884,52 +884,20 @@ class AdminDashboardController extends Controller
                     'rg_verso' => $user->foto_rg_verso,
                     'selfie_rg' => $user->selfie_rg,
                 ],
-                // Taxas - SEMPRE retornar valores salvos no banco (se existirem), senão usar padrão
-                // Converter para float para garantir que retorne número e não string
+                // Taxas fixas (em centavos) - SEMPRE retornar valores salvos no banco (se existirem), senão usar padrão
                 'taxas_personalizadas_ativas' => $usandoPersonalizadas,
-                'taxa_percentual_deposito' => (float) ($user->taxa_percentual_deposito !== null 
-                    ? $user->taxa_percentual_deposito 
-                    : ($setting->taxa_cash_in_padrao ?? 4.00)),
+                // Taxa fixa de depósito
                 'taxa_fixa_deposito' => (float) ($user->taxa_fixa_deposito !== null 
                     ? $user->taxa_fixa_deposito 
                     : ($setting->taxa_fixa_padrao ?? 0.00)),
-                'valor_minimo_deposito' => (float) ($user->valor_minimo_deposito !== null
-                    ? $user->valor_minimo_deposito 
-                    : ($setting->deposito_minimo ?? 1.00)),
-                // Taxas - Saque
-                'taxa_percentual_pix' => (float) ($user->taxa_percentual_pix !== null
-                    ? $user->taxa_percentual_pix 
-                    : ($setting->taxa_cash_out_padrao ?? 4.00)),
-                'taxa_minima_pix' => (float) ($user->taxa_minima_pix !== null
-                    ? $user->taxa_minima_pix 
-                    : 0.80),
+                // Taxa fixa de saque
                 'taxa_fixa_pix' => (float) ($user->taxa_fixa_pix !== null
                     ? $user->taxa_fixa_pix 
                     : ($setting->taxa_fixa_pix ?? 0.00)),
-                'valor_minimo_saque' => (float) ($user->valor_minimo_saque !== null
-                    ? $user->valor_minimo_saque 
-                    : ($setting->saque_minimo ?? 1.00)),
-                // Limites e extras
+                // Limites
                 'limite_mensal_pf' => (float) ($user->limite_mensal_pf !== null
                     ? $user->limite_mensal_pf 
                     : ($setting->limite_saque_mensal ?? 50000.00)),
-                'taxa_saque_api' => (float) ($user->taxa_saque_api !== null
-                    ? $user->taxa_saque_api 
-                    : ($setting->taxa_saque_api_padrao ?? 5.00)),
-                'taxa_saque_crypto' => (float) ($user->taxa_saque_crypto !== null
-                    ? $user->taxa_saque_crypto 
-                    : ($setting->taxa_saque_cripto_padrao ?? 1.00)),
-                // Sistema Flexível
-                'sistema_flexivel_ativo' => (bool) ($user->sistema_flexivel_ativo ?? false),
-                'valor_minimo_flexivel' => (float) ($user->valor_minimo_flexivel !== null
-                    ? $user->valor_minimo_flexivel 
-                    : ($setting->taxa_flexivel_valor_minimo ?? 15.00)),
-                'taxa_fixa_baixos' => (float) ($user->taxa_fixa_baixos !== null
-                    ? $user->taxa_fixa_baixos 
-                    : ($setting->taxa_flexivel_fixa_baixo ?? 1.00)),
-                'taxa_percentual_altos' => (float) ($user->taxa_percentual_altos !== null
-                    ? $user->taxa_percentual_altos 
-                    : ($setting->taxa_flexivel_percentual_alto ?? 4.00)),
                 // Afiliados
                 'is_affiliate' => (bool) ($user->is_affiliate ?? false),
                 'affiliate_percentage' => (float) ($user->affiliate_percentage ?? 0),
@@ -967,26 +935,14 @@ class AdminDashboardController extends Controller
                 return $this->errorResponse('Configurações do sistema não encontradas', 404);
             }
             
-            // Retornar todas as taxas padrão do sistema
+            // Retornar taxas padrão do sistema (apenas fixas em centavos)
             $defaultFees = [
-                // Taxas de depósito
-                'taxa_percentual_deposito' => (float) ($setting->taxa_cash_in_padrao ?? 4.00),
+                // Taxa fixa de depósito
                 'taxa_fixa_deposito' => (float) ($setting->taxa_fixa_padrao ?? 0.00),
-                'valor_minimo_deposito' => (float) ($setting->deposito_minimo ?? 1.00),
-                // Taxas de saque
-                'taxa_percentual_pix' => (float) ($setting->taxa_cash_out_padrao ?? 4.00),
-                'taxa_minima_pix' => 0.80, // Valor fixo padrão
+                // Taxa fixa de saque
                 'taxa_fixa_pix' => (float) ($setting->taxa_fixa_pix ?? 0.00),
-                'valor_minimo_saque' => (float) ($setting->saque_minimo ?? 1.00),
-                // Limites e extras
+                // Limites
                 'limite_mensal_pf' => (float) ($setting->limite_saque_mensal ?? 50000.00),
-                'taxa_saque_api' => (float) ($setting->taxa_saque_api_padrao ?? 5.00),
-                'taxa_saque_crypto' => (float) ($setting->taxa_saque_cripto_padrao ?? 1.00),
-                // Sistema flexível
-                'sistema_flexivel_ativo' => (bool) ($setting->taxa_flexivel_ativa ?? false),
-                'valor_minimo_flexivel' => (float) ($setting->taxa_flexivel_valor_minimo ?? 15.00),
-                'taxa_fixa_baixos' => (float) ($setting->taxa_flexivel_fixa_baixo ?? 1.00),
-                'taxa_percentual_altos' => (float) ($setting->taxa_flexivel_percentual_alto ?? 4.00),
             ];
             
             return $this->successResponse(['fees' => $defaultFees]);
@@ -1041,7 +997,7 @@ class AdminDashboardController extends Controller
             $taxFields = [
                 'taxas_personalizadas_ativas', 'taxa_percentual_deposito', 'taxa_fixa_deposito',
                 'valor_minimo_deposito', 'taxa_percentual_pix', 'taxa_minima_pix', 'taxa_fixa_pix',
-                'valor_minimo_saque', 'limite_mensal_pf', 'taxa_saque_api', 'taxa_saque_crypto',
+                'limite_mensal_pf', 'taxa_saque_api', 'taxa_saque_crypto',
                 'sistema_flexivel_ativo', 'valor_minimo_flexivel', 'taxa_fixa_baixos', 'taxa_percentual_altos'
             ];
             

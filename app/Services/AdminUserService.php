@@ -191,14 +191,9 @@ class AdminUserService
                 'cep', 'rua', 'estado', 'cidade', 'bairro', 'numero_residencia', 'complemento',
                 'media_faturamento', 'taxa_cash_in', 'taxa_cash_out', 
                 'taxa_cash_in_fixa', 'taxa_cash_out_fixa', 'gerente_id', 'gerente_percentage',
-                'taxas_personalizadas_ativas', 'taxa_percentual_deposito', 'taxa_fixa_deposito',
-                'valor_minimo_deposito', 'taxa_percentual_pix', 'taxa_minima_pix', 'taxa_fixa_pix',
-                'valor_minimo_saque', 'limite_mensal_pf',
-                // Saque API/Cripto
-                'taxa_saque_api', 'taxa_saque_crypto',
-                // Sistema flexível
-                'sistema_flexivel_ativo', 'valor_minimo_flexivel', 'taxa_fixa_baixos', 'taxa_percentual_altos',
-                'taxa_flexivel_ativa', 'taxa_flexivel_valor_minimo', 'taxa_flexivel_fixa_baixo', 'taxa_flexivel_percentual_alto',
+                // Taxas fixas (em centavos)
+                'taxas_personalizadas_ativas', 'taxa_fixa_deposito', 'taxa_fixa_pix',
+                'limite_mensal_pf',
                 // Observações
                 'observacoes_taxas',
                 // Adquirentes / overrides

@@ -2304,6 +2304,7 @@ class UserController extends Controller
 
     /**
      * Obter taxas de depósito (personalizadas ou globais)
+     * Sistema simplificado: apenas taxa fixa em centavos
      *
      * @param \App\Models\User $user
      * @param \App\Models\App $setting
@@ -2313,52 +2314,21 @@ class UserController extends Controller
     private function getDepositTaxes($user, $setting, bool $hasPersonalizedTaxes): array
     {
         if ($hasPersonalizedTaxes) {
-            // Taxas personalizadas do usuário
-            $percent = (float) ($user->taxa_percentual_deposito ?? $setting->taxa_cash_in_padrao ?? 0);
-            $fixed = (float) ($user->taxa_fixa_deposito ?? 0);
-            
-            // Verificar se sistema flexível está ativo para o usuário
-            $isFlexibleActive = $user->sistema_flexivel_ativo ?? false;
-            
-            if ($isFlexibleActive) {
-                return [
-                    'fixed' => (float) ($user->taxa_fixa_baixos ?? $setting->taxa_flexivel_fixa_baixo ?? 0),
-                    'percent' => 0, // Não aplicável em sistema flexível
-                    'after_limit_fixed' => (float) ($user->taxa_fixa_deposito ?? 0),
-                    'after_limit_percent' => (float) ($user->taxa_percentual_altos ?? $setting->taxa_flexivel_percentual_alto ?? 0),
-                ];
-            }
-            
-            return [
-                'fixed' => $fixed,
-                'percent' => $percent,
-                'after_limit_fixed' => 0,
-                'after_limit_percent' => 0,
-            ];
-        }
-
-        // Taxas globais do sistema
-        $isFlexibleActive = $setting->taxa_flexivel_ativa ?? false;
-        
-        if ($isFlexibleActive) {
-            return [
-                'fixed' => (float) ($setting->taxa_flexivel_fixa_baixo ?? 0),
-                'percent' => 0, // Não aplicável em sistema flexível
-                'after_limit_fixed' => (float) ($setting->taxa_fixa_padrao ?? 0),
-                'after_limit_percent' => (float) ($setting->taxa_flexivel_percentual_alto ?? 0),
-            ];
+            // Taxa fixa personalizada do usuário
+            $fixed = (float) ($user->taxa_fixa_deposito ?? $setting->taxa_fixa_padrao ?? 0);
+        } else {
+            // Taxa fixa global do sistema
+            $fixed = (float) ($setting->taxa_fixa_padrao ?? 0);
         }
 
         return [
-            'fixed' => (float) ($setting->taxa_fixa_padrao ?? 0),
-            'percent' => (float) ($setting->taxa_cash_in_padrao ?? 0),
-            'after_limit_fixed' => 0,
-            'after_limit_percent' => 0,
+            'fixed' => $fixed,
         ];
     }
 
     /**
      * Obter taxas de saque (personalizadas ou globais)
+     * Sistema simplificado: apenas taxa fixa em centavos
      *
      * @param \App\Models\User $user
      * @param \App\Models\App $setting
@@ -2368,31 +2338,19 @@ class UserController extends Controller
     private function getWithdrawTaxes($user, $setting, bool $hasPersonalizedTaxes): array
     {
         if ($hasPersonalizedTaxes) {
-            // Taxas personalizadas do usuário
-            $dashboardPercent = (float) ($user->taxa_percentual_pix ?? $setting->taxa_cash_out_padrao ?? 0);
-            $dashboardFixed = (float) ($user->taxa_fixa_pix ?? 0);
-            $apiPercent = (float) ($user->taxa_saque_api ?? $setting->taxa_saque_api_padrao ?? $setting->taxa_cash_out_padrao ?? 0);
-            $apiFixed = (float) ($user->taxa_fixa_pix ?? 0);
+            // Taxa fixa personalizada do usuário
+            $fixed = (float) ($user->taxa_fixa_pix ?? $setting->taxa_fixa_pix ?? 0);
         } else {
-            // Taxas globais do sistema
-            $dashboardPercent = (float) ($setting->taxa_cash_out_padrao ?? 0);
-            $dashboardFixed = (float) ($setting->taxa_fixa_pix ?? 0);
-            $apiPercent = (float) ($setting->taxa_saque_api_padrao ?? $setting->taxa_cash_out_padrao ?? 0);
-            $apiFixed = (float) ($setting->taxa_fixa_pix ?? 0);
+            // Taxa fixa global do sistema
+            $fixed = (float) ($setting->taxa_fixa_pix ?? 0);
         }
 
         return [
             'dashboard' => [
-                'fixed' => $dashboardFixed,
-                'percent' => $dashboardPercent,
-                'after_limit_fixed' => 0, // Não há sistema de limite para saques
-                'after_limit_percent' => 0,
+                'fixed' => $fixed,
             ],
             'api' => [
-                'fixed' => $apiFixed,
-                'percent' => $apiPercent,
-                'after_limit_fixed' => 0, // Não há sistema de limite para saques
-                'after_limit_percent' => 0,
+                'fixed' => $fixed,
             ],
         ];
     }
@@ -2414,6 +2372,7 @@ class UserController extends Controller
 
     /**
      * Retornar estrutura padrão de taxas quando não há configurações
+     * Sistema simplificado: apenas taxas fixas em centavos
      *
      * @return array
      */
@@ -2422,22 +2381,13 @@ class UserController extends Controller
         return [
             'deposit' => [
                 'fixed' => 0,
-                'percent' => 0,
-                'after_limit_fixed' => 0,
-                'after_limit_percent' => 0,
             ],
             'withdraw' => [
                 'dashboard' => [
                     'fixed' => 0,
-                    'percent' => 0,
-                    'after_limit_fixed' => 0,
-                    'after_limit_percent' => 0,
                 ],
                 'api' => [
                     'fixed' => 0,
-                    'percent' => 0,
-                    'after_limit_fixed' => 0,
-                    'after_limit_percent' => 0,
                 ],
             ],
             'affiliate' => [

@@ -54,16 +54,6 @@ class DepositController extends Controller
             return response()->json(['status' => 'error', 'message' => 'Nenhum adquirente configurado.'], 500);
         }
 
-        // Verificar valor mínimo de depósito - priorizar configuração específica do usuário
-        $valorMinimoDeposito = $user->valor_minimo_deposito ?? $setting->deposito_minimo;
-        
-        if ($valorMinimoDeposito > 0 && $request->amount < $valorMinimoDeposito) {
-            $valorret = number_format($valorMinimoDeposito, '2', ',', '.');
-            return response()->json([
-                'status' => 'error',
-                'message' => "O valor mínimo de depósito é de R$ $valorret."
-            ], 401);
-        }
         try {
             $validated = $request->validate([
                 'token' => ['required', 'string'],
@@ -206,16 +196,7 @@ class DepositController extends Controller
                 'save_card' => ['nullable', 'boolean'],
             ]);
 
-            // Verificar valor mínimo
             $setting = App::first();
-            $valorMinimoDeposito = $user->valor_minimo_deposito ?? $setting->deposito_minimo ?? 1;
-            
-            if ($request->amount < $valorMinimoDeposito) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => "O valor mínimo de depósito é de R$ " . number_format($valorMinimoDeposito, 2, ',', '.')
-                ], 400);
-            }
 
             // Criar DTO
             $dto = CardDepositDTO::fromRequest($request);
@@ -547,16 +528,13 @@ class DepositController extends Controller
             $amount = (float) $request->amount;
             $description = $request->input('description', 'Depósito via PIX');
             
-            // Obter taxa da TREEAL
-            $taxaTreeal = $treealConfig->taxa_pix_cash_in ?? 0.00;
-            
-            // Calcular taxas usando o Helper centralizado (garante consistência)
-            // Agora considera também a taxa da adquirente (TREEAL)
-            $taxaCalculada = \App\Helpers\TaxaFlexivelHelper::calcularTaxaDeposito($amount, $setting, $user, $taxaTreeal);
+            // Calcular taxas usando o Helper centralizado
+            // O helper obtém o custo da TREEAL automaticamente do config
+            $taxaCalculada = \App\Helpers\TaxaFlexivelHelper::calcularTaxaDeposito($amount, $setting, $user);
             $depositoLiquido = $taxaCalculada['deposito_liquido'];
-            $taxaTotal = $taxaCalculada['taxa_cash_in'];
-            $taxaAplicacao = $taxaCalculada['taxa_aplicacao'] ?? $taxaTotal;
-            $taxaAdquirente = $taxaCalculada['taxa_adquirente'] ?? 0.00;
+            $taxaTotal = $taxaCalculada['taxa_cash_in'];          // Taxa total cobrada do cliente
+            $taxaAplicacao = $taxaCalculada['taxa_aplicacao'];    // Lucro líquido da aplicação
+            $taxaAdquirente = $taxaCalculada['taxa_adquirente'];  // Custo da TREEAL
             $descricaoTaxa = $taxaCalculada['descricao'];
 
             // Gerar QR Code usando TreealService

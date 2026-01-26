@@ -103,41 +103,16 @@ trait UserRequestTrait
     }
     
     /**
-     * Regras para taxas personalizadas
+     * Regras para taxas personalizadas (apenas taxas fixas em centavos)
      */
     protected function customFeesRules(): array
     {
         return [
             'taxas_personalizadas_ativas' => 'nullable|boolean',
-            'taxa_percentual_deposito' => 'nullable|numeric|min:0|max:100',
             'taxa_fixa_deposito' => 'nullable|numeric|min:0',
-            'valor_minimo_deposito' => 'nullable|numeric|min:0',
-            'taxa_percentual_pix' => 'nullable|numeric|min:0|max:100',
-            'taxa_minima_pix' => 'nullable|numeric|min:0',
             'taxa_fixa_pix' => 'nullable|numeric|min:0',
-            'valor_minimo_saque' => 'nullable|numeric|min:0',
             'limite_mensal_pf' => 'nullable|numeric|min:0',
-            'taxa_saque_api' => 'nullable|numeric|min:0|max:100',
-            'taxa_saque_crypto' => 'nullable|numeric|min:0|max:100',
-        ];
-    }
-    
-    /**
-     * Regras para sistema flexível
-     */
-    protected function flexibleSystemRules(): array
-    {
-        return [
-            'sistema_flexivel_ativo' => 'nullable|boolean',
-            'valor_minimo_flexivel' => 'nullable|numeric|min:0',
-            'taxa_fixa_baixos' => 'nullable|numeric|min:0',
-            'taxa_percentual_altos' => 'nullable|numeric|min:0|max:100',
-            'taxa_flexivel_ativa' => 'nullable|boolean',
-            'taxa_flexivel_valor_minimo' => 'nullable|numeric|min:0',
-            'taxa_flexivel_fixa_baixo' => 'nullable|numeric|min:0',
-            'taxa_flexivel_percentual_alto' => 'nullable|numeric|min:0|max:100',
             'observacoes_taxas' => 'nullable|string|max:1000',
         ];
     }
 }
-

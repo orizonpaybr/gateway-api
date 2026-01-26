@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Cache;
 /**
  * Service Layer para gerenciar configurações do gateway
  * Centraliza lógica de negócio e cache
+ * Sistema simplificado: apenas taxas fixas em centavos
  */
 class GatewaySettingsService
 {
@@ -27,20 +28,11 @@ class GatewaySettingsService
             // Se não existir, criar registro padrão
             if (!$settings) {
                 $settings = App::create([
-                    'taxa_cash_in_padrao' => 5.00,
                     'taxa_fixa_padrao' => 1.00,
-                    'deposito_minimo' => 5.00,
-                    'taxa_cash_out_padrao' => 5.00,
                     'taxa_fixa_pix' => 1.00,
                     'taxa_fixa_padrao_cash_out' => 0.00,
                     'saque_minimo' => 5.00,
                     'limite_saque_mensal' => 50000.00,
-                    'taxa_saque_api_padrao' => 5.00,
-                    'taxa_saque_cripto_padrao' => 7.00,
-                    'taxa_flexivel_ativa' => false,
-                    'taxa_flexivel_valor_minimo' => 15.00,
-                    'taxa_flexivel_fixa_baixo' => 4.99,
-                    'taxa_flexivel_percentual_alto' => 5.00,
                 ]);
             }
             
@@ -99,25 +91,12 @@ class GatewaySettingsService
     public function formatSettingsResponse(App $settings): array
     {
         return [
-            // Taxas de Depósito
-            'taxa_percentual_deposito' => (float) ($settings->taxa_cash_in_padrao ?? 5.00),
+            // Taxas de Depósito (apenas fixa em centavos)
             'taxa_fixa_deposito' => (float) ($settings->taxa_fixa_padrao ?? 1.00),
-            'valor_minimo_deposito' => (float) ($settings->deposito_minimo ?? 5.00),
             
-            // Taxas de Saque PIX
-            'taxa_percentual_pix' => (float) ($settings->taxa_cash_out_padrao ?? 5.00),
-            'taxa_minima_pix' => (float) ($settings->taxa_fixa_pix ?? 1.00),
-            'taxa_fixa_pix' => (float) ($settings->taxa_fixa_padrao_cash_out ?? 0.00),
-            'valor_minimo_saque' => (float) ($settings->saque_minimo ?? 5.00),
+            // Taxas de Saque PIX (apenas fixa em centavos)
+            'taxa_fixa_pix' => (float) ($settings->taxa_fixa_pix ?? 1.00),
             'limite_mensal_pf' => (float) ($settings->limite_saque_mensal ?? 50000.00),
-            'taxa_saque_api' => (float) ($settings->taxa_saque_api_padrao ?? 5.00),
-            'taxa_saque_crypto' => (float) ($settings->taxa_saque_cripto_padrao ?? 7.00),
-            
-            // Sistema de Taxas Flexível
-            'sistema_flexivel_ativo' => (bool) ($settings->taxa_flexivel_ativa ?? false),
-            'valor_minimo_flexivel' => (float) ($settings->taxa_flexivel_valor_minimo ?? 15.00),
-            'taxa_fixa_baixos' => (float) ($settings->taxa_flexivel_fixa_baixo ?? 4.99),
-            'taxa_percentual_altos' => (float) ($settings->taxa_flexivel_percentual_alto ?? 5.00),
             
             // Personalização de Relatórios - Entradas
             'relatorio_entradas_mostrar_meio' => (bool) ($settings->relatorio_entradas_mostrar_meio ?? true),
@@ -159,20 +138,9 @@ class GatewaySettingsService
     private function getFieldMapping(): array
     {
         return [
-            'taxa_percentual_deposito' => 'taxa_cash_in_padrao',
             'taxa_fixa_deposito' => 'taxa_fixa_padrao',
-            'valor_minimo_deposito' => 'deposito_minimo',
-            'taxa_percentual_pix' => 'taxa_cash_out_padrao',
-            'taxa_minima_pix' => 'taxa_fixa_pix',
-            'taxa_fixa_pix' => 'taxa_fixa_padrao_cash_out',
-            'valor_minimo_saque' => 'saque_minimo',
+            'taxa_fixa_pix' => 'taxa_fixa_pix',
             'limite_mensal_pf' => 'limite_saque_mensal',
-            'taxa_saque_api' => 'taxa_saque_api_padrao',
-            'taxa_saque_crypto' => 'taxa_saque_cripto_padrao',
-            'sistema_flexivel_ativo' => 'taxa_flexivel_ativa',
-            'valor_minimo_flexivel' => 'taxa_flexivel_valor_minimo',
-            'taxa_fixa_baixos' => 'taxa_flexivel_fixa_baixo',
-            'taxa_percentual_altos' => 'taxa_flexivel_percentual_alto',
         ];
     }
 
@@ -209,25 +177,10 @@ class GatewaySettingsService
     public static function getValidationRules(): array
     {
         return [
-            // Taxas de Depósito
-            'taxa_percentual_deposito' => 'nullable|numeric|min:0|max:100',
+            // Taxas (fixas em centavos)
             'taxa_fixa_deposito' => 'nullable|numeric|min:0',
-            'valor_minimo_deposito' => 'nullable|numeric|min:0',
-            
-            // Taxas de Saque PIX
-            'taxa_percentual_pix' => 'nullable|numeric|min:0|max:100',
-            'taxa_minima_pix' => 'nullable|numeric|min:0',
             'taxa_fixa_pix' => 'nullable|numeric|min:0',
-            'valor_minimo_saque' => 'nullable|numeric|min:0',
             'limite_mensal_pf' => 'nullable|numeric|min:0',
-            'taxa_saque_api' => 'nullable|numeric|min:0|max:100',
-            'taxa_saque_crypto' => 'nullable|numeric|min:0|max:100',
-            
-            // Sistema de Taxas Flexível
-            'sistema_flexivel_ativo' => 'nullable|boolean',
-            'valor_minimo_flexivel' => 'nullable|numeric|min:0',
-            'taxa_fixa_baixos' => 'nullable|numeric|min:0',
-            'taxa_percentual_altos' => 'nullable|numeric|min:0|max:100',
             
             // Personalização de Relatórios
             'relatorio_entradas_mostrar_meio' => 'nullable|boolean',
@@ -254,4 +207,3 @@ class GatewaySettingsService
         ];
     }
 }
-

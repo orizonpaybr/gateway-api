@@ -6,6 +6,19 @@ use App\Models\App;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
 
+/**
+ * Helper para cálculo de taxas de saque
+ * Sistema simplificado: apenas taxa fixa em centavos
+ * 
+ * IMPORTANTE: A TREEAL já desconta automaticamente o custo fixo (4 centavos) quando processa o saque.
+ * O valor que é debitado da nossa conta já inclui o custo da TREEAL.
+ * 
+ * Lógica de taxas:
+ * - Taxa total cobrada do cliente = taxa fixa configurada na aplicação (ex: R$ 0,50)
+ * - Custo da TREEAL = valor fixo por transação (config treeal.custo_fixo_por_transacao = R$ 0,04)
+ * - Valor debitado da nossa conta = amount + custo TREEAL (a TREEAL desconta automaticamente)
+ * - Lucro líquido da aplicação = taxa total - custo TREEAL (ex: R$ 0,50 - R$ 0,04 = R$ 0,46)
+ */
 class TaxaSaqueHelper
 {
     /**
@@ -16,10 +29,16 @@ class TaxaSaqueHelper
      * @param User $user Usuário específico
      * @param bool $isInterfaceWeb Se é saque via interface web (true) ou API (false)
      * @param bool $taxaPorFora Se true, cliente recebe valor integral e taxa é descontada do saldo
-     * @param float $taxaAdquirente Taxa percentual da adquirente (ex: 5.00 para 5%)
-     * @return array ['taxa_cash_out' => float, 'saque_liquido' => float, 'descricao' => string, 'valor_total_descontar' => float, 'taxa_aplicacao' => float, 'taxa_adquirente' => float]
+     * @return array [
+     *   'taxa_cash_out' => float,          // Taxa total cobrada do cliente
+     *   'saque_liquido' => float,          // Valor que o cliente recebe
+     *   'descricao' => string,             // Descrição do tipo de taxa
+     *   'valor_total_descontar' => float,  // Total a ser descontado do saldo
+     *   'taxa_aplicacao' => float,         // Lucro líquido da aplicação (taxa - custo TREEAL)
+     *   'taxa_adquirente' => float         // Custo da TREEAL
+     * ]
      */
-    public static function calcularTaxaSaque($amount, $setting, $user, $isInterfaceWeb = false, $taxaPorFora = false, $taxaAdquirente = 0.00)
+    public static function calcularTaxaSaque($amount, $setting, $user, $isInterfaceWeb = false, $taxaPorFora = false)
     {
         // Validação de entrada
         if ($amount < 0) {
@@ -40,103 +59,45 @@ class TaxaSaqueHelper
             'isInterfaceWeb' => $isInterfaceWeb,
             'taxaPorFora' => $taxaPorFora
         ]);
-        ;
-
-        // Taxa fixa do usuário (prioridade máxima)
-        $taxafixa = $user->taxa_cash_out_fixa ?? 0;
-        
-        Log::info('TaxaSaqueHelper: Taxa fixa do usuário', [
-            'user_id' => $user->user_id ?? 'N/A',
-            'taxa_fixa_usuario' => $taxafixa
-        ]);
-        
-        // Taxa percentual
-        $taxaPercentual = 0;
-        $descricao = "";
 
         // Verificar se o usuário tem taxas personalizadas ativas
-        if ($user && isset($user->taxas_personalizadas_ativas) && $user->taxas_personalizadas_ativas) {
-            // Usar taxas personalizadas do usuário
-            if ($isInterfaceWeb) {
-                $taxaPercentual = $user->taxa_percentual_pix ?? $setting->taxa_cash_out_padrao ?? 5.00;
-                $descricao = "PERSONALIZADA_INTERFACE_WEB";
-            } else {
-                $taxaPercentual = $user->taxa_saque_api ?? $setting->taxa_saque_api_padrao ?? $setting->taxa_cash_out_padrao ?? 5.00;
-                $descricao = "PERSONALIZADA_API";
-            }
+        $taxasPersonalizadasAtivas = $user && isset($user->taxas_personalizadas_ativas) && $user->taxas_personalizadas_ativas;
+        
+        // Obter taxa fixa configurada (taxa total cobrada do cliente)
+        if ($taxasPersonalizadasAtivas) {
+            // Usar taxa fixa personalizada do usuário
+            $taxaTotal = $user->taxa_fixa_pix ?? $setting->taxa_fixa_pix ?? 0.00;
+            $descricao = $isInterfaceWeb ? "PERSONALIZADA_INTERFACE_WEB_FIXA" : "PERSONALIZADA_API_FIXA";
         } else {
-            // Usar taxas globais
-            if ($isInterfaceWeb) {
-                $taxaPercentual = $setting->taxa_cash_out_padrao ?? 5.00;
-                $descricao = "GLOBAL_INTERFACE_WEB";
-            } else {
-                $taxaPercentual = $setting->taxa_saque_api_padrao ?? $setting->taxa_cash_out_padrao ?? 5.00;
-                $descricao = "GLOBAL_API";
-            }
+            // Usar taxa fixa global
+            $taxaTotal = $setting->taxa_fixa_pix ?? 0.00;
+            $descricao = $isInterfaceWeb ? "GLOBAL_INTERFACE_WEB_FIXA" : "GLOBAL_API_FIXA";
         }
+        
+        // Garantir que a taxa não seja negativa
+        $taxaTotal = max(0, (float) $taxaTotal);
+        
+        // Custo fixo da TREEAL por transação (já descontado automaticamente por ela)
+        $custoTreeal = (float) config('treeal.custo_fixo_por_transacao', 0.04);
+        
+        // Lucro líquido da aplicação = taxa total - custo TREEAL
+        // Exemplo: R$ 0,50 (taxa) - R$ 0,04 (custo TREEAL) = R$ 0,46 (lucro)
+        // Se a taxa total for menor que o custo da TREEAL, o lucro é zero
+        $lucroAplicacao = max(0, $taxaTotal - $custoTreeal);
 
-        Log::info('TaxaSaqueHelper: Taxa percentual selecionada', [
+        Log::info('TaxaSaqueHelper: Taxas calculadas', [
             'user_id' => $user->user_id ?? 'N/A',
             'isInterfaceWeb' => $isInterfaceWeb,
-            'taxa_percentual' => $taxaPercentual,
+            'taxa_total' => $taxaTotal,
+            'custo_treeal' => $custoTreeal,
+            'lucro_aplicacao' => $lucroAplicacao,
             'descricao' => $descricao
         ]);
 
-        // Validação e sanitização de taxa percentual
-        $taxaPercentual = max(0, min(100, (float) $taxaPercentual)); // Limitar a 100%
-        
-        // Calcular taxa percentual
-        $taxaPercentualValor = ($amount * $taxaPercentual) / 100;
-        
-        // Taxa mínima e taxa fixa PIX - usar personalizadas se disponíveis
-        if ($user && isset($user->taxas_personalizadas_ativas) && $user->taxas_personalizadas_ativas) {
-            $taxaMinima = max(0, (float) ($user->taxa_minima_pix ?? 0)); // Não usar fallback global se personalizadas estão ativas
-            $taxaFixaPix = max(0, (float) ($user->taxa_fixa_pix ?? 0)); // Não usar fallback global se personalizadas estão ativas
-        } else {
-            // CORREÇÃO: Usar taxa_minima_pix global em vez do baseline para saques
-            $taxaMinima = max(0, (float) ($setting->taxa_minima_pix ?? 0));
-            $taxaFixaPix = max(0, (float) ($setting->taxa_fixa_pix ?? 0));
-        }
-        
-        Log::info('TaxaSaqueHelper: Cálculos de taxa', [
-            'user_id' => $user->user_id ?? 'N/A',
-            'amount' => $amount,
-            'taxa_percentual' => $taxaPercentual,
-            'taxa_percentual_valor' => $taxaPercentualValor,
-            'taxa_minima_baseline' => $taxaMinima,
-            'taxa_fixa_pix' => $taxaFixaPix
-        ]);
-        
-        // Taxa principal = maior entre taxa percentual e taxa mínima
-        $taxaPrincipal = max($taxaPercentualValor, $taxaMinima);
-        
-        // Taxa da aplicação = taxa principal + taxa fixa PIX (se > 0)
-        $taxaAplicacao = $taxaPrincipal + $taxaFixaPix;
-        
-        // Calcular taxa da adquirente (percentual sobre o valor solicitado)
-        $taxaAdquirente = max(0, min(100, (float) $taxaAdquirente)); // Limitar a 100%
-        $taxaAdquirenteValor = ($amount * $taxaAdquirente) / 100;
-        
-        // Taxa total = taxa aplicação + taxa adquirente
-        $taxaTotal = $taxaAplicacao + $taxaAdquirenteValor;
-        
-        Log::info('TaxaSaqueHelper: Taxa total calculada', [
-            'user_id' => $user->user_id ?? 'N/A',
-            'taxa_percentual_valor' => $taxaPercentualValor,
-            'taxa_minima' => $taxaMinima,
-            'taxa_principal' => $taxaPrincipal,
-            'taxa_fixa_pix' => $taxaFixaPix,
-            'taxa_aplicacao' => $taxaAplicacao,
-            'taxa_adquirente_percentual' => $taxaAdquirente,
-            'taxa_adquirente_valor' => $taxaAdquirenteValor,
-            'taxa_total' => $taxaTotal,
-            'maior_entre_eles' => $taxaPercentualValor > $taxaMinima ? 'PERCENTUAL' : 'MINIMA'
-        ]);
-        
-        // NOVA LÓGICA: Cliente sempre recebe o valor solicitado, taxa é descontada do saldo
-        $saque_liquido = $amount; // Cliente recebe exatamente o que solicitou
-        $taxa_cash_out = $taxaTotal; // Taxa total a ser descontada (aplicação + adquirente)
-        $valor_total_descontar = $amount + $taxaTotal; // Total a ser descontado do saldo
+        // Cliente sempre recebe o valor solicitado, taxa é descontada do saldo
+        $saque_liquido = $amount;
+        $taxa_cash_out = $taxaTotal;
+        $valor_total_descontar = $amount + $taxaTotal;
 
         Log::info('TaxaSaqueHelper: Valores finais calculados', [
             'user_id' => $user->user_id ?? 'N/A',
@@ -156,13 +117,9 @@ class TaxaSaqueHelper
             'saldo',
             [
                 'amount_solicitado' => $amount,
-                'taxa_percentual' => $taxaPercentual,
-                'taxa_percentual_valor' => $taxaPercentualValor,
-                'taxa_fixa' => $taxafixa,
-                'taxa_minima' => $taxaMinima,
-                'taxa_principal' => $taxaPrincipal,
-                'taxa_fixa_pix' => $taxaFixaPix,
                 'taxa_total' => $taxaTotal,
+                'custo_treeal' => $custoTreeal,
+                'lucro_aplicacao' => $lucroAplicacao,
                 'valor_total_descontar' => $valor_total_descontar,
                 'is_interface_web' => $isInterfaceWeb,
                 'taxa_por_fora' => $taxaPorFora,
@@ -175,14 +132,16 @@ class TaxaSaqueHelper
             'resultado' => [
                 'taxa_cash_out' => $taxa_cash_out,
                 'saque_liquido' => $saque_liquido,
-                'valor_total_descontar' => $valor_total_descontar
+                'valor_total_descontar' => $valor_total_descontar,
+                'lucro_aplicacao' => $lucroAplicacao,
+                'custo_treeal' => $custoTreeal
             ]
         ]);
 
         return [
-            'taxa_cash_out' => $taxa_cash_out, // Total de todas as taxas
-            'taxa_aplicacao' => $taxaAplicacao, // Taxa da aplicação apenas
-            'taxa_adquirente' => $taxaAdquirenteValor, // Taxa da adquirente apenas
+            'taxa_cash_out' => $taxa_cash_out,       // Taxa total cobrada do cliente
+            'taxa_aplicacao' => $lucroAplicacao,    // Lucro líquido da aplicação
+            'taxa_adquirente' => $custoTreeal,      // Custo da TREEAL
             'saque_liquido' => $saque_liquido,
             'descricao' => $descricao,
             'valor_total_descontar' => $valor_total_descontar
@@ -200,62 +159,23 @@ class TaxaSaqueHelper
      */
     public static function calcularValorMaximoSaque($saldoDisponivel, $setting, $user, $isInterfaceWeb = false)
     {
-        // Taxa fixa do usuário
-        $taxafixa = $user->taxa_cash_out_fixa ?? 0;
+        // Verificar se o usuário tem taxas personalizadas ativas
+        $taxasPersonalizadasAtivas = $user && isset($user->taxas_personalizadas_ativas) && $user->taxas_personalizadas_ativas;
         
-        // Taxa percentual
-        $taxaPercentual = 0;
-        
-        if ($isInterfaceWeb) {
-            $taxaPercentual = $user->taxa_cash_out ?? $setting->taxa_cash_out_padrao ?? 5.00;
+        // Taxa fixa
+        if ($taxasPersonalizadasAtivas) {
+            $taxaFixa = $user->taxa_fixa_pix ?? $setting->taxa_fixa_pix ?? 0;
         } else {
-            $taxaPercentual = $user->taxa_saque_api ?? $setting->taxa_saque_api_padrao ?? $setting->taxa_cash_out_padrao ?? 5.00;
+            $taxaFixa = $setting->taxa_fixa_pix ?? 0;
         }
         
-        // Taxa mínima - usar taxa_minima_pix em vez do baseline para saques
-        $taxaMinima = $setting->taxa_minima_pix ?? 0;
+        $taxaFixa = max(0, (float) $taxaFixa);
         
-        // Taxa fixa PIX
-        $taxaFixaPix = $setting->taxa_fixa_pix ?? 0;
+        // Valor máximo = saldo disponível - taxa fixa
+        $valorMaximo = max(0, $saldoDisponivel - $taxaFixa);
         
-        // Para calcular o valor máximo, precisamos resolver a equação:
-        // saldoDisponivel = valorMaximo + taxaTotal
-        // onde taxaTotal = max(valorMaximo * taxaPercentual/100, taxaMinima) + taxaFixa + taxaFixaPix
-        
-        // Se taxa percentual é 0, então taxaTotal = taxaMinima + taxaFixa + taxaFixaPix
-        if ($taxaPercentual == 0) {
-            $taxaTotal = $taxaMinima + $taxafixa + $taxaFixaPix;
-            $valorMaximo = $saldoDisponivel - $taxaTotal;
-        } else {
-            // Resolver equação quadrática: saldo = valor + max(valor * taxa/100, taxaMinima) + taxaFixa + taxaFixaPix
-            // Se valor * taxa/100 >= taxaMinima: saldo = valor + valor * taxa/100 + taxaFixa + taxaFixaPix
-            // Se valor * taxa/100 < taxaMinima: saldo = valor + taxaMinima + taxaFixa + taxaFixaPix
-            
-            // Caso 1: valor * taxa/100 >= taxaMinima
-            // saldo = valor + valor * taxa/100 + taxaFixa + taxaFixaPix
-            // saldo = valor * (1 + taxa/100) + taxaFixa + taxaFixaPix
-            // valor = (saldo - taxaFixa - taxaFixaPix) / (1 + taxa/100)
-            $valorMaximo1 = ($saldoDisponivel - $taxafixa - $taxaFixaPix) / (1 + $taxaPercentual / 100);
-            
-            // Caso 2: valor * taxa/100 < taxaMinima
-            // saldo = valor + taxaMinima + taxaFixa + taxaFixaPix
-            // valor = saldo - taxaMinima - taxaFixa - taxaFixaPix
-            $valorMaximo2 = $saldoDisponivel - $taxaMinima - $taxafixa - $taxaFixaPix;
-            
-            // Verificar qual caso se aplica
-            if ($valorMaximo1 * $taxaPercentual / 100 >= $taxaMinima) {
-                $valorMaximo = $valorMaximo1;
-            } else {
-                $valorMaximo = $valorMaximo2;
-            }
-        }
-        
-        // Garantir que o valor não seja negativo
-        $valorMaximo = max(0, $valorMaximo);
-        
-        // Calcular taxa total para o valor máximo
-        $taxaPercentualValor = ($valorMaximo * $taxaPercentual) / 100;
-        $taxaTotal = max($taxaPercentualValor, $taxaMinima) + $taxafixa + $taxaFixaPix;
+        // Taxa total para o valor máximo é a própria taxa fixa
+        $taxaTotal = $taxaFixa;
         
         $saldoRestante = $saldoDisponivel - $valorMaximo - $taxaTotal;
         

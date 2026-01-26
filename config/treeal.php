@@ -92,14 +92,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Taxas
+    | Custo Fixo da TREEAL
     |--------------------------------------------------------------------------
     |
-    | Taxas aplicadas pela aplicação (não são taxas da TREEAL).
+    | Custo fixo cobrado pela TREEAL por cada transação PIX (em reais).
+    | Este valor é descontado do lucro líquido da aplicação.
+    |
+    | Exemplo: Se a taxa configurada para o cliente é R$ 0,50 (50 centavos)
+    | e o custo da TREEAL é R$ 0,04 (4 centavos), o lucro líquido será
+    | R$ 0,46 (46 centavos).
     |
     */
-    'taxa_pix_cash_in' => env('TREEAL_TAXA_PIX_CASH_IN', 0.00),
-    'taxa_pix_cash_out' => env('TREEAL_TAXA_PIX_CASH_OUT', 0.00),
+    'custo_fixo_por_transacao' => env('TREEAL_CUSTO_FIXO_POR_TRANSACAO', 0.04),
 
     /*
     |--------------------------------------------------------------------------
