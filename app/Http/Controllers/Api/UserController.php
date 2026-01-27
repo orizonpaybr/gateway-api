@@ -73,12 +73,17 @@ class UserController extends Controller
             $totalInflows = $balanceData['totalInflows'];
             $totalOutflows = $balanceData['totalOutflows'];
 
+            // Arredondar todos os valores monetários para 2 casas decimais (evita problemas de precisão de ponto flutuante)
+            $currentBalance = round((float) ($user->saldo ?? 0), 2);
+            $totalInflowsRounded = round((float) $totalInflows, 2);
+            $totalOutflowsRounded = round((float) $totalOutflows, 2);
+
             // Log para debug
             Log::info('Saldo calculado', [
                 'user_id' => $user->username,
-                'saldo_atual' => $user->saldo ?? 0,
-                'total_inflows' => $totalInflows,
-                'total_outflows' => $totalOutflows,
+                'saldo_atual' => $currentBalance,
+                'total_inflows' => $totalInflowsRounded,
+                'total_outflows' => $totalOutflowsRounded,
                 'filtro_status' => ['PAID_OUT', 'COMPLETED']
             ]);
 
@@ -91,9 +96,9 @@ class UserController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => [
-                    'current' => $user->saldo ?? 0,
-                    'totalInflows' => $totalInflows,
-                    'totalOutflows' => $totalOutflows,
+                    'current' => $currentBalance,
+                    'totalInflows' => number_format($totalInflowsRounded, 2, '.', ''),
+                    'totalOutflows' => number_format($totalOutflowsRounded, 2, '.', ''),
                 ]
             ])->header('Access-Control-Allow-Origin', '*');
 

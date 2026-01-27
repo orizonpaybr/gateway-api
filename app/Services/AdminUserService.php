@@ -217,7 +217,26 @@ class AdminUserService
                     }
                 }
             }
-        
+            
+            // IMPORTANTE: Ativar automaticamente taxas personalizadas se uma taxa foi definida
+            // Se o usuário definiu taxa_fixa_deposito ou taxa_fixa_pix, ativar automaticamente
+            $hasTaxaDeposito = array_key_exists('taxa_fixa_deposito', $data);
+            $hasTaxaPix = array_key_exists('taxa_fixa_pix', $data);
+            $taxaDepositoValue = $hasTaxaDeposito ? (float) ($data['taxa_fixa_deposito'] ?? 0) : null;
+            $taxaPixValue = $hasTaxaPix ? (float) ($data['taxa_fixa_pix'] ?? 0) : null;
+            
+            // Se uma taxa foi definida e é diferente de zero, ativar taxas personalizadas
+            if (($hasTaxaDeposito && $taxaDepositoValue > 0) || ($hasTaxaPix && $taxaPixValue > 0)) {
+                // Só atualizar se não foi explicitamente definido como false
+                if (!array_key_exists('taxas_personalizadas_ativas', $data) || $data['taxas_personalizadas_ativas'] !== false) {
+                    $updateData['taxas_personalizadas_ativas'] = true;
+                    Log::info('AdminUserService::updateUser - Ativando taxas personalizadas automaticamente', [
+                        'user_id' => $userId,
+                        'taxa_fixa_deposito' => $taxaDepositoValue,
+                        'taxa_fixa_pix' => $taxaPixValue,
+                    ]);
+                }
+            }
             
             $user->update($updateData);
             

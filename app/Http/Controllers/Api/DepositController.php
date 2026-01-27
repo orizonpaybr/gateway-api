@@ -76,6 +76,17 @@ class DepositController extends Controller
             ], 422); // Status code 422 para erros de validação
         }
 
+        // IMPORTANTE: Recarregar usuário do banco para garantir dados atualizados (evita cache)
+        // Isso é crítico para garantir que taxas personalizadas atualizadas sejam aplicadas
+        if ($user && isset($user->user_id)) {
+            $user = \App\Models\User::where('user_id', $user->user_id)->first();
+            Log::info('DepositController - Usuário recarregado do banco', [
+                'user_id' => $user->user_id ?? 'N/A',
+                'taxas_personalizadas_ativas' => $user->taxas_personalizadas_ativas ?? false,
+                'taxa_fixa_deposito' => $user->taxa_fixa_deposito ?? 'N/A',
+            ]);
+        }
+        
         Log::info('DepositController - Executando switch para adquirente', ['adquirente' => $default]);
         switch($default){
             case 'pagarme':
@@ -83,7 +94,12 @@ class DepositController extends Controller
                 $response = PagarMeTrait::requestDepositPagarme($request);
                 break;
             case 'treeal':
-                Log::info('DepositController - Processando depósito Treeal', []);
+                Log::info('DepositController - Processando depósito Treeal', [
+                    'user_id' => $user->user_id ?? 'N/A',
+                    'amount' => $request->amount ?? 'N/A',
+                    'taxas_personalizadas_ativas' => $user->taxas_personalizadas_ativas ?? false,
+                    'taxa_fixa_deposito' => $user->taxa_fixa_deposito ?? 'N/A',
+                ]);
                 $response = $this->processTreealDeposit($request, $user, $setting);
                 break;
             default:
@@ -528,6 +544,19 @@ class DepositController extends Controller
             $amount = (float) $request->amount;
             $description = $request->input('description', 'Depósito via PIX');
             
+            // IMPORTANTE: Recarregar usuário novamente antes de calcular taxa (garantia extra)
+            if ($user && isset($user->user_id)) {
+                $user = \App\Models\User::where('user_id', $user->user_id)->first();
+            }
+            
+            Log::info('DepositController::processTreealDeposit - Dados antes do cálculo de taxa', [
+                'user_id' => $user->user_id ?? 'N/A',
+                'amount' => $amount,
+                'taxas_personalizadas_ativas' => $user->taxas_personalizadas_ativas ?? false,
+                'taxa_fixa_deposito' => $user->taxa_fixa_deposito ?? 'N/A',
+                'taxa_fixa_padrao_global' => $setting->taxa_fixa_padrao ?? 'N/A',
+            ]);
+            
             // Calcular taxas usando o Helper centralizado
             // O helper obtém o custo da TREEAL automaticamente do config
             $taxaCalculada = \App\Helpers\TaxaFlexivelHelper::calcularTaxaDeposito($amount, $setting, $user);
@@ -536,6 +565,16 @@ class DepositController extends Controller
             $taxaAplicacao = $taxaCalculada['taxa_aplicacao'];    // Lucro líquido da aplicação
             $taxaAdquirente = $taxaCalculada['taxa_adquirente'];  // Custo da TREEAL
             $descricaoTaxa = $taxaCalculada['descricao'];
+            
+            Log::info('DepositController::processTreealDeposit - Taxa calculada', [
+                'amount' => $amount,
+                'taxa_cash_in' => $taxaTotal,
+                'deposito_liquido' => $depositoLiquido,
+                'taxa_aplicacao' => $taxaAplicacao,
+                'taxa_adquirente' => $taxaAdquirente,
+                'descricao' => $descricaoTaxa,
+                'verificacao' => 'deposito_liquido = ' . $amount . ' - ' . $taxaTotal . ' = ' . $depositoLiquido,
+            ]);
 
             // Gerar QR Code usando TreealService
             $qrCodeResult = $treealService->generateQRCode(
