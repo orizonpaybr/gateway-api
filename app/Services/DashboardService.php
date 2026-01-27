@@ -32,12 +32,29 @@ class DashboardService
         $cacheKey = sprintf('dashboard:stats:%s:%s', $username, now()->format('Y-m-d'));
         
         return Cache::remember($cacheKey, self::CACHE_TTL_STATS, function () use ($username, $startOfMonth, $endOfMonth) {
+            // Custo fixo da TREEAL por transação
+            $custoTreealPorTransacao = (float) config('treeal.custo_fixo_por_transacao');
+            
             // Query única otimizada usando UNION ALL
+            // IMPORTANTE: Calcular lucro líquido (taxa - custo TREEAL)
+            // TODAS as transações TREEAL (depósitos E saques) têm custo de 2 centavos por transação
+            // Para depósitos TREEAL sem taxa_pix_cash_in_adquirente ou com valor 0, usar custo fixo
+            // Para saques TREEAL, identificar pelo campo executor_ordem = 'Treeal'
             $statsQuery = "
                 SELECT 
                     'deposito' as tipo,
                     SUM(CASE WHEN status IN ('PAID_OUT', 'COMPLETED') THEN amount ELSE 0 END) as total_pago,
-                    SUM(CASE WHEN status IN ('PAID_OUT', 'COMPLETED') THEN taxa_cash_in ELSE 0 END) as total_taxa
+                    SUM(CASE WHEN status IN ('PAID_OUT', 'COMPLETED') THEN (
+                        taxa_cash_in - 
+                        CASE 
+                            WHEN (adquirente_ref = 'Treeal' OR executor_ordem = 'Treeal') 
+                                 AND (taxa_pix_cash_in_adquirente IS NULL OR taxa_pix_cash_in_adquirente = 0)
+                            THEN {$custoTreealPorTransacao}
+                            WHEN taxa_pix_cash_in_adquirente IS NOT NULL AND taxa_pix_cash_in_adquirente > 0
+                            THEN taxa_pix_cash_in_adquirente
+                            ELSE 0
+                        END
+                    ) ELSE 0 END) as total_taxa
                 FROM solicitacoes 
                 WHERE user_id = ? AND date BETWEEN ? AND ?
                 
@@ -46,14 +63,15 @@ class DashboardService
                 SELECT 
                     'saque' as tipo,
                     SUM(CASE WHEN status IN ('PAID_OUT', 'COMPLETED') THEN amount ELSE 0 END) as total_pago,
-                    SUM(CASE WHEN status IN ('PAID_OUT', 'COMPLETED') THEN taxa_cash_out ELSE 0 END) as total_taxa
+                    COALESCE(SUM(CASE WHEN status IN ('PAID_OUT', 'COMPLETED') THEN taxa_cash_out ELSE 0 END), 0) - (COALESCE(SUM(CASE WHEN status IN ('PAID_OUT', 'COMPLETED') THEN 1 ELSE 0 END), 0) * ?) as total_taxa
                 FROM solicitacoes_cash_out 
                 WHERE user_id = ? AND date BETWEEN ? AND ?
             ";
 
             $results = DB::select($statsQuery, [
-                $username, $startOfMonth, $endOfMonth,
-                $username, $startOfMonth, $endOfMonth
+                $username, $startOfMonth, $endOfMonth, // depósitos
+                $custoTreealPorTransacao, // custo TREEAL para saques
+                $username, $startOfMonth, $endOfMonth // saques
             ]);
 
             $depositos = $results[0] ?? (object)['total_pago' => 0, 'total_taxa' => 0];

@@ -62,6 +62,7 @@ class AdminTransactionService
      * @param float $taxaCashIn
      * @param string $description
      * @param string $idTransaction
+     * @param float|null $taxaAdquirente Custo da adquirente (TREEAL) - opcional, padrão 0
      * @return Solicitacoes
      */
     public function createDepositRecord(
@@ -70,9 +71,13 @@ class AdminTransactionService
         float $depositoLiquido,
         float $taxaCashIn,
         string $description,
-        string $idTransaction
+        string $idTransaction,
+        ?float $taxaAdquirente = null
     ): Solicitacoes {
         $now = Carbon::now();
+        
+        // Se não foi passado, usar 0 (transações manuais não têm custo de adquirente)
+        $taxaAdquirente = $taxaAdquirente ?? 0.0;
         
         return Solicitacoes::create([
             'user_id' => $user->user_id,
@@ -90,7 +95,7 @@ class AdminTransactionService
             'paymentCodeBase64' => '',
             'adquirente_ref' => env('APP_NAME'),
             'taxa_cash_in' => $taxaCashIn,
-            'taxa_pix_cash_in_adquirente' => 0,
+            'taxa_pix_cash_in_adquirente' => $taxaAdquirente,
             'taxa_pix_cash_in_valor_fixo' => 0,
             'client_telefone' => $user->telefone,
             'executor_ordem' => env('APP_NAME'),

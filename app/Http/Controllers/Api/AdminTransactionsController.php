@@ -49,6 +49,11 @@ class AdminTransactionsController extends Controller
             return $this->errorResponse('Usuário não encontrado.', 404);
         }
 
+        // IMPORTANTE: Recarregar usuário do banco para garantir dados atualizados (evita cache)
+        if ($user && isset($user->user_id)) {
+            $user = \App\Models\User::where('user_id', $user->user_id)->first();
+        }
+
         $settings = $this->transactionService->getAppSettings();
         if (!$settings) {
             return $this->errorResponse('Configurações da aplicação não foram encontradas.', 500);
@@ -60,9 +65,33 @@ class AdminTransactionsController extends Controller
         DB::beginTransaction();
 
         try {
+            // IMPORTANTE: Recarregar usuário novamente antes de calcular taxa (garantia extra)
+            if ($user && isset($user->user_id)) {
+                $user = \App\Models\User::where('user_id', $user->user_id)->first();
+            }
+            
+            \Illuminate\Support\Facades\Log::info('AdminTransactionsController::storeDeposit - Dados antes do cálculo de taxa', [
+                'user_id' => $user->user_id ?? 'N/A',
+                'amount' => $amount,
+                'taxas_personalizadas_ativas' => $user->taxas_personalizadas_ativas ?? false,
+                'taxa_fixa_deposito' => $user->taxa_fixa_deposito ?? 'N/A',
+                'taxa_fixa_padrao_global' => $settings->taxa_fixa_padrao ?? 'N/A',
+            ]);
+            
             $taxaCalculada = \App\Helpers\TaxaFlexivelHelper::calcularTaxaDeposito($amount, $settings, $user);
+            
+            \Illuminate\Support\Facades\Log::info('AdminTransactionsController::storeDeposit - Taxa calculada', [
+                'amount' => $amount,
+                'taxa_cash_in' => $taxaCalculada['taxa_cash_in'],
+                'deposito_liquido' => $taxaCalculada['deposito_liquido'],
+                'taxa_adquirente' => $taxaCalculada['taxa_adquirente'],
+                'verificacao' => 'deposito_liquido = ' . $amount . ' - ' . $taxaCalculada['taxa_cash_in'] . ' = ' . $taxaCalculada['deposito_liquido'],
+            ]);
             $depositoLiquido = $taxaCalculada['deposito_liquido'];
             $taxaCashIn = $taxaCalculada['taxa_cash_in'];
+            // IMPORTANTE: Depósitos manuais não têm custo de adquirente (não passam pela TREEAL)
+            // O TaxaFlexivelHelper retorna o custo TREEAL para referência, mas para depósitos manuais deve ser 0
+            $taxaAdquirente = 0.0;
 
             $idTransaction = $this->transactionService->generateTransactionId();
 
@@ -72,7 +101,8 @@ class AdminTransactionsController extends Controller
                 $depositoLiquido,
                 $taxaCashIn,
                 $description,
-                $idTransaction
+                $idTransaction,
+                $taxaAdquirente // 0 para depósitos manuais (sem custo de adquirente)
             );
 
             // Usar BalanceService para operação thread-safe (já dentro de transação)

@@ -10,14 +10,14 @@ use Illuminate\Support\Facades\Log;
  * Helper para cálculo de taxas de saque
  * Sistema simplificado: apenas taxa fixa em centavos
  * 
- * IMPORTANTE: A TREEAL já desconta automaticamente o custo fixo (4 centavos) quando processa o saque.
+ * IMPORTANTE: A TREEAL já desconta automaticamente o custo fixo (2 centavos) quando processa o saque.
  * O valor que é debitado da nossa conta já inclui o custo da TREEAL.
  * 
  * Lógica de taxas:
  * - Taxa total cobrada do cliente = taxa fixa configurada na aplicação (ex: R$ 0,50)
- * - Custo da TREEAL = valor fixo por transação (config treeal.custo_fixo_por_transacao = R$ 0,04)
+ * - Custo da TREEAL = valor fixo por transação (config treeal.custo_fixo_por_transacao = R$ 0,02)
  * - Valor debitado da nossa conta = amount + custo TREEAL (a TREEAL desconta automaticamente)
- * - Lucro líquido da aplicação = taxa total - custo TREEAL (ex: R$ 0,50 - R$ 0,04 = R$ 0,46)
+ * - Lucro líquido da aplicação = taxa total - custo TREEAL (ex: R$ 0,50 - R$ 0,02 = R$ 0,48)
  */
 class TaxaSaqueHelper
 {
@@ -60,6 +60,11 @@ class TaxaSaqueHelper
             'taxaPorFora' => $taxaPorFora
         ]);
 
+        // IMPORTANTE: Recarregar usuário do banco para garantir dados atualizados (evita cache)
+        if ($user && isset($user->user_id)) {
+            $user = \App\Models\User::where('user_id', $user->user_id)->first();
+        }
+        
         // Verificar se o usuário tem taxas personalizadas ativas
         $taxasPersonalizadasAtivas = $user && isset($user->taxas_personalizadas_ativas) && $user->taxas_personalizadas_ativas;
         
@@ -68,6 +73,13 @@ class TaxaSaqueHelper
             // Usar taxa fixa personalizada do usuário
             $taxaTotal = $user->taxa_fixa_pix ?? $setting->taxa_fixa_pix ?? 0.00;
             $descricao = $isInterfaceWeb ? "PERSONALIZADA_INTERFACE_WEB_FIXA" : "PERSONALIZADA_API_FIXA";
+            
+            Log::info('TaxaSaqueHelper::calcularTaxaSaque - Usando taxa personalizada', [
+                'user_id' => $user->user_id ?? 'N/A',
+                'taxa_personalizada' => $user->taxa_fixa_pix ?? 'N/A',
+                'taxa_global' => $setting->taxa_fixa_pix ?? 'N/A',
+                'taxa_aplicada' => $taxaTotal
+            ]);
         } else {
             // Usar taxa fixa global
             $taxaTotal = $setting->taxa_fixa_pix ?? 0.00;
@@ -78,10 +90,10 @@ class TaxaSaqueHelper
         $taxaTotal = max(0, (float) $taxaTotal);
         
         // Custo fixo da TREEAL por transação (já descontado automaticamente por ela)
-        $custoTreeal = (float) config('treeal.custo_fixo_por_transacao', 0.04);
+        $custoTreeal = (float) config('treeal.custo_fixo_por_transacao');
         
         // Lucro líquido da aplicação = taxa total - custo TREEAL
-        // Exemplo: R$ 0,50 (taxa) - R$ 0,04 (custo TREEAL) = R$ 0,46 (lucro)
+        // Exemplo: R$ 0,50 (taxa) - R$ 0,02 (custo TREEAL) = R$ 0,48 (lucro)
         // Se a taxa total for menor que o custo da TREEAL, o lucro é zero
         $lucroAplicacao = max(0, $taxaTotal - $custoTreeal);
 

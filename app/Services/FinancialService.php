@@ -374,39 +374,47 @@ class FinancialService
             $mesInicio = $now->copy()->startOfMonth();
             $mesFim = $now->copy()->endOfMonth();
 
+            // Custo fixo da TREEAL por transação
+            $custoTreealPorTransacao = (float) config('treeal.custo_fixo_por_transacao');
+            
             // Usar uma única query com subqueries para melhor performance
             // Isso reduz o número de round-trips ao banco
+            // IMPORTANTE: TODOS os saques são processados pela TREEAL, incluindo os manuais
+            // Portanto, calcular lucro líquido subtraindo o custo da TREEAL de TODOS os saques
             $stats = DB::selectOne("
                 SELECT 
                     -- Estatísticas gerais
                     (SELECT COUNT(*) FROM solicitacoes_cash_out) as total_saques_geral,
                     (SELECT COUNT(*) FROM solicitacoes_cash_out WHERE status IN (?, ?)) as saques_aprovados_geral,
                     (SELECT COALESCE(SUM(amount), 0) FROM solicitacoes_cash_out WHERE status IN (?, ?)) as valor_total_geral,
-                    (SELECT COALESCE(SUM(taxa_cash_out), 0) FROM solicitacoes_cash_out WHERE status IN (?, ?)) as lucro_total_geral,
+                    (SELECT COALESCE(SUM(taxa_cash_out), 0) - (COUNT(*) * ?) FROM solicitacoes_cash_out WHERE status IN (?, ?)) as lucro_total_geral,
                     -- Estatísticas de hoje
                     (SELECT COUNT(*) FROM solicitacoes_cash_out WHERE date BETWEEN ? AND ? AND status IN (?, ?)) as saques_aprovados_hoje,
                     (SELECT COALESCE(SUM(amount), 0) FROM solicitacoes_cash_out WHERE date BETWEEN ? AND ? AND status IN (?, ?)) as valor_total_hoje,
-                    (SELECT COALESCE(SUM(taxa_cash_out), 0) FROM solicitacoes_cash_out WHERE date BETWEEN ? AND ? AND status IN (?, ?)) as lucro_total_hoje,
+                    (SELECT COALESCE(SUM(taxa_cash_out), 0) - (COUNT(*) * ?) FROM solicitacoes_cash_out WHERE date BETWEEN ? AND ? AND status IN (?, ?)) as lucro_total_hoje,
                     -- Estatísticas do mês
                     (SELECT COUNT(*) FROM solicitacoes_cash_out WHERE date BETWEEN ? AND ? AND status IN (?, ?)) as saques_aprovados_mes,
                     (SELECT COALESCE(SUM(amount), 0) FROM solicitacoes_cash_out WHERE date BETWEEN ? AND ? AND status IN (?, ?)) as valor_total_mes,
-                    (SELECT COALESCE(SUM(taxa_cash_out), 0) FROM solicitacoes_cash_out WHERE date BETWEEN ? AND ? AND status IN (?, ?)) as lucro_total_mes,
+                    (SELECT COALESCE(SUM(taxa_cash_out), 0) - (COUNT(*) * ?) FROM solicitacoes_cash_out WHERE date BETWEEN ? AND ? AND status IN (?, ?)) as lucro_total_mes,
                     -- Saques pendentes (geral)
                     (SELECT COUNT(*) FROM solicitacoes_cash_out WHERE status = ?) as saques_pendentes_geral
             ", array_merge(
                 self::APPROVED_STATUSES, // saques_aprovados_geral
                 self::APPROVED_STATUSES, // valor_total_geral
+                [$custoTreealPorTransacao], // custo TREEAL para lucro_total_geral
                 self::APPROVED_STATUSES, // lucro_total_geral
                 [$hojeInicio, $hojeFim], // saques_aprovados_hoje
                 self::APPROVED_STATUSES,
                 [$hojeInicio, $hojeFim], // valor_total_hoje
                 self::APPROVED_STATUSES,
+                [$custoTreealPorTransacao], // custo TREEAL para lucro_total_hoje
                 [$hojeInicio, $hojeFim], // lucro_total_hoje
                 self::APPROVED_STATUSES,
                 [$mesInicio, $mesFim], // saques_aprovados_mes
                 self::APPROVED_STATUSES,
                 [$mesInicio, $mesFim], // valor_total_mes
                 self::APPROVED_STATUSES,
+                [$custoTreealPorTransacao], // custo TREEAL para lucro_total_mes
                 [$mesInicio, $mesFim], // lucro_total_mes
                 self::APPROVED_STATUSES,
                 ['PENDING'] // saques_pendentes_geral
@@ -484,10 +492,24 @@ class FinancialService
      */
     private function getDepositsStatsAggregated(array $dateRange): array
     {
+        // Calcular lucro líquido: taxa_cash_in - custo TREEAL
+        // IMPORTANTE: Para transações TREEAL sem taxa_pix_cash_in_adquirente ou com valor 0, usar custo fixo
+        $custoTreealPorTransacao = (float) config('treeal.custo_fixo_por_transacao');
+        
         $stats = Solicitacoes::whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
             ->selectRaw('
                 SUM(CASE WHEN status IN (?, ?) THEN 1 ELSE 0 END) as aprovadas,
-                SUM(CASE WHEN status IN (?, ?) THEN (amount - deposito_liquido) ELSE 0 END) as lucro
+                SUM(CASE WHEN status IN (?, ?) THEN (
+                    taxa_cash_in - 
+                    CASE 
+                        WHEN (adquirente_ref = \'Treeal\' OR executor_ordem = \'Treeal\') 
+                             AND (taxa_pix_cash_in_adquirente IS NULL OR taxa_pix_cash_in_adquirente = 0)
+                        THEN ' . $custoTreealPorTransacao . '
+                        WHEN taxa_pix_cash_in_adquirente IS NOT NULL AND taxa_pix_cash_in_adquirente > 0
+                        THEN taxa_pix_cash_in_adquirente
+                        ELSE 0
+                    END
+                ) ELSE 0 END) as lucro
             ', array_merge(self::APPROVED_STATUSES, self::APPROVED_STATUSES))
             ->first();
 
@@ -502,16 +524,28 @@ class FinancialService
      */
     private function getWithdrawalsStatsAggregated(array $dateRange): array
     {
+        $custoTreealPorTransacao = (float) config('treeal.custo_fixo_por_transacao');
+        
         $stats = SolicitacoesCashOut::whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
             ->selectRaw('
                 SUM(CASE WHEN status IN (?, ?) THEN 1 ELSE 0 END) as aprovadas,
-                SUM(CASE WHEN status IN (?, ?) THEN taxa_cash_out ELSE 0 END) as lucro
-            ', array_merge(self::APPROVED_STATUSES, self::APPROVED_STATUSES))
+                SUM(CASE WHEN status IN (?, ?) THEN taxa_cash_out ELSE 0 END) as taxa_total
+            ', array_merge(
+                self::APPROVED_STATUSES, 
+                self::APPROVED_STATUSES
+            ))
             ->first();
 
+        $totalSaques = (int) ($stats->aprovadas ?? 0);
+        $taxaTotal = (float) ($stats->taxa_total ?? 0);
+        // TODOS os saques são processados pela TREEAL, incluindo os manuais
+        // Portanto, TODOS os saques têm custo de 2 centavos por transação
+        $custoTreeal = $totalSaques * $custoTreealPorTransacao;
+        $lucro = $taxaTotal - $custoTreeal;
+
         return [
-            'aprovadas' => (int) ($stats->aprovadas ?? 0),
-            'lucro' => (float) ($stats->lucro ?? 0),
+            'aprovadas' => $totalSaques,
+            'lucro' => $lucro,
         ];
     }
 
@@ -521,14 +555,36 @@ class FinancialService
     private function calculateProfit(string $periodo): float
     {
         $dateRange = $this->getDateRange($periodo);
+        $custoTreealPorTransacao = (float) config('treeal.custo_fixo_por_transacao');
 
+        // Lucro líquido de depósitos: taxa_cash_in - custo TREEAL
+        // IMPORTANTE: Para transações TREEAL sem taxa_pix_cash_in_adquirente ou com valor 0, usar custo fixo
         $lucroDepositos = Solicitacoes::whereIn('status', self::APPROVED_STATUSES)
             ->whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
-            ->sum(DB::raw('amount - deposito_liquido'));
+            ->sum(DB::raw("taxa_cash_in - 
+                CASE 
+                    WHEN (adquirente_ref = 'Treeal' OR executor_ordem = 'Treeal') 
+                         AND (taxa_pix_cash_in_adquirente IS NULL OR taxa_pix_cash_in_adquirente = 0)
+                    THEN {$custoTreealPorTransacao}
+                    WHEN taxa_pix_cash_in_adquirente IS NOT NULL AND taxa_pix_cash_in_adquirente > 0
+                    THEN taxa_pix_cash_in_adquirente
+                    ELSE 0
+                END"));
 
-        $lucroSaques = SolicitacoesCashOut::whereIn('status', self::APPROVED_STATUSES)
+        // Lucro líquido de saques: taxa_cash_out - (número total de saques * custo TREEAL)
+        // IMPORTANTE: TODOS os saques são processados pela TREEAL, incluindo os manuais
+        // Portanto, TODOS os saques têm custo de 2 centavos por transação
+        $totalSaques = SolicitacoesCashOut::whereIn('status', self::APPROVED_STATUSES)
+            ->whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
+            ->count();
+        
+        $taxaTotalSaques = SolicitacoesCashOut::whereIn('status', self::APPROVED_STATUSES)
             ->whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
             ->sum('taxa_cash_out');
+        
+        // TODOS os saques são processados pela TREEAL, então todos têm custo de 2 centavos por transação
+        $custoTreealSaques = $totalSaques * $custoTreealPorTransacao;
+        $lucroSaques = $taxaTotalSaques - $custoTreealSaques;
 
         return (float) ($lucroDepositos + $lucroSaques);
     }
