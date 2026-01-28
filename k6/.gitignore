@@ -1,0 +1,14 @@
+# Ignorar arquivos de ambiente com credenciais
+.env
+
+# Ignorar resultados de testes
+results/
+*.json.gz
+results_*.json
+
+# Ignorar dados de monitoramento local
+grafana-data/
+influxdb-data/
+
+# Manter .env.example
+!.env.example

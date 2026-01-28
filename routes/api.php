@@ -12,7 +12,6 @@ use App\Http\Controllers\Api\DepositController;
 use Illuminate\Support\Facades\Artisan;
 use App\Http\Controllers\Api\PixInfracoesController;
 use App\Http\Controllers\Api\PixKeyController;
-use App\Http\Controllers\Api\AdminTransactionsController;
 
 /*
 |--------------------------------------------------------------------------
@@ -98,8 +97,6 @@ Route::middleware(['verify.jwt'])->group(function () {
         Route::put('admin/financial/deposits/{id}/status', [App\Http\Controllers\Api\FinancialController::class, 'updateDepositStatus']);
         Route::get('admin/financial/withdrawals', [App\Http\Controllers\Api\FinancialController::class, 'getWithdrawals']);
         Route::get('admin/financial/withdrawals/stats', [App\Http\Controllers\Api\FinancialController::class, 'getWithdrawalsStats']);
-        Route::post('admin/manual-transactions/deposits', [AdminTransactionsController::class, 'storeDeposit']);
-        Route::post('admin/manual-transactions/withdrawal', [AdminTransactionsController::class, 'storeWithdrawal']);
         
         // Rotas de configurações do gateway (Admin)
         Route::get('admin/settings', [App\Http\Controllers\Api\GatewaySettingsController::class, 'getSettings']);
