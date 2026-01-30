@@ -133,9 +133,10 @@ class AdminDashboardController extends Controller
             $users = $query->paginate($perPage);
 
             // CORREÇÃO N+1: Buscar todas as vendas de uma vez
+            // CORRIGIDO: Incluir COMPLETED para consistência
             $userIds = $users->pluck('user_id');
             $vendas7d = Solicitacoes::whereIn('user_id', $userIds)
-                ->where('status', 'PAID_OUT')
+                ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
                 ->where('date', '>=', now()->subDays(7))
                 ->selectRaw('user_id, SUM(amount) as total')
                 ->groupBy('user_id')
@@ -489,10 +490,12 @@ class AdminDashboardController extends Controller
     private function calculateFinancialStats(Carbon $dataInicio, Carbon $dataFim): array
     {
         // Usar queries otimizadas com índices
-        $solicitacoes = Solicitacoes::where('status', 'PAID_OUT')
+        // CORRIGIDO: Incluir COMPLETED para consistência com dashboard do usuário
+        $solicitacoes = Solicitacoes::whereIn('status', ['PAID_OUT', 'COMPLETED'])
             ->whereBetween('date', [$dataInicio, $dataFim]);
 
-        $saques = SolicitacoesCashOut::where('status', 'COMPLETED')
+        // CORRIGIDO: Incluir PAID_OUT para consistência com dashboard do usuário
+        $saques = SolicitacoesCashOut::whereIn('status', ['PAID_OUT', 'COMPLETED'])
             ->whereBetween('date', [$dataInicio, $dataFim]);
 
         // Calcular lucros com uma única query usando aggregates
@@ -613,10 +616,12 @@ class AdminDashboardController extends Controller
      */
     private function calculateTransactionStats(Carbon $dataInicio, Carbon $dataFim): array
     {
-        $solicitacoes = Solicitacoes::where('status', 'PAID_OUT')
+        // CORRIGIDO: Incluir COMPLETED para consistência com dashboard do usuário
+        $solicitacoes = Solicitacoes::whereIn('status', ['PAID_OUT', 'COMPLETED'])
             ->whereBetween('date', [$dataInicio, $dataFim]);
 
-        $saques = SolicitacoesCashOut::where('status', 'COMPLETED')
+        // CORRIGIDO: Incluir PAID_OUT para consistência com dashboard do usuário
+        $saques = SolicitacoesCashOut::whereIn('status', ['PAID_OUT', 'COMPLETED'])
             ->whereBetween('date', [$dataInicio, $dataFim]);
 
         $depositStats = (clone $solicitacoes)

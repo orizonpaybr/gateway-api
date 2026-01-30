@@ -1454,6 +1454,10 @@ class UserController extends Controller
                     ->sum('amount');
                 $qrCodesPagosSafe = max($qrCodesPagos, 1);
                 $percentualInfracoes = ($infracoes / $qrCodesPagosSafe) * 100;
+                // CORRIGIDO: Calcular índice de conversão corretamente
+                $indiceConversao = $qrCodesGerados > 0 
+                    ? ($qrCodesPagos / $qrCodesGerados) * 100 
+                    : 0;
                 return [
                     'periodo' => $dates['inicio']->format('Y-m-d H:i:s') . ' a ' . $dates['fim']->format('Y-m-d H:i:s'),
                     'quantidadeTransacoes' => [
@@ -1465,7 +1469,7 @@ class UserController extends Controller
                         'pagos' => (int) $qrCodesPagos,
                         'gerados' => (int) $qrCodesGerados,
                     ],
-                    'indiceConversao' => 0, // permanecer como antes se calculado em outra parte
+                    'indiceConversao' => (float) round($indiceConversao, 2), // CORRIGIDO: Calcular corretamente
                     'ticketMedio' => [
                         'depositos' => (float) $ticketMedioDepositos,
                         'saques' => (float) $ticketMedioSaques,
