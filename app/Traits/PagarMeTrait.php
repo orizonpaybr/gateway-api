@@ -336,7 +336,8 @@ trait PagarMeTrait
             "cash_out_liquido"      => $cashout_liquido, 
             "end_to_end"            => $idTransaction,
             "callback"              => $request->callbackUrl,
-            "descricao_transacao"   => "WEB"
+            "descricao_transacao"   => "WEB",
+            "executor_ordem"        => null // CORRIGIDO: Saques WEB são manuais, precisam de aprovação
         ];
 
         $cashout = SolicitacoesCashOut::create($pixcashout);

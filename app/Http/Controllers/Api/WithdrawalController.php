@@ -7,8 +7,11 @@ use Illuminate\Http\Request;
 use App\Http\Requests\WithdrawalIndexRequest;
 use App\Http\Requests\WithdrawalStatsRequest;
 use App\Services\WithdrawalStatsService;
+use App\Services\TreealService;
+use App\Services\BalanceService;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
+use App\Models\Treeal;
 use App\Helpers\Helper;
 use App\Constants\UserPermission;
 use Illuminate\Support\Facades\DB;
@@ -34,10 +37,18 @@ class WithdrawalController extends Controller
             $perPage = max(1, min($perPage, 100)); // limites seguros
             $page = max(1, (int) ($validated['page'] ?? 1));
 
-            $status = strtoupper((string) ($validated['status'] ?? 'PENDING'));
-            $status = in_array($status, ['PENDING', 'COMPLETED', 'PAID_OUT', 'CANCELLED', 'FAILED', 'PROCESSING', 'ALL'])
-                ? $status
-                : 'PENDING';
+            // CORRIGIDO: Normalizar status antes de validar para tratar 'all' corretamente
+            $statusInput = strtolower((string) ($validated['status'] ?? 'pending'));
+            $status = match($statusInput) {
+                'pending' => 'PENDING',
+                'completed' => 'COMPLETED',
+                'paid_out' => 'PAID_OUT',
+                'cancelled' => 'CANCELLED',
+                'failed' => 'FAILED',
+                'processing' => 'PROCESSING',
+                'all' => 'ALL',
+                default => 'PENDING'
+            };
 
             $search = trim((string) ($validated['busca'] ?? ''));
             if (mb_strlen($search) > 100) {
@@ -47,10 +58,11 @@ class WithdrawalController extends Controller
             $dataInicio = $validated['data_inicio'] ?? null;
             $dataFim = $validated['data_fim'] ?? null;
 
-            $tipo = $validated['tipo'] ?? 'all'; // 'manual', 'automatico', 'all'
+            $tipo = strtolower((string) ($validated['tipo'] ?? 'all')); // 'manual', 'automatico', 'all'
             $tipo = in_array($tipo, ['manual', 'automatico', 'all']) ? $tipo : 'all';
 
             // Query base
+            // CORRIGIDO: Incluir todos os tipos de saques (WEB, MANUAL, AUTOMATICO) para aparecerem na listagem de aprovação
             $query = SolicitacoesCashOut::query()
                 ->with(['user:id,username,email,user_id'])
                 ->select([
@@ -58,19 +70,20 @@ class WithdrawalController extends Controller
                     'pix','pixkey','amount','taxa_cash_out','cash_out_liquido','status',
                     'executor_ordem','descricao_transacao','date','created_at','updated_at'
                 ])
-                ->where('descricao_transacao', 'WEB');
+                ->whereIn('descricao_transacao', ['WEB', 'MANUAL', 'AUTOMATICO']);
 
-            // Filtro de status
-            if ($status && $status !== 'all') {
+            // CORRIGIDO: Filtro de status - verificar 'ALL' após normalização
+            if ($status && $status !== 'ALL') {
                 $query->where('status', $status);
             }
 
-            // Filtro de tipo (manual/automático)
+            // CORRIGIDO: Filtro de tipo (manual/automático) - garantir que funciona corretamente
             if ($tipo === 'manual') {
                 $query->whereNull('executor_ordem');
             } elseif ($tipo === 'automatico') {
                 $query->whereNotNull('executor_ordem');
             }
+            // Se $tipo === 'all', não aplica filtro (mostra todos)
 
             // Filtro de busca (nome, documento, ID)
             if ($search !== '') {
@@ -207,6 +220,7 @@ class WithdrawalController extends Controller
 
     /**
      * Aprovar uma solicitação de saque
+     * CORRIGIDO: Implementação completa de aprovação usando TreealService
      */
     public function approve($id, Request $request)
     {
@@ -220,8 +234,8 @@ class WithdrawalController extends Controller
                 ], 403);
             }
 
-            // Buscar saque
-            $saque = SolicitacoesCashOut::findOrFail($id);
+            // Buscar saque com lock para evitar processamento duplicado
+            $saque = SolicitacoesCashOut::lockForUpdate()->findOrFail($id);
 
             // Verificar se já foi processado
             if ($saque->status !== 'PENDING') {
@@ -231,9 +245,33 @@ class WithdrawalController extends Controller
                 ], 400);
             }
 
-            // Buscar adquirente padrão
-            $default = Helper::adquirenteDefault();
-            if (!$default) {
+            // Buscar usuário do saque
+            $userSaque = User::where('user_id', $saque->user_id)->first();
+            if (!$userSaque) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário do saque não encontrado.'
+                ], 404);
+            }
+
+            // Verificar saldo suficiente antes de processar
+            $valorTotalDescontar = $saque->amount + ($saque->taxa_cash_out ?? 0);
+            if ($userSaque->saldo < $valorTotalDescontar) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Saldo insuficiente para processar o saque. Saldo disponível: R$ ' . number_format($userSaque->saldo, 2, ',', '.') . ', necessário: R$ ' . number_format($valorTotalDescontar, 2, ',', '.')
+                ], 400);
+            }
+
+            // Determinar adquirente baseado no executor_ordem ou adquirente padrão
+            $adquirente = $saque->executor_ordem ?? Helper::adquirenteDefault();
+            
+            // Se não tem executor_ordem e adquirente padrão é Treeal, usar Treeal
+            if (!$saque->executor_ordem) {
+                $adquirente = Helper::adquirenteDefault();
+            }
+
+            if (!$adquirente) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Nenhum adquirente configurado.'
@@ -241,40 +279,23 @@ class WithdrawalController extends Controller
             }
 
             // Processar aprovação baseado no adquirente
-            switch ($default) {
+            switch (strtolower($adquirente)) {
+                case 'treeal':
+                    return $this->approveWithTreeal($saque, $userSaque, $valorTotalDescontar);
+                
                 case 'pagarme':
                     // Pagar.me não suporta saques PIX diretamente
                     return response()->json([
                         'success' => false,
-                        'message' => 'Adquirente não suportado para saques.'
+                        'message' => 'Pagar.me não suporta saques PIX. Use Treeal para saques PIX.'
                     ], 500);
+                
                 default:
                     return response()->json([
                         'success' => false,
-                        'message' => 'Adquirente não suportado.'
+                        'message' => 'Adquirente não suportado para aprovação de saques: ' . $adquirente
                     ], 500);
             }
-
-            // Se o resultado for uma resposta HTTP, extrair informações
-            if (is_a($result, 'Illuminate\Http\RedirectResponse')) {
-                $session = $result->getSession();
-                if ($session && $session->has('success')) {
-                    return response()->json([
-                        'success' => true,
-                        'message' => $session->get('success')
-                    ], 200);
-                } elseif ($session && $session->has('error')) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => $session->get('error')
-                    ], 400);
-                }
-            }
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Saque aprovado e processado com sucesso.'
-            ], 200);
 
         } catch (\Exception $e) {
             Log::error('Erro ao aprovar saque', [
@@ -285,10 +306,143 @@ class WithdrawalController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Erro ao aprovar saque.',
+                'message' => 'Erro ao aprovar saque: ' . $e->getMessage(),
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Aprovar saque usando Treeal
+     */
+    private function approveWithTreeal(SolicitacoesCashOut $saque, User $userSaque, float $valorTotalDescontar)
+    {
+        try {
+            $treealService = app(TreealService::class);
+            $treealConfig = Treeal::first();
+
+            // Validar se Treeal está configurado e ativo
+            if (!$treealConfig || !$treealService->isActive()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Treeal não está configurado ou ativo.'
+                ], 500);
+            }
+
+            // Gerar idempotency key único
+            $idempotencyKey = str()->uuid()->toString();
+
+            // CORRIGIDO: Os campos no banco:
+            // - pix = valor da chave PIX (ex: "12345678901", "email@exemplo.com")
+            // - pixkey = tipo da chave PIX (ex: "cpf", "email", "telefone")
+            // Criar saque na API Treeal
+            Log::info('WithdrawalController::approveWithTreeal - Preparando aprovação', [
+                'saque_id' => $saque->id,
+                'pix_value' => $saque->pix,
+                'pix_type' => $saque->pixkey,
+                'amount' => $saque->amount,
+            ]);
+            
+            $withdrawalResult = $treealService->createWithdrawalByPixKey(
+                (float) $saque->amount,
+                $saque->pix, // CORRIGIDO: pix contém o valor da chave PIX
+                'Saque aprovado manualmente - ID: ' . $saque->id,
+                $idempotencyKey,
+                $saque->pixkey // CORRIGIDO: pixkey contém o tipo da chave PIX
+            );
+
+            if (!$withdrawalResult['success']) {
+                Log::error('WithdrawalController::approveWithTreeal - Erro ao criar saque na API', [
+                    'error' => $withdrawalResult['message'] ?? 'Erro desconhecido',
+                    'saque_id' => $saque->id
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => $withdrawalResult['message'] ?? 'Erro ao processar saque PIX na Treeal'
+                ], 500);
+            }
+
+            $transactionId = $withdrawalResult['transaction_id'] ?? $withdrawalResult['id'] ?? null;
+            $status = $withdrawalResult['status'] ?? 'PROCESSING';
+
+            // Mapear status da Treeal para status interno
+            $statusInterno = $this->mapTreealStatusToInternal($status);
+
+            // Atualizar saque em transação para garantir atomicidade
+            // IMPORTANTE: O débito é feito aqui na aprovação porque a Treeal já iniciou o processamento
+            // Se o webhook chegar depois com LIQUIDATED, o PaymentProcessingService verificará idempotência
+            DB::transaction(function () use ($saque, $userSaque, $valorTotalDescontar, $transactionId, $statusInterno) {
+                // Lock no saque para evitar race condition
+                $saqueAtualizado = SolicitacoesCashOut::where('id', $saque->id)
+                    ->lockForUpdate()
+                    ->first();
+                    
+                // Verificar idempotência - não debitar se já foi processado
+                if (in_array($saqueAtualizado->status, ['COMPLETED', 'PAID_OUT'])) {
+                    Log::info('WithdrawalController::approveWithTreeal - Saque já processado', [
+                        'saque_id' => $saque->id,
+                        'status' => $saqueAtualizado->status
+                    ]);
+                    return;
+                }
+                
+                // Atualizar saque
+                $saqueAtualizado->update([
+                    'status' => $statusInterno,
+                    'externalreference' => $transactionId ?? $saqueAtualizado->externalreference,
+                    'idTransaction' => $transactionId ?? $saqueAtualizado->idTransaction,
+                    'executor_ordem' => 'Treeal', // Marcar como processado pela Treeal
+                    'end_to_end' => $transactionId ?? $saqueAtualizado->end_to_end,
+                ]);
+
+                // Debitar saldo do usuário (thread-safe)
+                $balanceService = app(BalanceService::class);
+                $balanceService->decrementBalance($userSaque, $valorTotalDescontar, 'saldo');
+                
+                // Recalcular saldo líquido
+                Helper::calculaSaldoLiquido($userSaque->user_id);
+            });
+
+            Log::info('WithdrawalController::approveWithTreeal - Saque aprovado com sucesso', [
+                'saque_id' => $saque->id,
+                'transaction_id' => $transactionId,
+                'status' => $statusInterno,
+                'user_id' => $userSaque->user_id
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Saque aprovado e processado com sucesso.',
+                'data' => [
+                    'transaction_id' => $transactionId,
+                    'status' => $statusInterno
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            Log::error('WithdrawalController::approveWithTreeal - Exceção', [
+                'saque_id' => $saque->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
+     * Mapear status da Treeal para status interno
+     */
+    private function mapTreealStatusToInternal(string $statusTreeal): string
+    {
+        $statusNormalizado = strtoupper(trim($statusTreeal));
+        
+        return match($statusNormalizado) {
+            'PROCESSING', 'PENDING' => 'PROCESSING',
+            'COMPLETED', 'CONCLUIDO', 'PAID' => 'COMPLETED',
+            'FAILED', 'FALHOU', 'ERROR' => 'FAILED',
+            'CANCELLED', 'CANCELADO' => 'CANCELLED',
+            default => 'PROCESSING'
+        };
     }
 
     /**

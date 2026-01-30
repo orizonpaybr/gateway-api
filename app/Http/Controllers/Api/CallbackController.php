@@ -402,6 +402,14 @@ class CallbackController extends Controller
      * - REFUNDED: Transação estornada
      * - PARTIALLY_REFUNDED: Parcialmente estornada
      */
+    /**
+     * Processa webhook de Cash Out (saque) da Treeal
+     * 
+     * CORRIGIDO: Agora processa o saldo corretamente quando:
+     * - Saque é confirmado (LIQUIDATED/COMPLETED) - debita saldo se ainda não foi debitado
+     * - Saque é cancelado (CANCELLED) - reverte saldo se já foi debitado
+     * - Saque é estornado (REFUNDED) - reverte saldo se já foi debitado
+     */
     private function handleTreealCashOutWebhook($transactionId, $status, $data)
     {
         if (!$transactionId) {
@@ -438,6 +446,13 @@ class CallbackController extends Controller
         $internalStatus = $this->mapTreealStatusToInternal($status);
         $statusUpper = strtoupper($status ?? '');
 
+        // Status que indicam saque confirmado/liquidado
+        $statusConfirmado = ['LIQUIDATED', 'COMPLETED', 'PAID', 'CONCLUIDO'];
+        // Status que indicam saque cancelado
+        $statusCancelado = ['CANCELED', 'CANCELLED', 'FAILED'];
+        // Status que indicam saque estornado
+        $statusEstornado = ['REFUNDED', 'PARTIALLY_REFUNDED'];
+        
         // Preparar dados para atualização
         $updateData = [];
         
@@ -446,34 +461,139 @@ class CallbackController extends Controller
             $updateData['end_to_end'] = $endToEndId;
         }
 
-        // Atualizar status se diferente
-        if ($cashOut->status !== $internalStatus) {
-            $updateData['status'] = $internalStatus;
-            
-            // Se foi estornado, registrar informações adicionais
-            if (in_array($statusUpper, ['REFUNDED', 'PARTIALLY_REFUNDED'])) {
-                Log::warning('[TREEAL] Saque estornado', [
+        // ========================================
+        // PROCESSAMENTO DE SAQUE CONFIRMADO
+        // ========================================
+        if (in_array($statusUpper, $statusConfirmado)) {
+            // Verificar se já foi processado (idempotência)
+            if (in_array($cashOut->status, ['PAID_OUT', 'COMPLETED'])) {
+                Log::info('[TREEAL] Saque já processado anteriormente', [
                     'transaction_id' => $transactionId,
-                    'status' => $status,
-                    'end_to_end_id' => $endToEndId,
-                    'data' => $data
+                    'status' => $cashOut->status
                 ]);
                 
-                // TODO: Implementar lógica de estorno se necessário
-                // - Reverter saldo do usuário
-                // - Notificar usuário
-                // - Registrar em tabela de estornos
+                // Atualizar end_to_end se necessário
+                if (!empty($updateData)) {
+                    $cashOut->update($updateData);
+                }
+                
+                return response()->json(['status' => true, 'message' => 'Já processado']);
             }
             
-            // Se foi cancelado
-            if (in_array($statusUpper, ['CANCELED', 'CANCELLED'])) {
-                Log::warning('[TREEAL] Saque cancelado', [
-                    'transaction_id' => $transactionId,
-                    'reason' => $data['message'] ?? $data['errorCode'] ?? 'Não informado'
+            try {
+                // Usar PaymentProcessingService para processar de forma atômica
+                $paymentService = app(PaymentProcessingService::class);
+                $paymentService->processWithdrawal($cashOut);
+                
+                // Atualizar executor_ordem para indicar que foi processado pela Treeal
+                $cashOut->update([
+                    'executor_ordem' => 'Treeal',
+                    'end_to_end' => $endToEndId ?? $cashOut->end_to_end
                 ]);
+                
+                Log::info('[TREEAL] Saque confirmado e processado com sucesso', [
+                    'transaction_id' => $transactionId,
+                    'amount' => $cashOut->amount,
+                    'user_id' => $cashOut->user_id
+                ]);
+                
+                return response()->json(['status' => true, 'message' => 'Saque processado']);
+                
+            } catch (\Exception $e) {
+                // Verificar se já foi processado (idempotência - pode ter sido processado por outra requisição)
+                $cashOut->refresh();
+                if (in_array($cashOut->status, ['PAID_OUT', 'COMPLETED'])) {
+                    Log::info('[TREEAL] Saque processado por outra requisição', [
+                        'transaction_id' => $transactionId
+                    ]);
+                    return response()->json(['status' => true, 'message' => 'Já processado']);
+                }
+                
+                Log::error('[TREEAL] Erro ao processar saque confirmado', [
+                    'transaction_id' => $transactionId,
+                    'error' => $e->getMessage()
+                ]);
+                
+                return response()->json([
+                    'status' => false, 
+                    'message' => 'Erro ao processar saque: ' . $e->getMessage()
+                ], 500);
             }
         }
+        
+        // ========================================
+        // PROCESSAMENTO DE SAQUE CANCELADO
+        // ========================================
+        if (in_array($statusUpper, $statusCancelado)) {
+            Log::warning('[TREEAL] Saque cancelado', [
+                'transaction_id' => $transactionId,
+                'reason' => $data['message'] ?? $data['errorCode'] ?? 'Não informado',
+                'current_status' => $cashOut->status
+            ]);
+            
+            // Se o saque estava em processamento ou já foi debitado, reverter o saldo
+            if (in_array($cashOut->status, ['PROCESSING', 'PAID_OUT', 'COMPLETED'])) {
+                try {
+                    $this->reverterSaldoSaque($cashOut, $transactionId, 'cancelamento');
+                } catch (\Exception $e) {
+                    Log::error('[TREEAL] Erro ao reverter saldo por cancelamento', [
+                        'transaction_id' => $transactionId,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            }
+            
+            // Atualizar status para cancelado
+            $cashOut->update([
+                'status' => 'CANCELLED',
+                'end_to_end' => $endToEndId ?? $cashOut->end_to_end
+            ]);
+            
+            return response()->json(['status' => true, 'message' => 'Saque cancelado processado']);
+        }
+        
+        // ========================================
+        // PROCESSAMENTO DE SAQUE ESTORNADO
+        // ========================================
+        if (in_array($statusUpper, $statusEstornado)) {
+            Log::warning('[TREEAL] Saque estornado', [
+                'transaction_id' => $transactionId,
+                'status' => $status,
+                'end_to_end_id' => $endToEndId,
+                'data' => $data
+            ]);
+            
+            // Se o saque foi pago/completado, reverter o saldo
+            if (in_array($cashOut->status, ['PAID_OUT', 'COMPLETED'])) {
+                try {
+                    $isPartial = $statusUpper === 'PARTIALLY_REFUNDED';
+                    $refundAmount = $isPartial ? ($data['refundAmount'] ?? $data['amount'] ?? $cashOut->amount) : $cashOut->amount;
+                    
+                    $this->reverterSaldoSaque($cashOut, $transactionId, 'estorno', $refundAmount);
+                } catch (\Exception $e) {
+                    Log::error('[TREEAL] Erro ao reverter saldo por estorno', [
+                        'transaction_id' => $transactionId,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            }
+            
+            // Atualizar status para estornado
+            $cashOut->update([
+                'status' => $internalStatus,
+                'end_to_end' => $endToEndId ?? $cashOut->end_to_end
+            ]);
+            
+            return response()->json(['status' => true, 'message' => 'Saque estornado processado']);
+        }
 
+        // ========================================
+        // OUTROS STATUS (PROCESSING, etc.)
+        // ========================================
+        if ($cashOut->status !== $internalStatus) {
+            $updateData['status'] = $internalStatus;
+        }
+        
         // Aplicar atualizações se houver
         if (!empty($updateData)) {
             $cashOut->update($updateData);
@@ -485,6 +605,48 @@ class CallbackController extends Controller
         }
 
         return response()->json(['status' => true, 'message' => 'Webhook processado']);
+    }
+
+    /**
+     * Reverte o saldo de um saque cancelado ou estornado
+     * 
+     * @param SolicitacoesCashOut $cashOut
+     * @param string $transactionId
+     * @param string $motivo 'cancelamento' ou 'estorno'
+     * @param float|null $valorEstornado Valor a reverter (para estornos parciais)
+     */
+    private function reverterSaldoSaque(SolicitacoesCashOut $cashOut, string $transactionId, string $motivo, ?float $valorEstornado = null)
+    {
+        $user = User::where('user_id', $cashOut->user_id)->first();
+        
+        if (!$user) {
+            Log::warning("[TREEAL] Usuário não encontrado para reverter saldo de {$motivo}", [
+                'transaction_id' => $transactionId,
+                'user_id' => $cashOut->user_id
+            ]);
+            return;
+        }
+        
+        // Calcular valor a reverter
+        $valorPrincipal = $valorEstornado ?? $cashOut->amount;
+        $valorTaxas = $cashOut->taxa_cash_out ?? 0;
+        $valorTotalReverter = $valorPrincipal + $valorTaxas;
+        
+        // Reverter saldo
+        $balanceService = app(\App\Services\BalanceService::class);
+        $balanceService->incrementBalance($user, $valorTotalReverter, 'saldo');
+        
+        // Recalcular saldo líquido
+        Helper::calculaSaldoLiquido($user->user_id);
+        
+        Log::info("[TREEAL] Saldo revertido por {$motivo}", [
+            'transaction_id' => $transactionId,
+            'user_id' => $user->user_id,
+            'valor_principal' => $valorPrincipal,
+            'valor_taxas' => $valorTaxas,
+            'valor_total_revertido' => $valorTotalReverter,
+            'saldo_atualizado' => $user->fresh()->saldo
+        ]);
     }
 
     /**

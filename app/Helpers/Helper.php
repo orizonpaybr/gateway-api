@@ -395,8 +395,9 @@ class Helper
 
     public static function getPendingAprove()
     {
+        // CORRIGIDO: Incluir todos os tipos de saques (WEB, MANUAL, AUTOMATICO) para contagem de pendentes
         return $totalSaldoBloqueado = SolicitacoesCashOut::where('status', 'PENDING')
-            ->where('descricao_transacao', 'WEB')
+            ->whereIn('descricao_transacao', ['WEB', 'MANUAL', 'AUTOMATICO'])
             ->count();
     }
 
