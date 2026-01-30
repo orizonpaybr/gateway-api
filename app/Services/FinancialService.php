@@ -324,18 +324,20 @@ class FinancialService
             $page, $limit, $status, $busca, $dataInicio, $dataFim
         ) {
             // Select apenas campos necessários para reduzir memória e I/O
+            // CORRIGIDO: Incluir cash_out_liquido e beneficiaryname explicitamente
             $query = SolicitacoesCashOut::with(['user:id,user_id,name,username'])
                 ->select([
                     'id',
                     'user_id',
                     'idTransaction',
                     'amount',
-                    DB::raw('cash_out_liquido as valor_liquido'),
+                    'cash_out_liquido', // CORRIGIDO: Incluir campo original
                     'status',
                     'date',
-                    DB::raw('pixkey as pix_key'),
-                    DB::raw('type as pix_type'),
+                    'pixkey', // CORRIGIDO: Incluir campo original
+                    'type', // CORRIGIDO: Incluir campo original
                     'taxa_cash_out',
+                    'beneficiaryname', // CORRIGIDO: Incluir para busca
                     'created_at',
                 ])
                 ->when($status, fn($q) => $q->where('status', $status))
@@ -477,7 +479,22 @@ class FinancialService
             return collect();
         }
 
+        // CORRIGIDO: Selecionar campos específicos incluindo cash_out_liquido
         $query = SolicitacoesCashOut::with('user:id,user_id,name,username')
+            ->select([
+                'id',
+                'user_id',
+                'idTransaction',
+                'amount',
+                'cash_out_liquido',
+                'status',
+                'date',
+                'pixkey',
+                'type',
+                'taxa_cash_out',
+                'beneficiaryname',
+                'created_at',
+            ])
             ->when($status, fn($q) => $q->where('status', $status))
             ->when($busca, fn($q) => $this->applyWithdrawalSearch($q, $busca))
             ->when($dataInicio, fn($q) => $q->where('date', '>=', $dataInicio))
@@ -622,6 +639,7 @@ class FinancialService
 
     /**
      * Aplicar filtro de busca em saques
+     * CORRIGIDO: Incluir busca por user_id, beneficiaryname e pixkey diretamente
      * 
      * @param \Illuminate\Database\Eloquent\Builder $query
      * @param string $busca
@@ -636,11 +654,16 @@ class FinancialService
         }
         
         return $query->where(function($q) use ($busca) {
-            $q->where('pix_key', 'like', "%{$busca}%")
-              ->orWhere('pix_type', 'like', "%{$busca}%")
+            $q->where('user_id', 'like', "%{$busca}%")
+              ->orWhere('beneficiaryname', 'like', "%{$busca}%")
+              ->orWhere('pixkey', 'like', "%{$busca}%")
+              ->orWhere('type', 'like', "%{$busca}%")
+              ->orWhere('idTransaction', 'like', "%{$busca}%")
               ->orWhereHas('user', function($userQuery) use ($busca) {
                   $userQuery->where('name', 'like', "%{$busca}%")
-                           ->orWhere('username', 'like', "%{$busca}%");
+                           ->orWhere('username', 'like', "%{$busca}%")
+                           ->orWhere('email', 'like', "%{$busca}%")
+                           ->orWhere('user_id', 'like', "%{$busca}%");
               });
         });
     }
@@ -694,6 +717,19 @@ class FinancialService
         $isDeposit = $tipo === 'deposito';
         $model = $isDeposit ? Solicitacoes::class : SolicitacoesCashOut::class;
 
+        // CORRIGIDO: Usar cash_out_liquido diretamente para saques
+        // Se cash_out_liquido for NULL ou 0, calcular: amount (cliente sempre recebe o valor solicitado)
+        if ($isDeposit) {
+            $valorLiquido = $item->deposito_liquido ?? 0;
+        } else {
+            $valorLiquido = $item->cash_out_liquido ?? $item->valor_liquido ?? null;
+            if ($valorLiquido === null || $valorLiquido == 0) {
+                // Para saques, o cliente sempre recebe o valor solicitado (amount)
+                // A taxa é descontada do saldo, não do valor recebido
+                $valorLiquido = $item->amount ?? 0;
+            }
+        }
+
         return [
             'id' => $item->id,
             'tipo' => $tipo,
@@ -703,7 +739,7 @@ class FinancialService
                 ? $item->idTransaction 
                 : ($item->idTransaction ?? 'dep_' . $item->id),
             'valor_total' => (float) $item->amount,
-            'valor_liquido' => (float) ($isDeposit ? $item->deposito_liquido : $item->valor_liquido),
+            'valor_liquido' => (float) $valorLiquido,
             'status' => $item->status,
             'status_legivel' => $this->getStatusLabel($item->status),
             'data' => $item->date,
@@ -734,19 +770,37 @@ class FinancialService
 
     /**
      * Formatar saque
+     * CORRIGIDO: Usar cash_out_liquido diretamente e incluir beneficiaryname
+     * CORRIGIDO: Calcular cash_out_liquido se NULL (para saques antigos)
      */
     private function formatWithdrawal($item): array
     {
+        // CORRIGIDO: Usar cash_out_liquido diretamente ao invés de valor_liquido
+        // Se cash_out_liquido for NULL ou 0, calcular: amount (cliente sempre recebe o valor solicitado)
+        $valorLiquido = $item->cash_out_liquido ?? $item->valor_liquido ?? null;
+        if ($valorLiquido === null || $valorLiquido == 0) {
+            // Para saques, o cliente sempre recebe o valor solicitado (amount)
+            // A taxa é descontada do saldo, não do valor recebido
+            $valorLiquido = $item->amount ?? 0;
+        }
+        
+        // CORRIGIDO: Usar pixkey e type diretamente ao invés de pix_key e pix_type
+        $pixKey = $item->pixkey ?? $item->pix_key ?? '';
+        $pixType = $item->type ?? $item->pix_type ?? '';
+        
+        // CORRIGIDO: Usar beneficiaryname se disponível, senão usar nome do usuário
+        $clienteNome = $item->beneficiaryname ?? ($item->user ? $item->user->name : 'N/A');
+
         return [
             'id' => $item->id,
             'meio' => 'pix',
             'cliente_id' => $item->user ? $item->user->username : $item->user_id,
-            'cliente_nome' => $item->user ? $item->user->name : 'N/A',
-            'pix_key' => $item->pix_key,
-            'pix_type' => $item->pix_type,
+            'cliente_nome' => $clienteNome,
+            'pix_key' => $pixKey,
+            'pix_type' => $pixType,
             'transacao_id' => $item->idTransaction ?? 'dep_' . $item->id,
             'valor_total' => (float) $item->amount,
-            'valor_liquido' => (float) $item->valor_liquido,
+            'valor_liquido' => (float) $valorLiquido,
             'taxa' => (float) $item->taxa_cash_out,
             'status' => $item->status,
             'status_legivel' => $this->getStatusLabel($item->status),
