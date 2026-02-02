@@ -56,12 +56,12 @@ class UserController extends Controller
             $cacheKey = "user_balance_{$user->username}";
             $balanceData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 120, function() use ($user) {
                 // Calcular totais de transações (entradas) - apenas COMPLETED e PAID_OUT
-                $totalInflows = \App\Models\Solicitacoes::where('user_id', $user->username)
+                $totalInflows = \App\Models\Solicitacoes::where('user_id', $user->user_id)
                     ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
                     ->sum('amount');
 
                 // Calcular totais de saques (saídas) - apenas COMPLETED e PAID_OUT
-                $totalOutflows = \App\Models\SolicitacoesCashOut::where('user_id', $user->username)
+                $totalOutflows = \App\Models\SolicitacoesCashOut::where('user_id', $user->user_id)
                     ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
                     ->sum('amount');
 
@@ -159,7 +159,7 @@ class UserController extends Controller
             );
             
             $transactionsData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 120, function() use ($user, $page, $limit, $tipo, $status, $busca, $dataInicio, $dataFim) {
-                $depositosQuery = \App\Models\Solicitacoes::where('user_id', $user->username)
+                $depositosQuery = \App\Models\Solicitacoes::where('user_id', $user->user_id)
                 ->select([
                     'id',
                     'idTransaction',
@@ -178,7 +178,7 @@ class UserController extends Controller
                 ]);
 
             // Buscar saques
-            $saquesQuery = \App\Models\SolicitacoesCashOut::where('user_id', $user->username)
+            $saquesQuery = \App\Models\SolicitacoesCashOut::where('user_id', $user->user_id)
                 ->select([
                     'id',
                     'idTransaction',
@@ -198,8 +198,17 @@ class UserController extends Controller
 
             // Aplicar filtro de período se fornecido
             if ($dataInicio && $dataFim) {
-                $depositosQuery->whereBetween('date', [$dataInicio, $dataFim]);
-                $saquesQuery->whereBetween('date', [$dataInicio, $dataFim]);
+                // Garantir que as datas tenham hora para whereBetween funcionar corretamente
+                // Se a data vem apenas como YYYY-MM-DD, adicionar horas
+                $dataInicioFormatada = strlen($dataInicio) === 10 
+                    ? $dataInicio . ' 00:00:00' 
+                    : $dataInicio;
+                $dataFimFormatada = strlen($dataFim) === 10 
+                    ? $dataFim . ' 23:59:59' 
+                    : $dataFim;
+                
+                $depositosQuery->whereBetween('date', [$dataInicioFormatada, $dataFimFormatada]);
+                $saquesQuery->whereBetween('date', [$dataInicioFormatada, $dataFimFormatada]);
             }
 
             // Aplicar filtro de status se fornecido
@@ -210,7 +219,7 @@ class UserController extends Controller
 
             // Aplicar filtro de busca se fornecido
             if ($busca && trim($busca) !== '') {
-                $this->applyPendingTransactionsSearchFilter($depositosQuery, $saquesQuery, trim($busca));
+                $this->applyTransactionsSearchFilter($depositosQuery, $saquesQuery, trim($busca));
             }
 
             // Unir as queries baseado no filtro de tipo
@@ -2214,16 +2223,24 @@ class UserController extends Controller
      * @param string $busca
      * @return void
      */
-    private function applyPendingTransactionsSearchFilter($depositosQuery, $saquesQuery, string $busca): void
+    /**
+     * Aplicar filtro de busca em transações (depósitos e saques)
+     * Busca por: transaction_id, idTransaction, descrição, nome_cliente e valor
+     */
+    private function applyTransactionsSearchFilter($depositosQuery, $saquesQuery, string $busca): void
     {
         $buscaLower = strtolower(trim($busca));
         $searchPattern = '%' . $buscaLower . '%';
 
         // Aplicar busca em depósitos
         $depositosQuery->where(function($query) use ($searchPattern, $busca) {
-            // Buscar por descrição (case-insensitive)
-            $query->whereRaw('LOWER(CAST(descricao_transacao AS CHAR CHARACTER SET utf8mb4)) LIKE ?', [$searchPattern])
-                  ->orWhereRaw('LOWER(CAST(descricao AS CHAR CHARACTER SET utf8mb4)) LIKE ?', [$searchPattern]);
+            // Buscar por transaction_id ou idTransaction
+            $query->whereRaw('LOWER(idTransaction) LIKE ?', [$searchPattern])
+                  ->orWhereRaw('LOWER(externalreference) LIKE ?', [$searchPattern])
+                  // Buscar por nome do cliente
+                  ->orWhereRaw('LOWER(CAST(client_name AS CHAR CHARACTER SET utf8mb4)) LIKE ?', [$searchPattern])
+                  // Buscar por descrição (case-insensitive)
+                  ->orWhereRaw('LOWER(CAST(descricao_transacao AS CHAR CHARACTER SET utf8mb4)) LIKE ?', [$searchPattern]);
 
             // Buscar por valor
             $this->applyValueSearch($query, $busca, ['amount', 'deposito_liquido']);
@@ -2231,13 +2248,25 @@ class UserController extends Controller
 
         // Aplicar busca em saques
         $saquesQuery->where(function($query) use ($searchPattern, $busca) {
-            // Buscar por descrição (case-insensitive)
-            $query->whereRaw('LOWER(CAST(descricao_transacao AS CHAR CHARACTER SET utf8mb4)) LIKE ?', [$searchPattern])
-                  ->orWhereRaw('LOWER(CAST(descricao AS CHAR CHARACTER SET utf8mb4)) LIKE ?', [$searchPattern]);
+            // Buscar por transaction_id ou idTransaction
+            $query->whereRaw('LOWER(idTransaction) LIKE ?', [$searchPattern])
+                  ->orWhereRaw('LOWER(externalreference) LIKE ?', [$searchPattern])
+                  // Buscar por nome do beneficiário
+                  ->orWhereRaw('LOWER(CAST(beneficiaryname AS CHAR CHARACTER SET utf8mb4)) LIKE ?', [$searchPattern])
+                  // Buscar por descrição (case-insensitive)
+                  ->orWhereRaw('LOWER(CAST(descricao_transacao AS CHAR CHARACTER SET utf8mb4)) LIKE ?', [$searchPattern]);
 
             // Buscar por valor
             $this->applyValueSearch($query, $busca, ['amount', 'cash_out_liquido']);
         });
+    }
+
+    /**
+     * @deprecated Use applyTransactionsSearchFilter instead
+     */
+    private function applyPendingTransactionsSearchFilter($depositosQuery, $saquesQuery, string $busca): void
+    {
+        $this->applyTransactionsSearchFilter($depositosQuery, $saquesQuery, $busca);
     }
 
     /**
