@@ -1,0 +1,545 @@
+{
+	"_type": "export",
+	"__export_format": 4,
+	"__export_date": "2026-02-02T10:00:00.000Z",
+	"__export_source": "insomnia.desktop.app:v2023.5.8",
+	"resources": [
+		{
+			"_id": "req_auth_login",
+			"parentId": "fld_auth",
+			"modified": 1706875200000,
+			"created": 1706875200000,
+			"url": "{{ _.base_url }}/api/auth/login",
+			"name": "1. Login - Usuário Pai",
+			"description": "Login do usuário que será pai afiliado",
+			"method": "POST",
+			"body": {
+				"mimeType": "application/json",
+				"text": "{\n  \"username\": \"pai_afiliado\",\n  \"password\": \"senha123\"\n}"
+			},
+			"parameters": [],
+			"headers": [
+				{
+					"name": "Content-Type",
+					"value": "application/json",
+					"id": "pair_content_type"
+				},
+				{
+					"name": "Accept",
+					"value": "application/json",
+					"id": "pair_accept"
+				}
+			],
+			"authentication": {},
+			"metaSortKey": 1000000000000,
+			"isPrivate": false,
+			"settingStoreCookies": true,
+			"settingSendCookies": true,
+			"settingDisableRenderRequestBody": false,
+			"settingEncodeUrl": true,
+			"settingRebuildPath": true,
+			"settingFollowRedirects": "global",
+			"_type": "request"
+		},
+		{
+			"_id": "req_generate_affiliate_link",
+			"parentId": "fld_affiliates",
+			"modified": 1706875200000,
+			"created": 1706875200000,
+			"url": "{{ _.base_url }}/api/user/affiliate-link",
+			"name": "2. Gerar Link de Afiliado",
+			"description": "Gera ou obtém o link de afiliado do usuário autenticado. Qualquer usuário pode gerar um link.",
+			"method": "GET",
+			"body": {},
+			"parameters": [],
+			"headers": [
+				{
+					"name": "Authorization",
+					"value": "Bearer {{ _.token_pai }}",
+					"id": "pair_auth"
+				},
+				{
+					"name": "Accept",
+					"value": "application/json",
+					"id": "pair_accept"
+				}
+			],
+			"authentication": {},
+			"metaSortKey": 2000000000000,
+			"isPrivate": false,
+			"settingStoreCookies": true,
+			"settingSendCookies": true,
+			"settingDisableRenderRequestBody": false,
+			"settingEncodeUrl": true,
+			"settingRebuildPath": true,
+			"settingFollowRedirects": "global",
+			"_type": "request"
+		},
+		{
+			"_id": "req_register_with_ref",
+			"parentId": "fld_affiliates",
+			"modified": 1706875200000,
+			"created": 1706875200000,
+			"url": "{{ _.base_url }}/api/auth/register?ref={{ _.affiliate_code }}",
+			"name": "3. Cadastrar Filho com Link de Afiliado",
+			"description": "Cadastra um novo usuário usando o link de afiliado. O parâmetro 'ref' deve conter o affiliate_code do pai.",
+			"method": "POST",
+			"body": {
+				"mimeType": "multipart/form-data",
+				"params": [
+					{
+						"id": "pair_username",
+						"name": "username",
+						"value": "filho_afiliado",
+						"description": "Username único do novo usuário",
+						"type": "text"
+					},
+					{
+						"id": "pair_name",
+						"name": "name",
+						"value": "Filho Afiliado",
+						"description": "Nome completo",
+						"type": "text"
+					},
+					{
+						"id": "pair_email",
+						"name": "email",
+						"value": "filho@example.com",
+						"description": "Email válido",
+						"type": "text"
+					},
+					{
+						"id": "pair_password",
+						"name": "password",
+						"value": "senha123",
+						"description": "Senha do usuário",
+						"type": "text"
+					},
+					{
+						"id": "pair_telefone",
+						"name": "telefone",
+						"value": "11999999999",
+						"description": "Telefone com DDD",
+						"type": "text"
+					},
+					{
+						"id": "pair_cpf_cnpj",
+						"name": "cpf_cnpj",
+						"value": "12345678900",
+						"description": "CPF ou CNPJ",
+						"type": "text"
+					},
+					{
+						"id": "pair_gender",
+						"name": "gender",
+						"value": "M",
+						"description": "Gênero (M/F/O)",
+						"type": "text"
+					}
+				]
+			},
+			"parameters": [
+				{
+					"id": "pair_ref",
+					"name": "ref",
+					"value": "{{ _.affiliate_code }}",
+					"description": "Código de afiliado do pai (vem da URL)",
+					"disabled": false
+				}
+			],
+			"headers": [
+				{
+					"name": "Accept",
+					"value": "application/json",
+					"id": "pair_accept"
+				}
+			],
+			"authentication": {},
+			"metaSortKey": 3000000000000,
+			"isPrivate": false,
+			"settingStoreCookies": true,
+			"settingSendCookies": true,
+			"settingDisableRenderRequestBody": false,
+			"settingEncodeUrl": true,
+			"settingRebuildPath": true,
+			"settingFollowRedirects": "global",
+			"_type": "request"
+		},
+		{
+			"_id": "req_login_filho",
+			"parentId": "fld_affiliates",
+			"modified": 1706875200000,
+			"created": 1706875200000,
+			"url": "{{ _.base_url }}/api/auth/login",
+			"name": "4. Login - Usuário Filho",
+			"description": "Login do usuário filho que foi cadastrado com link de afiliado",
+			"method": "POST",
+			"body": {
+				"mimeType": "application/json",
+				"text": "{\n  \"username\": \"filho_afiliado\",\n  \"password\": \"senha123\"\n}"
+			},
+			"parameters": [],
+			"headers": [
+				{
+					"name": "Content-Type",
+					"value": "application/json",
+					"id": "pair_content_type"
+				},
+				{
+					"name": "Accept",
+					"value": "application/json",
+					"id": "pair_accept"
+				}
+			],
+			"authentication": {},
+			"metaSortKey": 4000000000000,
+			"isPrivate": false,
+			"settingStoreCookies": true,
+			"settingSendCookies": true,
+			"settingDisableRenderRequestBody": false,
+			"settingEncodeUrl": true,
+			"settingRebuildPath": true,
+			"settingFollowRedirects": "global",
+			"_type": "request"
+		},
+		{
+			"_id": "req_cash_in",
+			"parentId": "fld_affiliates",
+			"modified": 1706875200000,
+			"created": 1706875200000,
+			"url": "{{ _.base_url }}/api/wallet/deposit/payment",
+			"name": "5. Cash-In (Depósito) - Filho",
+			"description": "Realiza um depósito de R$5,00. O filho paga taxa da aplicação (R$0,50) + comissão do pai (R$0,50) = R$1,00 total. O filho recebe R$4,00 (R$5,00 - R$1,00). O pai recebe R$0,50 de comissão.",
+			"method": "POST",
+			"body": {
+				"mimeType": "application/json",
+				"text": "{\n  \"token\": \"{{ _.token_filho }}\",\n  \"secret\": \"{{ _.secret_filho }}\",\n  \"amount\": 5.00,\n  \"debtor_name\": \"Filho Afiliado\",\n  \"email\": \"filho@example.com\",\n  \"debtor_document_number\": \"12345678900\",\n  \"phone\": \"11999999999\",\n  \"method_pay\": \"pix\",\n  \"postback\": \"https://seu-site.com/webhook\",\n  \"split_email\": null,\n  \"split_percentage\": null\n}"
+			},
+			"parameters": [],
+			"headers": [
+				{
+					"name": "Content-Type",
+					"value": "application/json",
+					"id": "pair_content_type"
+				},
+				{
+					"name": "Accept",
+					"value": "application/json",
+					"id": "pair_accept"
+				}
+			],
+			"authentication": {},
+			"metaSortKey": 5000000000000,
+			"isPrivate": false,
+			"settingStoreCookies": true,
+			"settingSendCookies": true,
+			"settingDisableRenderRequestBody": false,
+			"settingEncodeUrl": true,
+			"settingRebuildPath": true,
+			"settingFollowRedirects": "global",
+			"_type": "request"
+		},
+		{
+			"_id": "req_check_balance_filho",
+			"parentId": "fld_affiliates",
+			"modified": 1706875200000,
+			"created": 1706875200000,
+			"url": "{{ _.base_url }}/api/balance",
+			"name": "6. Verificar Saldo - Filho",
+			"description": "Verifica o saldo do filho após o cash-in. Deve mostrar R$4,00 (R$5,00 - R$0,50 taxa aplicação - R$0,50 comissão pai = R$4,00).",
+			"method": "GET",
+			"body": {},
+			"parameters": [],
+			"headers": [
+				{
+					"name": "Authorization",
+					"value": "Bearer {{ _.token_filho }}",
+					"id": "pair_auth"
+				},
+				{
+					"name": "Accept",
+					"value": "application/json",
+					"id": "pair_accept"
+				}
+			],
+			"authentication": {},
+			"metaSortKey": 6000000000000,
+			"isPrivate": false,
+			"settingStoreCookies": true,
+			"settingSendCookies": true,
+			"settingDisableRenderRequestBody": false,
+			"settingEncodeUrl": true,
+			"settingRebuildPath": true,
+			"settingFollowRedirects": "global",
+			"_type": "request"
+		},
+		{
+			"_id": "req_check_balance_pai",
+			"parentId": "fld_affiliates",
+			"modified": 1706875200000,
+			"created": 1706875200000,
+			"url": "{{ _.base_url }}/api/balance",
+			"name": "7. Verificar Saldo - Pai",
+			"description": "Verifica o saldo do pai após o filho fazer cash-in. Deve mostrar R$0,50 de comissão recebida.",
+			"method": "GET",
+			"body": {},
+			"parameters": [],
+			"headers": [
+				{
+					"name": "Authorization",
+					"value": "Bearer {{ _.token_pai }}",
+					"id": "pair_auth"
+				},
+				{
+					"name": "Accept",
+					"value": "application/json",
+					"id": "pair_accept"
+				}
+			],
+			"authentication": {},
+			"metaSortKey": 7000000000000,
+			"isPrivate": false,
+			"settingStoreCookies": true,
+			"settingSendCookies": true,
+			"settingDisableRenderRequestBody": false,
+			"settingEncodeUrl": true,
+			"settingRebuildPath": true,
+			"settingFollowRedirects": "global",
+			"_type": "request"
+		},
+		{
+			"_id": "req_affiliate_commissions",
+			"parentId": "fld_affiliates",
+			"modified": 1706875200000,
+			"created": 1706875200000,
+			"url": "{{ _.base_url }}/api/user/affiliate-commissions",
+			"name": "8. Ver Comissões Recebidas - Pai",
+			"description": "Lista todas as comissões de afiliados recebidas pelo usuário pai. Deve mostrar a comissão de R$0,50 do cash-in do filho.",
+			"method": "GET",
+			"body": {},
+			"parameters": [],
+			"headers": [
+				{
+					"name": "Authorization",
+					"value": "Bearer {{ _.token_pai }}",
+					"id": "pair_auth"
+				},
+				{
+					"name": "Accept",
+					"value": "application/json",
+					"id": "pair_accept"
+				}
+			],
+			"authentication": {},
+			"metaSortKey": 8000000000000,
+			"isPrivate": false,
+			"settingStoreCookies": true,
+			"settingSendCookies": true,
+			"settingDisableRenderRequestBody": false,
+			"settingEncodeUrl": true,
+			"settingRebuildPath": true,
+			"settingFollowRedirects": "global",
+			"_type": "request"
+		},
+		{
+			"_id": "req_cash_out",
+			"parentId": "fld_affiliates",
+			"modified": 1706875200000,
+			"created": 1706875200000,
+			"url": "{{ _.base_url }}/api/pixout",
+			"name": "9. Cash-Out (Saque) - Filho",
+			"description": "Realiza um saque de R$2,00. O filho paga taxa da aplicação (R$0,50) + comissão do pai (R$0,50) = R$1,00 total. O filho paga R$3,00 (R$2,00 + R$1,00). O pai recebe R$0,50 de comissão.",
+			"method": "POST",
+			"body": {
+				"mimeType": "application/json",
+				"text": "{\n  \"token\": \"{{ _.token_filho }}\",\n  \"secret\": \"{{ _.secret_filho }}\",\n  \"amount\": 2.00,\n  \"pixKey\": \"12345678900\",\n  \"pixKeyType\": \"cpf\",\n  \"baasPostbackUrl\": \"web\"\n}"
+			},
+			"parameters": [],
+			"headers": [
+				{
+					"name": "Content-Type",
+					"value": "application/json",
+					"id": "pair_content_type"
+				},
+				{
+					"name": "Accept",
+					"value": "application/json",
+					"id": "pair_accept"
+				}
+			],
+			"authentication": {},
+			"metaSortKey": 9000000000000,
+			"isPrivate": false,
+			"settingStoreCookies": true,
+			"settingSendCookies": true,
+			"settingDisableRenderRequestBody": false,
+			"settingEncodeUrl": true,
+			"settingRebuildPath": true,
+			"settingFollowRedirects": "global",
+			"_type": "request"
+		},
+		{
+			"_id": "req_check_balance_after_cashout",
+			"parentId": "fld_affiliates",
+			"modified": 1706875200000,
+			"created": 1706875200000,
+			"url": "{{ _.base_url }}/api/balance",
+			"name": "10. Verificar Saldo Após Cash-Out - Filho",
+			"description": "Verifica o saldo do filho após o cash-out. Deve ter descontado R$3,00 (R$2,00 + R$0,50 taxa aplicação + R$0,50 comissão pai). Saldo esperado: R$1,00 (R$4,00 - R$3,00).",
+			"method": "GET",
+			"body": {},
+			"parameters": [],
+			"headers": [
+				{
+					"name": "Authorization",
+					"value": "Bearer {{ _.token_filho }}",
+					"id": "pair_auth"
+				},
+				{
+					"name": "Accept",
+					"value": "application/json",
+					"id": "pair_accept"
+				}
+			],
+			"authentication": {},
+			"metaSortKey": 10000000000000,
+			"isPrivate": false,
+			"settingStoreCookies": true,
+			"settingSendCookies": true,
+			"settingDisableRenderRequestBody": false,
+			"settingEncodeUrl": true,
+			"settingRebuildPath": true,
+			"settingFollowRedirects": "global",
+			"_type": "request"
+		},
+		{
+			"_id": "req_commissions_after_cashout",
+			"parentId": "fld_affiliates",
+			"modified": 1706875200000,
+			"created": 1706875200000,
+			"url": "{{ _.base_url }}/api/user/affiliate-commissions",
+			"name": "11. Ver Comissões Após Cash-Out - Pai",
+			"description": "Lista todas as comissões recebidas. Deve mostrar 2 comissões: uma de R$0,50 do cash-in e outra de R$0,50 do cash-out.",
+			"method": "GET",
+			"body": {},
+			"parameters": [],
+			"headers": [
+				{
+					"name": "Authorization",
+					"value": "Bearer {{ _.token_pai }}",
+					"id": "pair_auth"
+				},
+				{
+					"name": "Accept",
+					"value": "application/json",
+					"id": "pair_accept"
+				}
+			],
+			"authentication": {},
+			"metaSortKey": 11000000000000,
+			"isPrivate": false,
+			"settingStoreCookies": true,
+			"settingSendCookies": true,
+			"settingDisableRenderRequestBody": false,
+			"settingEncodeUrl": true,
+			"settingRebuildPath": true,
+			"settingFollowRedirects": "global",
+			"_type": "request"
+		},
+		{
+			"_id": "req_balance_pai_final",
+			"parentId": "fld_affiliates",
+			"modified": 1706875200000,
+			"created": 1706875200000,
+			"url": "{{ _.base_url }}/api/balance",
+			"name": "12. Saldo Final - Pai",
+			"description": "Verifica o saldo final do pai. Deve mostrar R$1,00 (R$0,50 comissão do cash-in + R$0,50 comissão do cash-out).",
+			"method": "GET",
+			"body": {},
+			"parameters": [],
+			"headers": [
+				{
+					"name": "Authorization",
+					"value": "Bearer {{ _.token_pai }}",
+					"id": "pair_auth"
+				},
+				{
+					"name": "Accept",
+					"value": "application/json",
+					"id": "pair_accept"
+				}
+			],
+			"authentication": {},
+			"metaSortKey": 12000000000000,
+			"isPrivate": false,
+			"settingStoreCookies": true,
+			"settingSendCookies": true,
+			"settingDisableRenderRequestBody": false,
+			"settingEncodeUrl": true,
+			"settingRebuildPath": true,
+			"settingFollowRedirects": "global",
+			"_type": "request"
+		},
+		{
+			"_id": "fld_auth",
+			"parentId": "wrk_insomnia",
+			"modified": 1706875200000,
+			"created": 1706875200000,
+			"name": "Autenticação",
+			"description": "Rotas de autenticação",
+			"environment": {},
+			"environmentPropertyOrder": null,
+			"metaSortKey": 1000000000000,
+			"_type": "request_group"
+		},
+		{
+			"_id": "fld_affiliates",
+			"parentId": "wrk_insomnia",
+			"modified": 1706875200000,
+			"created": 1706875200000,
+			"name": "Sistema de Afiliados",
+			"description": "Fluxo completo de teste do sistema de afiliados 1 para 1",
+			"environment": {},
+			"environmentPropertyOrder": null,
+			"metaSortKey": 2000000000000,
+			"_type": "request_group"
+		},
+		{
+			"_id": "env_base",
+			"parentId": "wrk_insomnia",
+			"modified": 1706875200000,
+			"created": 1706875200000,
+			"name": "Base Environment",
+			"data": {
+				"base_url": "http://localhost:8000",
+				"token_pai": "",
+				"token_filho": "",
+				"secret_filho": "",
+				"affiliate_code": ""
+			},
+			"dataPropertyOrder": {
+				"&": [
+					"base_url",
+					"token_pai",
+					"token_filho",
+					"secret_filho",
+					"affiliate_code"
+				]
+			},
+			"color": null,
+			"isPrivate": false,
+			"metaSortKey": 1706875200000,
+			"_type": "environment"
+		},
+		{
+			"_id": "wrk_insomnia",
+			"parentId": null,
+			"modified": 1706875200000,
+			"created": 1706875200000,
+			"name": "Gateway API - Sistema de Afiliados",
+			"description": "Coleção completa para testar o sistema de afiliados 1 para 1",
+			"scope": "collection",
+			"_type": "workspace"
+		}
+	]
+}

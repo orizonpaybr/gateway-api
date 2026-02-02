@@ -90,16 +90,31 @@ class TaxaFlexivelHelper
         // Garantir que a taxa não seja negativa
         $taxaTotal = max(0, (float) $taxaTotal);
         
+        // Adicionar comissão de afiliado se o usuário tem pai afiliado (R$0,50 fixo)
+        $comissaoAfiliado = 0.00;
+        if ($user && $user->affiliate_id) {
+            $comissaoAfiliado = 0.50; // Valor fixo de R$0,50 por transação
+            $taxaTotal += $comissaoAfiliado;
+            
+            \Illuminate\Support\Facades\Log::info('TaxaFlexivelHelper: Comissão de afiliado adicionada', [
+                'user_id' => $user->user_id,
+                'affiliate_id' => $user->affiliate_id,
+                'comissao_afiliado' => $comissaoAfiliado,
+                'taxa_antes_comissao' => $taxaTotal - $comissaoAfiliado,
+                'taxa_total_com_comissao' => $taxaTotal
+            ]);
+        }
+        
         // Custo fixo da TREEAL por transação (já descontado automaticamente por ela)
         $custoTreeal = (float) config('treeal.custo_fixo_por_transacao');
         
-        // Lucro líquido da aplicação = taxa total - custo TREEAL
-        // Exemplo: R$ 0,50 (taxa) - R$ 0,02 (custo TREEAL) = R$ 0,48 (lucro)
-        // Se a taxa total for menor que o custo da TREEAL, o lucro é zero
-        $lucroAplicacao = max(0, $taxaTotal - $custoTreeal);
+        // Lucro líquido da aplicação = taxa aplicação (sem comissão afiliado) - custo TREEAL
+        // A comissão do afiliado não é lucro da aplicação, é repassada ao pai
+        $taxaAplicacaoSemComissao = $taxaTotal - $comissaoAfiliado;
+        $lucroAplicacao = max(0, $taxaAplicacaoSemComissao - $custoTreeal);
         
-        // Depósito líquido para o cliente = valor bruto - taxa total cobrada
-        // Exemplo: R$ 100,00 - R$ 0,50 = R$ 99,50
+        // Depósito líquido para o cliente = valor bruto - taxa total cobrada (inclui comissão afiliado)
+        // Exemplo: R$ 5,00 - R$ 0,50 (taxa aplicação) - R$ 0,50 (comissão pai) = R$ 4,00
         $depositoLiquido = max(0, $amount - $taxaTotal);
         
         // Valor que a TREEAL envia para nossa conta (já descontado o custo dela)
@@ -108,10 +123,11 @@ class TaxaFlexivelHelper
         $valorRecebidoTreeal = max(0, $amount - $custoTreeal);
         
         return [
-            'taxa_cash_in' => $taxaTotal,              // Taxa total cobrada do cliente
-            'taxa_aplicacao' => $lucroAplicacao,       // Lucro líquido da aplicação
+            'taxa_cash_in' => $taxaTotal,              // Taxa total cobrada do cliente (aplicação + comissão afiliado)
+            'taxa_aplicacao' => $lucroAplicacao,       // Lucro líquido da aplicação (sem comissão afiliado)
             'taxa_adquirente' => $custoTreeal,         // Custo da TREEAL (já descontado por ela)
-            'deposito_liquido' => $depositoLiquido,    // Valor que o cliente recebe
+            'comissao_afiliado' => $comissaoAfiliado,  // Comissão do pai afiliado (R$0,50 se houver)
+            'deposito_liquido' => $depositoLiquido,    // Valor que o cliente recebe (amount - taxa total)
             'valor_recebido_treeal' => $valorRecebidoTreeal, // Valor que a TREEAL envia (informativo)
             'descricao' => $descricao
         ];

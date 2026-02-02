@@ -89,17 +89,34 @@ class TaxaSaqueHelper
         // Garantir que a taxa não seja negativa
         $taxaTotal = max(0, (float) $taxaTotal);
         
+        // Adicionar comissão de afiliado se o usuário tem pai afiliado (R$0,50 fixo)
+        $comissaoAfiliado = 0.00;
+        if ($user && $user->affiliate_id) {
+            $comissaoAfiliado = 0.50; // Valor fixo de R$0,50 por transação
+            $taxaTotal += $comissaoAfiliado;
+            
+            Log::info('TaxaSaqueHelper: Comissão de afiliado adicionada', [
+                'user_id' => $user->user_id,
+                'affiliate_id' => $user->affiliate_id,
+                'comissao_afiliado' => $comissaoAfiliado,
+                'taxa_antes_comissao' => $taxaTotal - $comissaoAfiliado,
+                'taxa_total_com_comissao' => $taxaTotal
+            ]);
+        }
+        
         // Custo fixo da TREEAL por transação (já descontado automaticamente por ela)
         $custoTreeal = (float) config('treeal.custo_fixo_por_transacao');
         
-        // Lucro líquido da aplicação = taxa total - custo TREEAL
-        // Exemplo: R$ 0,50 (taxa) - R$ 0,02 (custo TREEAL) = R$ 0,48 (lucro)
-        // Se a taxa total for menor que o custo da TREEAL, o lucro é zero
-        $lucroAplicacao = max(0, $taxaTotal - $custoTreeal);
+        // Lucro líquido da aplicação = taxa aplicação (sem comissão afiliado) - custo TREEAL
+        // A comissão do afiliado não é lucro da aplicação, é repassada ao pai
+        $taxaAplicacaoSemComissao = $taxaTotal - $comissaoAfiliado;
+        $lucroAplicacao = max(0, $taxaAplicacaoSemComissao - $custoTreeal);
 
         Log::info('TaxaSaqueHelper: Taxas calculadas', [
             'user_id' => $user->user_id ?? 'N/A',
             'isInterfaceWeb' => $isInterfaceWeb,
+            'taxa_aplicacao' => $taxaAplicacaoSemComissao,
+            'comissao_afiliado' => $comissaoAfiliado,
             'taxa_total' => $taxaTotal,
             'custo_treeal' => $custoTreeal,
             'lucro_aplicacao' => $lucroAplicacao,
@@ -151,9 +168,10 @@ class TaxaSaqueHelper
         ]);
 
         return [
-            'taxa_cash_out' => $taxa_cash_out,       // Taxa total cobrada do cliente
-            'taxa_aplicacao' => $lucroAplicacao,    // Lucro líquido da aplicação
+            'taxa_cash_out' => $taxa_cash_out,       // Taxa total cobrada do cliente (aplicação + comissão afiliado)
+            'taxa_aplicacao' => $lucroAplicacao,    // Lucro líquido da aplicação (sem comissão afiliado)
             'taxa_adquirente' => $custoTreeal,      // Custo da TREEAL
+            'comissao_afiliado' => $comissaoAfiliado, // Comissão do pai afiliado (R$0,50 se houver)
             'saque_liquido' => $saque_liquido,
             'descricao' => $descricao,
             'valor_total_descontar' => $valor_total_descontar

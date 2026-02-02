@@ -174,6 +174,10 @@ Route::middleware(['verify.jwt'])->group(function () {
     // Rotas de segurança e conta
     Route::post('auth/change-password', [UserController::class, 'changePassword']);
     
+    // Rotas de afiliados (qualquer usuário autenticado pode gerar link e ver comissões)
+    Route::get('user/affiliate-link', [UserController::class, 'generateAffiliateLink']);
+    Route::get('user/affiliate-commissions', [UserController::class, 'getAffiliateCommissions']);
+    
     // Integração de API - Credenciais e IPs autorizados
     Route::middleware(['throttle:60,1'])->group(function () {
         Route::get('integration/credentials', [App\Http\Controllers\Api\IntegrationController::class, 'getCredentials']);

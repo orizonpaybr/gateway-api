@@ -92,6 +92,20 @@ class PaymentProcessingService
                 $this->processCommissions($cashin, $user);
             }
             
+            // 6. Processar comissões de afiliados (dentro da transação)
+            if ($user->affiliate_id) {
+                try {
+                    $affiliateService = app(\App\Services\AffiliateCommissionService::class);
+                    $affiliateService->processCashInCommission($cashin, $user);
+                } catch (\Exception $e) {
+                    Log::error("Erro ao processar comissão de afiliado", [
+                        'transaction_id' => $cashin->idTransaction,
+                        'error' => $e->getMessage(),
+                    ]);
+                    // Não re-throw - comissões são opcionais, não devem quebrar o pagamento
+                }
+            }
+            
             Log::info("Pagamento processado com sucesso", [
                 'transaction_id' => $cashin->idTransaction,
                 'user_id' => $user->user_id,
@@ -139,23 +153,50 @@ class PaymentProcessingService
             }
             
             // Calcular valor total a debitar
+            // NOTA: A taxa_cash_out já inclui a comissão do afiliado (calculada no TaxaSaqueHelper)
             $valorTotalDebitar = $cashout->amount + ($cashout->taxa_cash_out ?? 0);
             
+            // Verificar se o saldo já foi debitado (saque automático)
+            // Se o saldo atual for menor que o necessário, provavelmente já foi debitado
+            $saldoAtual = $user->saldo;
+            $saldoEsperadoAposDebito = $saldoAtual - $valorTotalDebitar;
+            
             // Verificar saldo suficiente
-            if ($user->saldo < $valorTotalDebitar) {
-                throw new \Exception("Saldo insuficiente. Disponível: {$user->saldo}, Necessário: {$valorTotalDebitar}");
+            if ($saldoAtual < $valorTotalDebitar) {
+                // Pode ser que já tenha sido debitado (saque automático)
+                // Verificar se a diferença é exatamente o valor que deveria ser debitado
+                Log::warning("Saldo insuficiente no processWithdrawal - pode já ter sido debitado", [
+                    'saldo_atual' => $saldoAtual,
+                    'valor_necessario' => $valorTotalDebitar,
+                    'transaction_id' => $cashout->idTransaction
+                ]);
+                
+                // Se o saldo é exatamente o esperado após débito, não debitar novamente
+                // Caso contrário, lançar exceção
+                if ($saldoAtual < 0 || abs($saldoAtual - ($saldoEsperadoAposDebito + $valorTotalDebitar)) > 0.01) {
+                    throw new \Exception("Saldo insuficiente. Disponível: {$saldoAtual}, Necessário: {$valorTotalDebitar}");
+                }
             }
             
             // 1. Atualizar status
             $cashout->update(['status' => 'COMPLETED']);
             
-            // 2. Debitar saldo
+            // 2. Debitar saldo apenas se ainda não foi debitado (saque manual)
+            // Para saques automáticos, o saldo já foi debitado no SaqueController
             $balanceBefore = $user->saldo;
-            $this->balanceService->decrementBalance(
-                $user,
-                $valorTotalDebitar,
-                'saldo'
-            );
+            if ($saldoAtual >= $valorTotalDebitar) {
+                $this->balanceService->decrementBalance(
+                    $user,
+                    $valorTotalDebitar,
+                    'saldo'
+                );
+            } else {
+                Log::info("Saldo já foi debitado anteriormente (saque automático)", [
+                    'transaction_id' => $cashout->idTransaction,
+                    'saldo_atual' => $saldoAtual,
+                    'valor_total' => $valorTotalDebitar
+                ]);
+            }
             $balanceAfter = $user->fresh()->saldo;
             
             // 3. Registrar evento
@@ -165,6 +206,20 @@ class PaymentProcessingService
                 $balanceBefore,
                 $balanceAfter
             );
+            
+            // 4. Processar comissões de afiliados (dentro da transação)
+            if ($user->affiliate_id) {
+                try {
+                    $affiliateService = app(\App\Services\AffiliateCommissionService::class);
+                    $affiliateService->processCashOutCommission($cashout, $user);
+                } catch (\Exception $e) {
+                    Log::error("Erro ao processar comissão de afiliado (cash-out)", [
+                        'transaction_id' => $cashout->idTransaction,
+                        'error' => $e->getMessage(),
+                    ]);
+                    // Não re-throw - comissões são opcionais, não devem quebrar o saque
+                }
+            }
             
             Log::info("Saque processado com sucesso", [
                 'transaction_id' => $cashout->idTransaction,

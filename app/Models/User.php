@@ -212,13 +212,40 @@ class User extends Authenticatable
     }
     
     /**
+     * Relacionamento: comissões de afiliados recebidas (quando este usuário é o pai)
+     */
+    public function affiliateCommissionsReceived()
+    {
+        return $this->hasMany(AffiliateCommission::class, 'affiliate_id');
+    }
+    
+    /**
+     * Relacionamento: comissões de afiliados geradas (quando este usuário é o filho)
+     */
+    public function affiliateCommissionsGenerated()
+    {
+        return $this->hasMany(AffiliateCommission::class, 'user_id', 'user_id');
+    }
+    
+    /**
      * Gera código único para affiliado
+     * Qualquer usuário pode gerar código de afiliado
      */
     public function gerarCodigoAffiliate(): string
     {
         if (!$this->affiliate_code) {
-            $this->affiliate_code = strtoupper(substr($this->user_id, 0, 4)) . rand(1000, 9999);
-            $this->affiliate_link = url('/register') . '?ref=' . $this->affiliate_code;
+            $codigoBase = strtoupper(substr($this->user_id, 0, 4));
+            $numeroAleatorio = rand(1000, 9999);
+            $codigoCompleto = $codigoBase . $numeroAleatorio;
+            
+            // Verificar unicidade
+            while (User::where('affiliate_code', $codigoCompleto)->where('id', '!=', $this->id)->exists()) {
+                $numeroAleatorio = rand(1000, 9999);
+                $codigoCompleto = $codigoBase . $numeroAleatorio;
+            }
+            
+            $this->affiliate_code = $codigoCompleto;
+            $this->affiliate_link = config('app.url') . '/register?ref=' . $this->affiliate_code;
             $this->save();
         }
         return $this->affiliate_code;
@@ -226,6 +253,8 @@ class User extends Authenticatable
     
     /**
      * Verifica se é affiliado ativo
+     * @deprecated Este método não é mais necessário para o sistema 1 para 1
+     * Qualquer usuário com affiliate_code pode ser pai afiliado
      */
     public function isAffiliateAtivo(): bool
     {

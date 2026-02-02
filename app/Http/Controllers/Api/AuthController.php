@@ -490,25 +490,25 @@ class AuthController extends Controller
             ]);
 
             // PROCESSAR AFILIADO SE houver parâmetro 'ref' na URL
+            // Qualquer usuário com affiliate_code pode ser pai afiliado (sistema 1 para 1)
             $affiliateCode = $request->get('ref'); 
             $affiliateUser = null;
             if ($affiliateCode) {
+                // Buscar usuário pelo affiliate_code (qualquer usuário pode ter código)
                 $affiliateUser = User::where('affiliate_code', $affiliateCode)
-                    ->where('is_affiliate', true)
-                    ->where('affiliate_percentage', '>', 0)
+                    ->where('id', '!=', $user->id) // Não pode ser o próprio usuário
                     ->first();
                     
                 if ($affiliateUser) {
+                    // Vincular filho ao pai afiliado (relação 1 para 1)
                     $user->update([
                         'affiliate_id' => $affiliateUser->id,
-                        'affiliate_percentage' => $affiliateUser->affiliate_percentage
                     ]);
                     
                     Log::info('[REGISTRO AFFILIATE API] Usuário registrado via affiliate', [
                         'novo_usuario_id' => $user->id,
                         'affiliate_id' => $affiliateUser->id,
                         'affiliate_code' => $affiliateCode,
-                        'affiliate_percentage' => $affiliateUser->affiliate_percentage
                     ]);
                 }
             }
@@ -535,27 +535,9 @@ class AuthController extends Controller
                 }
             }
 
-            // Criar split interno automático se usuário foi indicado por affiliate
-            if ($affiliateUser && $affiliateUser->isAffiliateAtivo()) {
-                try {
-                    \App\Models\SplitInterno::create([
-                        'usuario_pagador_id' => $user->id,
-                        'usuario_beneficiario_id' => $affiliateUser->id,
-                        'porcentagem_split' => $affiliateUser->affiliate_percentage,
-                        'tipo_taxa' => \App\Models\SplitInterno::TAXA_DEPOSITO,
-                        'ativo' => true,
-                        'criado_por_admin_id' => 1,
-                        'data_inicio' => now(),
-                        'data_fim' => null,
-                    ]);
-                } catch (\Exception $e) {
-                    Log::error('[REGISTRO AFFILIATE API] Erro ao criar split interno', [
-                        'erro' => $e->getMessage(),
-                        'novo_usuario_id' => $user->id,
-                        'affiliate_id' => $affiliateUser->id ?? null
-                    ]);
-                }
-            }
+            // NOTA: Não criar split interno para afiliados
+            // O sistema de afiliados agora funciona com comissão fixa de R$0,50
+            // processada automaticamente pelo AffiliateCommissionService nas transações
 
             Log::info('Usuário registrado com sucesso via API', [
                 'username' => $request->username,

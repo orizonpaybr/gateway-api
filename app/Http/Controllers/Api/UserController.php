@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\AffiliateCommission;
 use App\Constants\UserStatus;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -2404,5 +2405,102 @@ class UserController extends Controller
                 'percent' => 0,
             ],
         ];
+    }
+
+    /**
+     * Gerar ou obter link de afiliado do usuário
+     * Qualquer usuário pode gerar um link de afiliado
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function generateAffiliateLink(Request $request)
+    {
+        try {
+            $user = $request->user();
+            
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário não autenticado'
+                ], 401);
+            }
+
+            // Gerar código único se não existe
+            if (!$user->affiliate_code) {
+                $codigoBase = strtoupper(substr($user->user_id, 0, 4));
+                $numeroAleatorio = rand(1000, 9999);
+                $codigoCompleto = $codigoBase . $numeroAleatorio;
+                
+                // Verificar unicidade
+                while (User::where('affiliate_code', $codigoCompleto)->where('id', '!=', $user->id)->exists()) {
+                    $numeroAleatorio = rand(1000, 9999);
+                    $codigoCompleto = $codigoBase . $numeroAleatorio;
+                }
+                
+                $user->affiliate_code = $codigoCompleto;
+                $user->affiliate_link = config('app.url') . '/register?ref=' . $user->affiliate_code;
+                $user->save();
+            }
+            
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'affiliate_code' => $user->affiliate_code,
+                    'affiliate_link' => $user->affiliate_link
+                ]
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Erro ao gerar link de afiliado', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao gerar link de afiliado'
+            ], 500);
+        }
+    }
+
+    /**
+     * Visualizar comissões de afiliados recebidas pelo usuário
+     *
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getAffiliateCommissions(Request $request)
+    {
+        try {
+            $user = $request->user();
+            
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário não autenticado'
+                ], 401);
+            }
+
+            $commissions = \App\Models\AffiliateCommission::where('affiliate_id', $user->id)
+                ->where('status', 'paid')
+                ->with(['user:id,user_id,username,name', 'solicitacao:id,idTransaction,amount', 'solicitacaoCashOut:id,idTransaction,amount'])
+                ->orderBy('created_at', 'desc')
+                ->paginate(20);
+            
+            return response()->json([
+                'success' => true,
+                'data' => $commissions
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Erro ao buscar comissões de afiliados', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao buscar comissões de afiliados'
+            ], 500);
+        }
     }
 }
