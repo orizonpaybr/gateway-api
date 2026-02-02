@@ -62,7 +62,7 @@ class TransactionsSeeder extends Seeder
                 'status' => $status,
                 'idTransaction' => $idTransaction, // Sempre gerar ID, mesmo para PENDING/CANCELLED
                 'deposito_liquido' => $depositoLiquido,
-                'taxa_cash_in' => $taxaPercentual,
+                'taxa_cash_in' => $taxaTotal, // CORRIGIDO: Salva valor monetário total ao invés de percentual
                 'taxa_pix_cash_in_adquirente' => 1.5,
                 'taxa_pix_cash_in_valor_fixo' => $taxaFixa,
                 'qrcode_pix' => '00020126580014br.gov.bcb.pix0136' . uniqid() . '52040000530398654' . number_format($amount, 2, '', ''),

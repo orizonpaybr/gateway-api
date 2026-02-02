@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\{User, Solicitacoes, SolicitacoesCashOut};
+use App\Models\{User, Solicitacoes, SolicitacoesCashOut, AffiliateCommission};
 use App\Services\{AdminUserService, CacheKeyService};
 use App\Models\UsersKey;
 use App\Models\Adquirente;
@@ -133,10 +133,9 @@ class AdminDashboardController extends Controller
             $users = $query->paginate($perPage);
 
             // CORREÇÃO N+1: Buscar todas as vendas de uma vez
-            // CORRIGIDO: Incluir COMPLETED para consistência
             $userIds = $users->pluck('user_id');
             $vendas7d = Solicitacoes::whereIn('user_id', $userIds)
-                ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
+                ->where('status', 'PAID_OUT')
                 ->where('date', '>=', now()->subDays(7))
                 ->selectRaw('user_id, SUM(amount) as total')
                 ->groupBy('user_id')
@@ -371,49 +370,30 @@ class AdminDashboardController extends Controller
                 $withdraws = collect();
 
                 // Buscar depósitos
-                // IMPORTANTE: Selecionar explicitamente os campos necessários para garantir que sejam carregados
+                // Por padrão, mostrar apenas depósitos pagos (PAID_OUT) se não houver filtro de status
                 if (!$type || $type === 'deposit') {
-                    $deposits = Solicitacoes::with(['user' => function ($query) {
+                    $depositsQuery = Solicitacoes::with(['user' => function ($query) {
                         $query->select('id', 'user_id', 'name', 'username');
                     }])
-                        ->select([
-                            'id',
-                            'user_id',
-                            'amount',
-                            'taxa_cash_in',
-                            'taxa_pix_cash_in_adquirente',
-                            'adquirente_ref',
-                            'executor_ordem',
-                            'status',
-                            'date',
-                            'created_at'
-                        ])
-                        ->when($status, fn($q) => $q->where('status', $status))
+                        ->when($status, fn($q) => $q->where('status', $status), fn($q) => $q->where('status', 'PAID_OUT'))
                         ->orderBy('created_at', 'desc')
-                        ->limit($limit)
-                        ->get()
+                        ->limit($limit);
+                    
+                    $deposits = $depositsQuery->get()
                         ->map(fn($item) => $this->formatTransaction($item, 'deposit'));
                 }
 
                 // Buscar saques
-                // IMPORTANTE: Selecionar explicitamente os campos necessários para garantir que sejam carregados
+                // Por padrão, mostrar apenas saques completos (COMPLETED) se não houver filtro de status
                 if (!$type || $type === 'withdraw') {
-                    $withdraws = SolicitacoesCashOut::with(['user' => function ($query) {
+                    $withdrawsQuery = SolicitacoesCashOut::with(['user' => function ($query) {
                         $query->select('id', 'user_id', 'name', 'username');
                     }])
-                        ->select([
-                            'id',
-                            'user_id',
-                            'amount',
-                            'taxa_cash_out',
-                            'status',
-                            'date',
-                            'created_at'
-                        ])
-                        ->when($status, fn($q) => $q->where('status', $status))
+                        ->when($status, fn($q) => $q->where('status', $status), fn($q) => $q->where('status', 'COMPLETED'))
                         ->orderBy('created_at', 'desc')
-                        ->limit($limit)
-                        ->get()
+                        ->limit($limit);
+                    
+                    $withdraws = $withdrawsQuery                    ->get()
                         ->map(fn($item) => $this->formatTransaction($item, 'withdraw'));
                 }
 
@@ -425,7 +405,7 @@ class AdminDashboardController extends Controller
                 $allTransactions = collect(array_merge($depositsArray, $withdrawsArray));
                 
                 // Ordenar usando closure para acessar corretamente o array
-                return $allTransactions
+                $sortedTransactions = $allTransactions
                     ->sortByDesc(fn($item) => $item['created_at_timestamp'] ?? 0)
                     ->take($limit)
                     ->values()
@@ -435,6 +415,8 @@ class AdminDashboardController extends Controller
                         return $item;
                     })
                     ->toArray();
+                
+                return $sortedTransactions;
             });
 
             return $this->successResponse(['transactions' => $transactions]);
@@ -490,87 +472,46 @@ class AdminDashboardController extends Controller
     private function calculateFinancialStats(Carbon $dataInicio, Carbon $dataFim): array
     {
         // Usar queries otimizadas com índices
-        // CORRIGIDO: Incluir COMPLETED para consistência com dashboard do usuário
-        $solicitacoes = Solicitacoes::whereIn('status', ['PAID_OUT', 'COMPLETED'])
+        $solicitacoes = Solicitacoes::where('status', 'PAID_OUT')
             ->whereBetween('date', [$dataInicio, $dataFim]);
 
-        // CORRIGIDO: Incluir PAID_OUT para consistência com dashboard do usuário
-        $saques = SolicitacoesCashOut::whereIn('status', ['PAID_OUT', 'COMPLETED'])
+        $saques = SolicitacoesCashOut::where('status', 'COMPLETED')
             ->whereBetween('date', [$dataInicio, $dataFim]);
 
         // Calcular lucros com uma única query usando aggregates
-        // IMPORTANTE: Usar taxa_cash_in - custo TREEAL para obter o lucro líquido
-        // O custo da TREEAL será calculado separadamente contando todas as transações TREEAL
-        $custoTreealPorTransacao = (float) config('treeal.custo_fixo_por_transacao');
-        
-        // Contar transações TREEAL separadamente para garantir que todas sejam contabilizadas
-        // Verificar tanto por adquirente_ref quanto por executor_ordem para pegar todas as transações
-        $totalDepositosTreeal = (clone $solicitacoes)
-            ->where(function($query) {
-                $query->where('adquirente_ref', 'Treeal')
-                      ->orWhere('executor_ordem', 'Treeal');
-            })
-            ->count();
-        
-        // Calcular lucro líquido por transação: taxa_cash_in - custo TREEAL
-        // IMPORTANTE: Para transações TREEAL, usar custo fixo se taxa_pix_cash_in_adquirente for NULL ou 0
-        // Isso garante que transações antigas sem o campo sejam tratadas corretamente
         $depositStats = (clone $solicitacoes)
             ->select(
-                DB::raw('SUM(taxa_cash_in) as taxa_total_depositos'),
-                DB::raw('SUM(
-                    CASE 
-                        WHEN (adquirente_ref = \'Treeal\' OR executor_ordem = \'Treeal\') 
-                             AND (taxa_pix_cash_in_adquirente IS NULL OR taxa_pix_cash_in_adquirente = 0)
-                        THEN ' . $custoTreealPorTransacao . '
-                        WHEN taxa_pix_cash_in_adquirente IS NOT NULL AND taxa_pix_cash_in_adquirente > 0
-                        THEN taxa_pix_cash_in_adquirente
-                        ELSE 0
-                    END
-                ) as custo_total_treeal'),
-                DB::raw('SUM(taxa_cash_in - 
-                    CASE 
-                        WHEN (adquirente_ref = \'Treeal\' OR executor_ordem = \'Treeal\') 
-                             AND (taxa_pix_cash_in_adquirente IS NULL OR taxa_pix_cash_in_adquirente = 0)
-                        THEN ' . $custoTreealPorTransacao . '
-                        WHEN taxa_pix_cash_in_adquirente IS NOT NULL AND taxa_pix_cash_in_adquirente > 0
-                        THEN taxa_pix_cash_in_adquirente
-                        ELSE 0
-                    END
-                ) as lucro_depositos'),
+                DB::raw('SUM(taxa_cash_in) as lucro_depositos'),
                 DB::raw('SUM(amount) as valor_total_depositos'),
                 DB::raw('COUNT(*) as total_depositos')
             )
             ->first();
-        
-        // Lucro líquido já está calculado na query acima
-        $lucroDepositos = $depositStats->lucro_depositos ?? 0;
 
-        // Para saques: taxa_cash_out já é o valor total, mas precisamos subtrair o custo da TREEAL (2 centavos por transação)
-        // IMPORTANTE: TODOS os saques são processados pela TREEAL, incluindo os manuais
-        // Portanto, TODOS os saques têm custo de 2 centavos por transação
         $withdrawStats = (clone $saques)
             ->select(
-                DB::raw('SUM(taxa_cash_out) as taxa_total_saques'),
-                DB::raw('COUNT(*) as total_saques'),
-                DB::raw('SUM(amount) as valor_total_saques')
+                DB::raw('SUM(taxa_cash_out) as lucro_saques'),
+                DB::raw('SUM(amount) as valor_total_saques'),
+                DB::raw('COUNT(*) as total_saques')
             )
             ->first();
 
-        $totalSaques = $withdrawStats->total_saques ?? 0;
-        $taxaTotalSaques = $withdrawStats->taxa_total_saques ?? 0;
-        // TODOS os saques são processados pela TREEAL, então todos têm custo de 2 centavos por transação
-        $custoTreealSaques = $totalSaques * $custoTreealPorTransacao;
-        $lucroSaques = $taxaTotalSaques - $custoTreealSaques;
+        $lucroDepositos = $depositStats->lucro_depositos ?? 0;
+        $lucroSaques = $withdrawStats->lucro_saques ?? 0;
 
-        // Calcular taxas pagas aos adquirentes
-        // Usar o custo total já calculado na query
-        $custoTotalTreealDepositos = $depositStats->custo_total_treeal ?? ($totalDepositosTreeal * $custoTreealPorTransacao);
-        // TODOS os saques são processados pela TREEAL, então passar total_saques (não apenas total_saques_treeal)
-        $taxasAdquirentes = $this->calculateAcquirerFees($solicitacoes, $saques, $custoTotalTreealDepositos, $totalSaques, $custoTreealPorTransacao);
+        // Calcular taxas pagas aos adquirentes (TREEAL)
+        $taxasAdquirentes = $this->calculateAcquirerFees($solicitacoes, $saques);
         
-        // Lucro líquido total
-        $lucroLiquido = $lucroDepositos + $lucroSaques;
+        // Calcular comissões pagas aos afiliados no período
+        // IMPORTANTE: As comissões de afiliados já estão incluídas em taxa_cash_in e taxa_cash_out,
+        // mas são pagas aos afiliados (saindo do saldo do sistema), então precisam ser descontadas do lucro líquido
+        $comissoesAfiliados = $this->calculateAffiliateCommissions($dataInicio, $dataFim);
+        
+        // Lucro líquido = (taxas recebidas) - (custos TREEAL) - (comissões pagas aos afiliados)
+        // Onde:
+        // - taxas recebidas = taxa_cash_in + taxa_cash_out (já inclui comissões de afiliados)
+        // - custos TREEAL = número de transações * R$ 0,02
+        // - comissões pagas = valor total creditado aos afiliados (R$ 0,50 por transação)
+        $lucroLiquido = ($lucroDepositos + $lucroSaques) - ($taxasAdquirentes['entradas'] + $taxasAdquirentes['saidas']) - $comissoesAfiliados;
 
         // Saldo total em carteiras (usando Cache facade padronizado)
         $balanceCacheKey = CacheKeyService::totalWalletsBalance();
@@ -583,31 +524,17 @@ class AdminDashboardController extends Controller
             $saldoTotalCarteiras = (float) User::sum('saldo');
         }
 
-        // Log para debug
-        \Illuminate\Support\Facades\Log::info('AdminDashboardController::calculateFinancialStats - Cálculo final', [
-            'total_depositos' => $depositStats->total_depositos ?? 0,
-            'total_depositos_treeal' => $totalDepositosTreeal,
-            'taxa_total_depositos' => $depositStats->taxa_total_depositos ?? 0,
-            'custo_total_treeal_depositos' => $custoTotalTreealDepositos,
-            'lucro_depositos' => $lucroDepositos,
-            'total_saques' => $totalSaques,
-            'taxa_total_saques' => $taxaTotalSaques,
-            'custo_treeal_saques' => $custoTreealSaques,
-            'lucro_saques' => $lucroSaques,
-            'lucro_liquido_total' => $lucroLiquido,
-            'taxas_adquirentes' => $taxasAdquirentes,
-        ]);
-
         return [
             'saldo_carteiras' => (float) $saldoTotalCarteiras,
-            'lucro_liquido' => (float) $lucroLiquido, // Já é o lucro líquido (taxas - custos TREEAL)
-            'lucro_depositos' => (float) $lucroDepositos, // Lucro líquido de depósitos (taxa_cash_in - custo TREEAL)
-            'lucro_saques' => (float) $lucroSaques, // Lucro líquido de saques (taxa_cash_out - custo TREEAL)
+            'lucro_liquido' => (float) $lucroLiquido,
+            'lucro_depositos' => (float) $lucroDepositos,
+            'lucro_saques' => (float) $lucroSaques,
             'taxas_adquirentes' => [
-                'entradas' => (float) $taxasAdquirentes['entradas'], // Custo TREEAL em depósitos
-                'saidas' => (float) $taxasAdquirentes['saidas'], // Custo TREEAL em saques
+                'entradas' => (float) $taxasAdquirentes['entradas'],
+                'saidas' => (float) $taxasAdquirentes['saidas'],
                 'total' => (float) ($taxasAdquirentes['entradas'] + $taxasAdquirentes['saidas']),
             ],
+            'comissoes_afiliados' => (float) $comissoesAfiliados,
         ];
     }
     
@@ -616,12 +543,10 @@ class AdminDashboardController extends Controller
      */
     private function calculateTransactionStats(Carbon $dataInicio, Carbon $dataFim): array
     {
-        // CORRIGIDO: Incluir COMPLETED para consistência com dashboard do usuário
-        $solicitacoes = Solicitacoes::whereIn('status', ['PAID_OUT', 'COMPLETED'])
+        $solicitacoes = Solicitacoes::where('status', 'PAID_OUT')
             ->whereBetween('date', [$dataInicio, $dataFim]);
 
-        // CORRIGIDO: Incluir PAID_OUT para consistência com dashboard do usuário
-        $saques = SolicitacoesCashOut::whereIn('status', ['PAID_OUT', 'COMPLETED'])
+        $saques = SolicitacoesCashOut::where('status', 'COMPLETED')
             ->whereBetween('date', [$dataInicio, $dataFim]);
 
         $depositStats = (clone $solicitacoes)
@@ -699,37 +624,75 @@ class AdminDashboardController extends Controller
     }
 
     /**
-     * Calcular taxas pagas aos adquirentes
+     * Calcular taxas pagas aos adquirentes (TREEAL)
      * 
-     * Calcula o custo total pago à TREEAL (2 centavos por transação PIX)
-     * IMPORTANTE: Usa o custo total já calculado na query para garantir precisão
+     * Calcula os custos fixos da TREEAL por transação (R$ 0,02 por transação)
+     * conforme configurado em config('treeal.custo_fixo_por_transacao')
      * 
-     * @param $solicitacoes Query builder de solicitações (não usado, mantido para compatibilidade)
-     * @param $saques Query builder de saques (não usado, mantido para compatibilidade)
-     * @param float $custoTotalTreealDepositos Custo total da TREEAL em depósitos já calculado
-     * @param int $totalSaques Total de saques (TODOS os saques são processados pela TREEAL)
-     * @param float $custoTreealPorTransacao Custo fixo da TREEAL por transação (obtido da config)
-     * @return array
+     * @param $solicitacoes Query builder de depósitos
+     * @param $saques Query builder de saques
+     * @return array ['entradas' => float, 'saidas' => float]
      */
-    private function calculateAcquirerFees($solicitacoes, $saques, float $custoTotalTreealDepositos = 0, int $totalSaques = 0, float $custoTreealPorTransacao = null): array
+    private function calculateAcquirerFees($solicitacoes, $saques): array
     {
-        // Se não foi passado, obter da config
-        if ($custoTreealPorTransacao === null) {
-            $custoTreealPorTransacao = (float) config('treeal.custo_fixo_por_transacao');
-        }
+        // Custo fixo da TREEAL por transação
+        $custoTreealPorTransacao = (float) config('treeal.custo_fixo_por_transacao', 0.02);
         
-        // Taxas de adquirentes em depósitos = custo total já calculado na query
-        // Isso garante que todas as transações sejam contabilizadas, mesmo com taxa_pix_cash_in_adquirente NULL
-        $taxasAdquirenteDepositos = $custoTotalTreealDepositos;
+        // Contar número de transações aprovadas
+        $totalDepositos = (clone $solicitacoes)->count();
+        $totalSaques = (clone $saques)->count();
         
-        // Taxas de adquirentes em saques (custo fixo da TREEAL * número total de saques)
-        // IMPORTANTE: TODOS os saques são processados pela TREEAL, incluindo os manuais
-        $taxasAdquirenteSaques = $totalSaques * $custoTreealPorTransacao;
+        // Calcular custos totais da TREEAL
+        $custosEntradas = $totalDepositos * $custoTreealPorTransacao;
+        $custosSaidas = $totalSaques * $custoTreealPorTransacao;
         
         return [
-            'entradas' => (float) $taxasAdquirenteDepositos,
-            'saidas' => (float) $taxasAdquirenteSaques,
+            'entradas' => (float) $custosEntradas,
+            'saidas' => (float) $custosSaidas,
         ];
+    }
+
+    /**
+     * Calcular comissões pagas aos afiliados no período
+     * 
+     * Busca todas as comissões pagas (status = 'paid') relacionadas a transações
+     * de depósitos e saques no período especificado.
+     * 
+     * @param Carbon $dataInicio
+     * @param Carbon $dataFim
+     * @return float Total de comissões pagas aos afiliados
+     */
+    private function calculateAffiliateCommissions(Carbon $dataInicio, Carbon $dataFim): float
+    {
+        // Buscar IDs das transações de depósito no período
+        $depositIds = Solicitacoes::where('status', 'PAID_OUT')
+            ->whereBetween('date', [$dataInicio, $dataFim])
+            ->pluck('id');
+
+        // Buscar IDs das transações de saque no período
+        $withdrawIds = SolicitacoesCashOut::where('status', 'COMPLETED')
+            ->whereBetween('date', [$dataInicio, $dataFim])
+            ->pluck('id');
+
+        // Calcular total de comissões pagas relacionadas a essas transações
+        // Usar whereIn apenas se houver IDs, caso contrário retornar 0
+        $comissoesDepositos = 0;
+        if ($depositIds->isNotEmpty()) {
+            $comissoesDepositos = AffiliateCommission::where('status', 'paid')
+                ->where('transaction_type', 'cash_in')
+                ->whereIn('solicitacao_id', $depositIds)
+                ->sum('commission_value') ?? 0;
+        }
+
+        $comissoesSaques = 0;
+        if ($withdrawIds->isNotEmpty()) {
+            $comissoesSaques = AffiliateCommission::where('status', 'paid')
+                ->where('transaction_type', 'cash_out')
+                ->whereIn('solicitacao_cash_out_id', $withdrawIds)
+                ->sum('commission_value') ?? 0;
+        }
+
+        return (float) ($comissoesDepositos + $comissoesSaques);
     }
 
     /**
@@ -989,20 +952,52 @@ class AdminDashboardController extends Controller
                     'rg_verso' => $user->foto_rg_verso,
                     'selfie_rg' => $user->selfie_rg,
                 ],
-                // Taxas fixas (em centavos) - SEMPRE retornar valores salvos no banco (se existirem), senão usar padrão
+                // Taxas - SEMPRE retornar valores salvos no banco (se existirem), senão usar padrão
+                // Converter para float para garantir que retorne número e não string
                 'taxas_personalizadas_ativas' => $usandoPersonalizadas,
-                // Taxa fixa de depósito
+                'taxa_percentual_deposito' => (float) ($user->taxa_percentual_deposito !== null 
+                    ? $user->taxa_percentual_deposito 
+                    : ($setting->taxa_cash_in_padrao ?? 4.00)),
                 'taxa_fixa_deposito' => (float) ($user->taxa_fixa_deposito !== null 
                     ? $user->taxa_fixa_deposito 
                     : ($setting->taxa_fixa_padrao ?? 0.00)),
-                // Taxa fixa de saque
+                'valor_minimo_deposito' => (float) ($user->valor_minimo_deposito !== null
+                    ? $user->valor_minimo_deposito 
+                    : ($setting->deposito_minimo ?? 1.00)),
+                // Taxas - Saque
+                'taxa_percentual_pix' => (float) ($user->taxa_percentual_pix !== null
+                    ? $user->taxa_percentual_pix 
+                    : ($setting->taxa_cash_out_padrao ?? 4.00)),
+                'taxa_minima_pix' => (float) ($user->taxa_minima_pix !== null
+                    ? $user->taxa_minima_pix 
+                    : 0.80),
                 'taxa_fixa_pix' => (float) ($user->taxa_fixa_pix !== null
                     ? $user->taxa_fixa_pix 
                     : ($setting->taxa_fixa_pix ?? 0.00)),
-                // Limites
+                'valor_minimo_saque' => (float) ($user->valor_minimo_saque !== null
+                    ? $user->valor_minimo_saque 
+                    : ($setting->saque_minimo ?? 1.00)),
+                // Limites e extras
                 'limite_mensal_pf' => (float) ($user->limite_mensal_pf !== null
                     ? $user->limite_mensal_pf 
-                    : ($setting->limite_saque_mensal ?? 10000000.00)), // 10 milhões de reais
+                    : ($setting->limite_saque_mensal ?? 50000.00)),
+                'taxa_saque_api' => (float) ($user->taxa_saque_api !== null
+                    ? $user->taxa_saque_api 
+                    : ($setting->taxa_saque_api_padrao ?? 5.00)),
+                'taxa_saque_crypto' => (float) ($user->taxa_saque_crypto !== null
+                    ? $user->taxa_saque_crypto 
+                    : ($setting->taxa_saque_cripto_padrao ?? 1.00)),
+                // Sistema Flexível
+                'sistema_flexivel_ativo' => (bool) ($user->sistema_flexivel_ativo ?? false),
+                'valor_minimo_flexivel' => (float) ($user->valor_minimo_flexivel !== null
+                    ? $user->valor_minimo_flexivel 
+                    : ($setting->taxa_flexivel_valor_minimo ?? 15.00)),
+                'taxa_fixa_baixos' => (float) ($user->taxa_fixa_baixos !== null
+                    ? $user->taxa_fixa_baixos 
+                    : ($setting->taxa_flexivel_fixa_baixo ?? 1.00)),
+                'taxa_percentual_altos' => (float) ($user->taxa_percentual_altos !== null
+                    ? $user->taxa_percentual_altos 
+                    : ($setting->taxa_flexivel_percentual_alto ?? 4.00)),
                 // Afiliados
                 'is_affiliate' => (bool) ($user->is_affiliate ?? false),
                 'affiliate_percentage' => (float) ($user->affiliate_percentage ?? 0),
@@ -1040,14 +1035,26 @@ class AdminDashboardController extends Controller
                 return $this->errorResponse('Configurações do sistema não encontradas', 404);
             }
             
-            // Retornar taxas padrão do sistema (apenas fixas em centavos)
+            // Retornar todas as taxas padrão do sistema
             $defaultFees = [
-                // Taxa fixa de depósito
+                // Taxas de depósito
+                'taxa_percentual_deposito' => (float) ($setting->taxa_cash_in_padrao ?? 4.00),
                 'taxa_fixa_deposito' => (float) ($setting->taxa_fixa_padrao ?? 0.00),
-                // Taxa fixa de saque
+                'valor_minimo_deposito' => (float) ($setting->deposito_minimo ?? 1.00),
+                // Taxas de saque
+                'taxa_percentual_pix' => (float) ($setting->taxa_cash_out_padrao ?? 4.00),
+                'taxa_minima_pix' => 0.80, // Valor fixo padrão
                 'taxa_fixa_pix' => (float) ($setting->taxa_fixa_pix ?? 0.00),
-                // Limites
-                'limite_mensal_pf' => (float) ($setting->limite_saque_mensal ?? 10000000.00), // 10 milhões de reais
+                'valor_minimo_saque' => (float) ($setting->saque_minimo ?? 1.00),
+                // Limites e extras
+                'limite_mensal_pf' => (float) ($setting->limite_saque_mensal ?? 50000.00),
+                'taxa_saque_api' => (float) ($setting->taxa_saque_api_padrao ?? 5.00),
+                'taxa_saque_crypto' => (float) ($setting->taxa_saque_cripto_padrao ?? 1.00),
+                // Sistema flexível
+                'sistema_flexivel_ativo' => (bool) ($setting->taxa_flexivel_ativa ?? false),
+                'valor_minimo_flexivel' => (float) ($setting->taxa_flexivel_valor_minimo ?? 15.00),
+                'taxa_fixa_baixos' => (float) ($setting->taxa_flexivel_fixa_baixo ?? 1.00),
+                'taxa_percentual_altos' => (float) ($setting->taxa_flexivel_percentual_alto ?? 4.00),
             ];
             
             return $this->successResponse(['fees' => $defaultFees]);
@@ -1096,43 +1103,8 @@ class AdminDashboardController extends Controller
     public function updateUser(UpdateUserRequest $request, int $id)
     {
         try {
-            $validatedData = $request->validated();
-            
-            // Validar taxas individuais se estiverem presentes
-            $taxFields = [
-                'taxas_personalizadas_ativas', 'taxa_percentual_deposito', 'taxa_fixa_deposito',
-                'valor_minimo_deposito', 'taxa_percentual_pix', 'taxa_minima_pix', 'taxa_fixa_pix',
-                'limite_mensal_pf', 'taxa_saque_api', 'taxa_saque_crypto',
-                'sistema_flexivel_ativo', 'valor_minimo_flexivel', 'taxa_fixa_baixos', 'taxa_percentual_altos'
-            ];
-            
-            $hasTaxFields = false;
-            foreach ($taxFields as $field) {
-                if (array_key_exists($field, $validatedData)) {
-                    $hasTaxFields = true;
-                    break;
-                }
-            }
-            
-            if ($hasTaxFields) {
-                // Validar taxas individuais
-                $taxValidator = \App\Services\TaxValidationService::validateIndividualTaxes($validatedData);
-                if ($taxValidator->fails()) {
-                    return $this->errorResponse('Erro de validação nas taxas: ' . $taxValidator->errors()->first(), 422);
-                }
-                
-                // Validar consistência das taxas
-                $consistencyCheck = \App\Services\TaxValidationService::validateTaxConsistency($validatedData);
-                if (!$consistencyCheck['valid']) {
-                    return $this->errorResponse('Inconsistência nas taxas: ' . implode(' ', $consistencyCheck['errors']), 422);
-                }
-                
-                // Sanitizar dados de taxas
-                $validatedData = \App\Services\TaxValidationService::sanitizeTaxData($validatedData);
-            }
-            
             // Verificação de admin ou gerente feita pelo middleware 'ensure.admin_or_manager'
-            $user = $this->userService->updateUser($id, $validatedData);
+            $user = $this->userService->updateUser($id, $request->validated());
             
             return $this->successResponse([
                 'message' => 'Usuário atualizado com sucesso',
@@ -1440,66 +1412,57 @@ class AdminDashboardController extends Controller
             ];
         }
         
-        // Acessar campos de forma explícita para garantir que os valores sejam carregados
-        $amount = $type === 'deposit' 
-            ? (float) ($item->getAttribute('amount') ?? $item->amount ?? 0)
-            : (float) ($item->getAttribute('amount') ?? $item->amount ?? 0);
+        // Determinar campo de taxa baseado no tipo
+        $taxaField = $type === 'deposit' ? 'taxa_cash_in' : 'taxa_cash_out';
         
-        $taxa = $type === 'deposit'
-            ? (float) ($item->getAttribute('taxa_cash_in') ?? $item->taxa_cash_in ?? 0)
-            : (float) ($item->getAttribute('taxa_cash_out') ?? $item->taxa_cash_out ?? 0);
+        // Garantir que os valores numéricos sejam floats
+        $amount = (float) ($item->amount ?? 0);
+        $taxa = (float) ($item->$taxaField ?? 0);
         
-        // Calcular custo TREEAL e lucro líquido
-        $custoTreealPorTransacao = (float) config('treeal.custo_fixo_por_transacao');
-        $custoTreeal = 0;
-        $lucroLiquido = $taxa;
-        
-        if ($type === 'deposit') {
-            // Para depósitos: verificar se é transação TREEAL
-            $adquirenteRef = $item->getAttribute('adquirente_ref') ?? $item->adquirente_ref ?? '';
-            $executorOrdem = $item->getAttribute('executor_ordem') ?? $item->executor_ordem ?? '';
-            $isTreeal = $adquirenteRef === 'Treeal' || $executorOrdem === 'Treeal';
-            
-            if ($isTreeal) {
-                // Se tem taxa_pix_cash_in_adquirente, usar ela; senão, usar custo fixo
-                $taxaAdquirente = $item->getAttribute('taxa_pix_cash_in_adquirente') ?? $item->taxa_pix_cash_in_adquirente ?? null;
-                if ($taxaAdquirente !== null && $taxaAdquirente > 0) {
-                    $custoTreeal = (float) $taxaAdquirente;
-                } else {
-                    $custoTreeal = $custoTreealPorTransacao;
+        // Formatar data - usar date se disponível, senão usar created_at
+        $dateValue = $item->date ?? $item->created_at;
+        $formattedDate = null;
+        if ($dateValue) {
+            try {
+                if ($dateValue instanceof \Carbon\Carbon) {
+                    $formattedDate = $dateValue->toIso8601String();
+                } elseif (is_string($dateValue)) {
+                    $formattedDate = \Carbon\Carbon::parse($dateValue)->toIso8601String();
                 }
-                $lucroLiquido = $taxa - $custoTreeal;
+            } catch (\Exception $e) {
+                // Se falhar ao parsear, usar null
+                $formattedDate = null;
             }
-        } else {
-            // Para saques: TODOS são processados pela TREEAL
-            $custoTreeal = $custoTreealPorTransacao;
-            $lucroLiquido = $taxa - $custoTreeal;
         }
         
-        // Log para debug (remover em produção se necessário)
-        \Illuminate\Support\Facades\Log::debug('AdminDashboardController::formatTransaction', [
-            'transaction_id' => $item->id ?? null,
-            'type' => $type,
-            'amount_raw' => $item->amount ?? null,
-            'amount_formatted' => $amount,
-            'taxa_raw' => $type === 'deposit' ? ($item->taxa_cash_in ?? null) : ($item->taxa_cash_out ?? null),
-            'taxa_formatted' => $taxa,
-            'custo_treeal' => $custoTreeal,
-            'lucro_liquido' => $lucroLiquido,
-        ]);
+        // Formatar created_at para timestamp
+        $createdAtTimestamp = 0;
+        $createdAtIso = null;
+        if ($item->created_at) {
+            try {
+                if ($item->created_at instanceof \Carbon\Carbon) {
+                    $createdAtTimestamp = $item->created_at->timestamp;
+                    $createdAtIso = $item->created_at->toIso8601String();
+                } elseif (is_string($item->created_at)) {
+                    $carbonDate = \Carbon\Carbon::parse($item->created_at);
+                    $createdAtTimestamp = $carbonDate->timestamp;
+                    $createdAtIso = $carbonDate->toIso8601String();
+                }
+            } catch (\Exception $e) {
+                // Se falhar ao parsear, manter valores padrão
+            }
+        }
         
         return [
-            'id' => $item->id,
+            'id' => (int) $item->id,
             'type' => $type,
             'user' => $userData,
             'amount' => $amount,
             'taxa' => $taxa,
-            'custo_treeal' => $custoTreeal,
-            'lucro_liquido' => max(0, $lucroLiquido), // Garantir que não seja negativo
             'status' => $item->status ?? null,
-            'date' => $item->date ?? null,
-            'created_at' => $item->created_at ? $item->created_at->toIso8601String() : null,
-            'created_at_timestamp' => $item->created_at ? $item->created_at->timestamp : 0,
+            'date' => $formattedDate,
+            'created_at' => $createdAtIso,
+            'created_at_timestamp' => $createdAtTimestamp,
         ];
     }
     

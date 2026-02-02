@@ -132,7 +132,7 @@ class AdminFinancialSeeder extends Seeder
                 'status' => $status,
                 'idTransaction' => $idTransaction,
                 'deposito_liquido' => $depositoLiquido,
-                'taxa_cash_in' => $taxaPercentual,
+                'taxa_cash_in' => $taxaTotal, // CORRIGIDO: Salva valor monetário total ao invés de percentual
                 'taxa_pix_cash_in_adquirente' => 1.5,
                 'taxa_pix_cash_in_valor_fixo' => $taxaFixa,
                 'qrcode_pix' => '00020126580014br.gov.bcb.pix0136' . uniqid(),
