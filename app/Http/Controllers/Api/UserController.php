@@ -2471,12 +2471,15 @@ class UserController extends Controller
                 $user->affiliate_link = config('app.url') . '/register?ref=' . $user->affiliate_code;
                 $user->save();
             }
+
+            $affiliatesCount = $user->clientesAffiliate()->count();
             
             return response()->json([
                 'success' => true,
                 'data' => [
                     'affiliate_code' => $user->affiliate_code,
-                    'affiliate_link' => $user->affiliate_link
+                    'affiliate_link' => $user->affiliate_link,
+                    'affiliates_count' => $affiliatesCount
                 ]
             ]);
         } catch (\Exception $e) {
