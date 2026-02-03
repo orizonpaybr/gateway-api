@@ -15,16 +15,38 @@ return new class extends Migration
     public function up(): void
     {
         // Limpar dados sensíveis, mantendo apenas configurações não sensíveis
-        DB::table('treeal')->update([
-            'certificate_password' => null,
-            'client_id' => null,
-            'client_secret' => null,
-            'qrcodes_client_id' => null,
-            'qrcodes_client_secret' => null,
-            'pix_key_secondary' => null,
-            'certificate_path' => null, // Caminho pode ficar, mas vamos limpar também
-            'updated_at' => now(),
-        ]);
+        // Verificar se as colunas existem antes de tentar atualizar
+        // (elas podem já ter sido removidas pela migration anterior)
+        
+        $columnsToClean = [];
+        
+        if (Schema::hasColumn('treeal', 'certificate_password')) {
+            $columnsToClean['certificate_password'] = null;
+        }
+        if (Schema::hasColumn('treeal', 'client_id')) {
+            $columnsToClean['client_id'] = null;
+        }
+        if (Schema::hasColumn('treeal', 'client_secret')) {
+            $columnsToClean['client_secret'] = null;
+        }
+        if (Schema::hasColumn('treeal', 'qrcodes_client_id')) {
+            $columnsToClean['qrcodes_client_id'] = null;
+        }
+        if (Schema::hasColumn('treeal', 'qrcodes_client_secret')) {
+            $columnsToClean['qrcodes_client_secret'] = null;
+        }
+        if (Schema::hasColumn('treeal', 'pix_key_secondary')) {
+            $columnsToClean['pix_key_secondary'] = null;
+        }
+        if (Schema::hasColumn('treeal', 'certificate_path')) {
+            $columnsToClean['certificate_path'] = null;
+        }
+        
+        // Só atualiza se houver colunas para limpar
+        if (!empty($columnsToClean)) {
+            $columnsToClean['updated_at'] = now();
+            DB::table('treeal')->update($columnsToClean);
+        }
     }
 
     /**
