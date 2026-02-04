@@ -150,13 +150,11 @@ class QRCodeService
         if ($busca !== '') {
             $depositosQuery->where(function ($q) use ($busca) {
                 $q->where('idTransaction', 'like', "%{$busca}%")
-                  ->orWhere('descricao_transacao', 'like', "%{$busca}%")
                   ->orWhere('client_name', 'like', "%{$busca}%")
                   ->orWhere('client_document', 'like', "%{$busca}%");
             });
             $saquesQuery->where(function ($q) use ($busca) {
                 $q->where('idTransaction', 'like', "%{$busca}%")
-                  ->orWhere('descricao_transacao', 'like', "%{$busca}%")
                   ->orWhere('beneficiaryname', 'like', "%{$busca}%")
                   ->orWhere('beneficiarydocument', 'like', "%{$busca}%");
             });

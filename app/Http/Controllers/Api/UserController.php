@@ -839,39 +839,10 @@ class UserController extends Controller
                 // Aplicar filtro de busca se fornecido
                 if ($busca) {
                     $entradasQuery->where(function($query) use ($busca) {
-                        $query->where('transaction_id', 'like', "%{$busca}%")
-                              ->orWhere('nome_cliente', 'like', "%{$busca}%")
-                              ->orWhere('documento', 'like', "%{$busca}%")
-                              ->orWhere('descricao_transacao', 'like', "%{$busca}%")
-                              ->orWhere('descricao', 'like', "%{$busca}%");
-                        
-                        // Buscar por valor - tentar diferentes interpretações do número
-                        $valorBusca = preg_replace('/[^0-9,.]/', '', $busca);
-                        $valorBusca = str_replace(',', '.', $valorBusca);
-                        
-                        if (is_numeric($valorBusca) && $valorBusca > 0) {
-                            $valorNumerico = (float) $valorBusca;
-                            
-                            // Se o número não tem ponto decimal e é grande, tentar diferentes posições
-                            if (strpos($busca, '.') === false && strpos($busca, ',') === false && $valorNumerico >= 100) {
-                                // Tentar com 2 casas decimais (mais comum para valores monetários)
-                                $valorComDecimais = $valorNumerico / 100;
-                                $query->orWhere(function($q) use ($valorComDecimais, $valorNumerico) {
-                                    // Buscar valor exato ou com 2 casas decimais
-                                    $q->whereBetween('amount', [$valorComDecimais * 0.999, $valorComDecimais * 1.001])
-                                      ->orWhereBetween('deposito_liquido', [$valorComDecimais * 0.999, $valorComDecimais * 1.001])
-                                      // Também tentar valor sem decimais (para valores inteiros)
-                                      ->orWhereBetween('amount', [$valorNumerico * 0.999, $valorNumerico * 1.001])
-                                      ->orWhereBetween('deposito_liquido', [$valorNumerico * 0.999, $valorNumerico * 1.001]);
-                                });
-                            } else {
-                                // Valor com ponto decimal ou valor pequeno - busca normal
-                                $query->orWhere(function($q) use ($valorNumerico) {
-                                    $q->whereBetween('amount', [$valorNumerico * 0.999, $valorNumerico * 1.001])
-                                      ->orWhereBetween('deposito_liquido', [$valorNumerico * 0.999, $valorNumerico * 1.001]);
-                                });
-                            }
-                        }
+                        $query->where('idTransaction', 'like', "%{$busca}%")
+                              ->orWhere('externalreference', 'like', "%{$busca}%")
+                              ->orWhere('client_name', 'like', "%{$busca}%")
+                              ->orWhere('client_document', 'like', "%{$busca}%");
                     });
                 }
 
@@ -887,39 +858,10 @@ class UserController extends Controller
                 // Aplicar filtro de busca se fornecido
                 if ($busca) {
                     $saidasQuery->where(function($query) use ($busca) {
-                        $query->where('transaction_id', 'like', "%{$busca}%")
-                              ->orWhere('nome_cliente', 'like', "%{$busca}%")
-                              ->orWhere('documento', 'like', "%{$busca}%")
-                              ->orWhere('descricao_transacao', 'like', "%{$busca}%")
-                              ->orWhere('descricao', 'like', "%{$busca}%");
-                        
-                        // Buscar por valor - tentar diferentes interpretações do número
-                        $valorBusca = preg_replace('/[^0-9,.]/', '', $busca);
-                        $valorBusca = str_replace(',', '.', $valorBusca);
-                        
-                        if (is_numeric($valorBusca) && $valorBusca > 0) {
-                            $valorNumerico = (float) $valorBusca;
-                            
-                            // Se o número não tem ponto decimal e é grande, tentar diferentes posições
-                            if (strpos($busca, '.') === false && strpos($busca, ',') === false && $valorNumerico >= 100) {
-                                // Tentar com 2 casas decimais (mais comum para valores monetários)
-                                $valorComDecimais = $valorNumerico / 100;
-                                $query->orWhere(function($q) use ($valorComDecimais, $valorNumerico) {
-                                    // Buscar valor exato ou com 2 casas decimais
-                                    $q->whereBetween('amount', [$valorComDecimais * 0.999, $valorComDecimais * 1.001])
-                                      ->orWhereBetween('cash_out_liquido', [$valorComDecimais * 0.999, $valorComDecimais * 1.001])
-                                      // Também tentar valor sem decimais (para valores inteiros)
-                                      ->orWhereBetween('amount', [$valorNumerico * 0.999, $valorNumerico * 1.001])
-                                      ->orWhereBetween('cash_out_liquido', [$valorNumerico * 0.999, $valorNumerico * 1.001]);
-                                });
-                            } else {
-                                // Valor com ponto decimal ou valor pequeno - busca normal
-                                $query->orWhere(function($q) use ($valorNumerico) {
-                                    $q->whereBetween('amount', [$valorNumerico * 0.999, $valorNumerico * 1.001])
-                                      ->orWhereBetween('cash_out_liquido', [$valorNumerico * 0.999, $valorNumerico * 1.001]);
-                                });
-                            }
-                        }
+                        $query->where('idTransaction', 'like', "%{$busca}%")
+                              ->orWhere('externalreference', 'like', "%{$busca}%")
+                              ->orWhere('beneficiaryname', 'like', "%{$busca}%")
+                              ->orWhere('beneficiarydocument', 'like', "%{$busca}%");
                     });
                 }
 
@@ -2225,7 +2167,7 @@ class UserController extends Controller
      */
     /**
      * Aplicar filtro de busca em transações (depósitos e saques)
-     * Busca por: transaction_id, idTransaction, descrição, nome_cliente e valor
+     * Busca por: transaction_id, idTransaction, nome_cliente e documento
      */
     private function applyTransactionsSearchFilter($depositosQuery, $saquesQuery, string $busca): void
     {
@@ -2239,11 +2181,8 @@ class UserController extends Controller
                   ->orWhereRaw('LOWER(externalreference) LIKE ?', [$searchPattern])
                   // Buscar por nome do cliente
                   ->orWhereRaw('LOWER(CAST(client_name AS CHAR CHARACTER SET utf8mb4)) LIKE ?', [$searchPattern])
-                  // Buscar por descrição (case-insensitive)
-                  ->orWhereRaw('LOWER(CAST(descricao_transacao AS CHAR CHARACTER SET utf8mb4)) LIKE ?', [$searchPattern]);
-
-            // Buscar por valor
-            $this->applyValueSearch($query, $busca, ['amount', 'deposito_liquido']);
+                  // Buscar por documento do cliente
+                  ->orWhereRaw('LOWER(CAST(client_document AS CHAR CHARACTER SET utf8mb4)) LIKE ?', [$searchPattern]);
         });
 
         // Aplicar busca em saques
@@ -2253,56 +2192,8 @@ class UserController extends Controller
                   ->orWhereRaw('LOWER(externalreference) LIKE ?', [$searchPattern])
                   // Buscar por nome do beneficiário
                   ->orWhereRaw('LOWER(CAST(beneficiaryname AS CHAR CHARACTER SET utf8mb4)) LIKE ?', [$searchPattern])
-                  // Buscar por descrição (case-insensitive)
-                  ->orWhereRaw('LOWER(CAST(descricao_transacao AS CHAR CHARACTER SET utf8mb4)) LIKE ?', [$searchPattern]);
-
-            // Buscar por valor
-            $this->applyValueSearch($query, $busca, ['amount', 'cash_out_liquido']);
-        });
-    }
-
-    /**
-     * @deprecated Use applyTransactionsSearchFilter instead
-     */
-    private function applyPendingTransactionsSearchFilter($depositosQuery, $saquesQuery, string $busca): void
-    {
-        $this->applyTransactionsSearchFilter($depositosQuery, $saquesQuery, $busca);
-    }
-
-    /**
-     * Aplicar busca por valor numérico com diferentes interpretações
-     *
-     * @param \Illuminate\Database\Eloquent\Builder $query
-     * @param string $busca
-     * @param array $fields Campos numéricos para buscar
-     * @return void
-     */
-    private function applyValueSearch($query, string $busca, array $fields): void
-    {
-        $valorBusca = preg_replace('/[^0-9,.]/', '', $busca);
-        $valorBusca = str_replace(',', '.', $valorBusca);
-
-        if (!is_numeric($valorBusca) || $valorBusca <= 0) {
-            return;
-        }
-
-        $valorNumerico = (float) $valorBusca;
-        $hasDecimalSeparator = strpos($busca, '.') !== false || strpos($busca, ',') !== false;
-
-        $query->orWhere(function($q) use ($valorNumerico, $fields, $hasDecimalSeparator) {
-            // Se não tem separador decimal e é um número grande, tentar interpretar como centavos
-            if (!$hasDecimalSeparator && $valorNumerico >= 100) {
-                $valorComDecimais = $valorNumerico / 100;
-                foreach ($fields as $field) {
-                    $q->orWhereBetween($field, [$valorComDecimais * 0.999, $valorComDecimais * 1.001])
-                      ->orWhereBetween($field, [$valorNumerico * 0.999, $valorNumerico * 1.001]);
-                }
-            } else {
-                // Busca normal com margem de erro de 0.1%
-                foreach ($fields as $field) {
-                    $q->orWhereBetween($field, [$valorNumerico * 0.999, $valorNumerico * 1.001]);
-                }
-            }
+                  // Buscar por documento do beneficiário
+                  ->orWhereRaw('LOWER(CAST(beneficiarydocument AS CHAR CHARACTER SET utf8mb4)) LIKE ?', [$searchPattern]);
         });
     }
 
