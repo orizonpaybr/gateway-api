@@ -13,9 +13,13 @@ class CheckTokenAndSecret
 {
     public function handle(Request $request, Closure $next)
     {
-        // Pegue o token e secret do corpo da requisição ou query parameters
-        $token = $request->input('token') ?: $request->query('token');
-        $secret = $request->input('secret') ?: $request->query('secret');
+        // Token e secret: body, query ou headers (api_token / api_secret para frontend)
+        $token = $request->input('token')
+            ?: $request->query('token')
+            ?: $request->header('api_token');
+        $secret = $request->input('secret')
+            ?: $request->query('secret')
+            ?: $request->header('api_secret');
 
         // Verifique se ambos os parâmetros token e secret foram enviados
         if (!$token || !$secret) {

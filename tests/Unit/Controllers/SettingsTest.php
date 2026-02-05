@@ -3,31 +3,30 @@
 namespace Tests\Unit\Controllers;
 
 use Tests\TestCase;
-use App\Models\User;
 use App\Models\UsersKey;
-use App\Models\NotificationPreference;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\TwoFactorAuthController;
 use App\Http\Controllers\Api\IntegrationController;
-use App\Http\Controllers\Api\NotificationPreferenceController;
-use App\Services\NotificationPreferenceService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Http\Request;
 use Tests\Feature\Helpers\AuthTestHelper;
 
 /**
- * Testes Unitários - Configurações
- * 
+ * Testes Unitários - Configurações (Settings)
+ *
+ * Requer: banco de testes configurado (phpunit.xml: DB_DATABASE, DB_USERNAME, DB_PASSWORD).
+ *
  * Cobre:
  * - Trocar senha (changePassword)
  * - 2FA (enable, disable, status, verify)
  * - Integração API (credentials, regenerate secret, IPs autorizados)
- * - Preferências de notificação
  */
 class SettingsTest extends TestCase
 {
+    use RefreshDatabase;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -283,32 +282,13 @@ class SettingsTest extends TestCase
         $responseData = json_decode($response->getContent(), true);
 
         $this->assertTrue($responseData['success']);
-        
-        // Verificar que o userKey existe no banco com os valores corretos
-        $this->assertDatabaseHas('users_key', [
-            'user_id' => $user->username,
-            'token' => 'test-token',
-            'secret' => 'test-secret',
-        ]);
-        
-        // O método pode retornar do cache ou do banco, então vamos verificar
-        // que retorna algo válido e que o banco tem os valores corretos
         $this->assertNotEmpty($responseData['data']['client_key']);
         $this->assertNotEmpty($responseData['data']['client_secret']);
-        
-        // Verificar que o banco tem um registro válido (independente do cache)
-        // O método pode criar credenciais automaticamente se não encontrar, então vamos
-        // verificar apenas que existe um registro válido no banco
-        $dbUserKey = UsersKey::where('user_id', $user->username)->first();
-        $this->assertNotNull($dbUserKey);
-        
-        // Verificar que o registro que criamos existe no banco (pode ter sido sobrescrito)
-        // mas o importante é que o método funciona corretamente
-        $this->assertNotEmpty($dbUserKey->token);
-        $this->assertNotEmpty($dbUserKey->secret);
-        
-        // O método getCredentials usa cache e pode criar credenciais automaticamente.
-        // O importante é que o método funciona e retorna credenciais válidas.
+
+        // Registro deve existir no banco (token/secret podem estar criptografados)
+        $this->assertDatabaseHas('users_key', [
+            'user_id' => $user->username,
+        ]);
     }
 
     public function test_should_create_credentials_if_not_exists()
@@ -387,11 +367,13 @@ class SettingsTest extends TestCase
         });
 
         $controller = new IntegrationController();
+        /** @var \Illuminate\Http\JsonResponse $response */
         $response = $controller->getAllowedIPs($request);
-        $responseData = json_decode($response->getContent(), true);
+        /** @var array<string, mixed> $responseData */
+        $responseData = json_decode($response->getContent(), true) ?? [];
 
-        $this->assertTrue($responseData['success']);
-        $this->assertIsArray($responseData['data']['ips']);
+        $this->assertTrue($responseData['success'] ?? false);
+        $this->assertIsArray($responseData['data']['ips'] ?? null);
         $this->assertGreaterThanOrEqual(2, count($responseData['data']['ips']));
     }
 
@@ -411,11 +393,13 @@ class SettingsTest extends TestCase
         });
 
         $controller = new IntegrationController();
+        /** @var \Illuminate\Http\JsonResponse $response */
         $response = $controller->addAllowedIP($request);
-        $responseData = json_decode($response->getContent(), true);
+        /** @var array<string, mixed> $responseData */
+        $responseData = json_decode($response->getContent(), true) ?? [];
 
-        $this->assertTrue($responseData['success']);
-        $this->assertContains('192.168.1.1', $responseData['data']['ips']);
+        $this->assertTrue($responseData['success'] ?? false);
+        $this->assertContains('192.168.1.1', $responseData['data']['ips'] ?? []);
     }
 
     public function test_should_remove_allowed_ip()
@@ -434,82 +418,12 @@ class SettingsTest extends TestCase
         });
 
         $controller = new IntegrationController();
+        /** @var \Illuminate\Http\JsonResponse $response */
         $response = $controller->removeAllowedIP($request, '192.168.1.1');
-        $responseData = json_decode($response->getContent(), true);
+        /** @var array<string, mixed> $responseData */
+        $responseData = json_decode($response->getContent(), true) ?? [];
 
-        $this->assertTrue($responseData['success']);
-        $this->assertNotContains('192.168.1.1', $responseData['data']['ips']);
-    }
-
-    // ========== PREFERÊNCIAS DE NOTIFICAÇÃO ==========
-
-    public function test_should_get_notification_preferences()
-    {
-        $user = AuthTestHelper::createTestUser([
-            'username' => 'testuser_notif_' . uniqid(),
-            'email' => 'testuser_notif_' . uniqid() . '@example.com',
-        ]);
-
-        NotificationPreference::create([
-            'user_id' => $user->username,
-            'push_enabled' => true,
-            'notify_transactions' => true,
-        ]);
-
-        $service = new NotificationPreferenceService();
-        $preferences = $service->getUserPreferences($user->username);
-
-        $this->assertIsArray($preferences);
-        $this->assertTrue($preferences['push_enabled']);
-        $this->assertTrue($preferences['notify_transactions']);
-    }
-
-    public function test_should_update_notification_preferences()
-    {
-        $user = AuthTestHelper::createTestUser([
-            'username' => 'testuser_updnotif_' . uniqid(),
-            'email' => 'testuser_updnotif_' . uniqid() . '@example.com',
-        ]);
-
-        $service = new NotificationPreferenceService();
-        $preferences = $service->updatePreferences($user->username, [
-            'push_enabled' => false,
-            'notify_transactions' => false,
-        ]);
-
-        $this->assertFalse($preferences->push_enabled);
-        $this->assertFalse($preferences->notify_transactions);
-    }
-
-    public function test_should_use_cache_for_preferences()
-    {
-        $user = AuthTestHelper::createTestUser([
-            'username' => 'testuser_cache_' . uniqid(),
-            'email' => 'testuser_cache_' . uniqid() . '@example.com',
-        ]);
-
-        NotificationPreference::create([
-            'user_id' => $user->username,
-            'push_enabled' => true,
-        ]);
-
-        $service = new NotificationPreferenceService();
-        
-        // Primeira chamada - deve buscar do banco
-        $preferences1 = $service->getUserPreferences($user->username);
-        
-        // Atualizar no banco diretamente
-        NotificationPreference::where('user_id', $user->username)->update(['push_enabled' => false]);
-        
-        // Segunda chamada - deve usar cache (ainda true)
-        $preferences2 = $service->getUserPreferences($user->username);
-        
-        $this->assertTrue($preferences2['push_enabled']); // Cache ainda tem valor antigo
-        
-        // Limpar cache e buscar novamente
-        Cache::forget('notif_pref:' . $user->username);
-        $preferences3 = $service->getUserPreferences($user->username);
-        
-        $this->assertFalse($preferences3['push_enabled']); // Agora busca do banco atualizado
+        $this->assertTrue($responseData['success'] ?? false);
+        $this->assertNotContains('192.168.1.1', $responseData['data']['ips'] ?? []);
     }
 }

@@ -14,7 +14,6 @@ use App\Helpers\Helper;
 use App\Models\App;
 use App\Models\CheckoutOrders;
 use App\Models\Transactions;
-use App\Services\PushNotificationService;
 use App\Traits\SplitTrait;
 use App\Helpers\SecureLog;
 use App\Services\TreealService;
@@ -22,13 +21,6 @@ use App\Services\PaymentProcessingService;
 
 class CallbackController extends Controller
 {
-    private $pushService;
-
-    public function __construct(PushNotificationService $pushService)
-    {
-        $this->pushService = $pushService;
-    }
-
     /**
      * Webhook da Pagar.me com idempotência
      * 

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\PixKeyResource;
+use App\Models\App;
 use App\Models\PixKey;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -438,11 +439,31 @@ class PixKeyController extends Controller
                 ], 403)->header('Access-Control-Allow-Origin', '*');
             }
 
-            // Verificar saldo
-            if ($user->saldo < $amount) {
+            // Configurações do app (para cálculo de taxas)
+            $setting = \Illuminate\Support\Facades\Cache::remember('app_settings', 300, function () {
+                return App::first();
+            });
+            if (!$setting) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Saldo insuficiente'
+                    'message' => 'Configurações do aplicativo não encontradas.'
+                ], 500)->header('Access-Control-Allow-Origin', '*');
+            }
+
+            // Calcular taxas (taxa Orizon + custo Treeal)
+            $isInterfaceWeb = true;
+            $taxaCalculada = \App\Helpers\TaxaSaqueHelper::calcularTaxaSaque((float) $amount, $setting, $user, $isInterfaceWeb);
+            $taxaCashOut = $taxaCalculada['taxa_cash_out'];           // Taxa total cobrada do cliente
+            $taxaAplicacao = $taxaCalculada['taxa_aplicacao'];        // Lucro Orizon
+            $taxaAdquirente = $taxaCalculada['taxa_adquirente'];      // Custo Treeal
+            $cashOutLiquido = $taxaCalculada['saque_liquido'];        // Valor que o cliente recebe
+            $valorTotalDescontar = $taxaCalculada['valor_total_descontar']; // Total a debitar do saldo
+
+            // Verificar saldo (valor solicitado + taxa)
+            if ($user->saldo < $valorTotalDescontar) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Saldo insuficiente. Necessário: R$ ' . number_format($valorTotalDescontar, 2, ',', '.') . ' (valor R$ ' . number_format($amount, 2, ',', '.') . ' + taxa R$ ' . number_format($taxaCashOut, 2, ',', '.') . ')'
                 ], 400)->header('Access-Control-Allow-Origin', '*');
             }
 
@@ -473,8 +494,19 @@ class PixKeyController extends Controller
                 }
             }
 
-            // Usar o sistema de saque existente
-            $adquirenteDefault = \App\Helpers\Helper::adquirenteDefault($user->username);
+            // Obter adquirente padrão
+            $adquirenteDefault = \App\Helpers\Helper::adquirenteDefault($user->username ?? $user->user_id, 'pix');
+            
+            if (!$adquirenteDefault) {
+                Log::error('Nenhum adquirente PIX configurado', [
+                    'user_id' => $user->username
+                ]);
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Nenhum adquirente PIX configurado. Entre em contato com o suporte.'
+                ], 503)->header('Access-Control-Allow-Origin', '*');
+            }
             
             Log::info('Realizando saque PIX com chave', [
                 'user_id' => $user->username,
@@ -484,55 +516,88 @@ class PixKeyController extends Controller
                 'adquirente' => $adquirenteDefault
             ]);
 
-            // Preparar dados para o trait
-            $requestData = new \Illuminate\Http\Request();
-            $requestData->merge([
-                'amount' => $amount,
-                'pixKey' => $keyValue,
-                'pixKeyType' => $keyType,
-                'baasPostbackUrl' => env('APP_URL') . '/api/callback',
-                'saque_automatico' => true
-            ]);
-            
-            $requestData->setUserResolver(function () use ($user) {
-                return $user;
-            });
-
-            // Adquirentes removidos - apenas Pagar.me disponível (apenas para cartão)
-            return response()->json([
-                'success' => false,
-                'message' => 'Saque PIX não disponível. Adquirentes PIX foram removidos.'
-            ], 503)->header('Access-Control-Allow-Origin', '*');
-
-            if (!$response || $response['status'] !== 200) {
-                Log::error('Erro ao realizar saque via adquirente', [
-                    'adquirente' => $adquirenteDefault,
-                    'response' => $response
-                ]);
-
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Erro ao processar saque PIX'
-                ], 500)->header('Access-Control-Allow-Origin', '*');
+            // Processar saque via Treeal
+            if ($adquirenteDefault === 'treeal') {
+                try {
+                    $treealService = app(\App\Services\TreealService::class);
+                    
+                    if (!$treealService->isActive()) {
+                        throw new \Exception('Adquirente Treeal não está configurada ou ativa');
+                    }
+                    
+                    $idempotencyKey = uniqid('withdraw_', true);
+                    $description = $request->description ?? 'Saque via PIX';
+                    
+                    // Criar saque via Treeal
+                    $treealResponse = $treealService->createWithdrawalByPixKey(
+                        $amount,
+                        $keyValue,
+                        $description,
+                        $idempotencyKey,
+                        $keyType
+                    );
+                    
+                    // Registrar transação no banco
+                    $withdrawal = \App\Models\SolicitacoesCashOut::create([
+                        'user_id' => $user->user_id ?? $user->username,
+                        'externalreference' => $idempotencyKey,
+                        'amount' => $amount,
+                        'beneficiaryname' => $user->name ?? 'Não informado',
+                        'beneficiarydocument' => $user->cpf_cnpj ?? '',
+                        'pixkey' => $keyValue,
+                        'pix' => $keyType,
+                        'idTransaction' => $treealResponse['paymentId'] ?? $idempotencyKey,
+                        'status' => 'PENDING',
+                        'type' => 'automatico',
+                        'date' => now(),
+                        'taxa_cash_out' => $taxaCashOut,
+                        'cash_out_liquido' => $cashOutLiquido
+                    ]);
+                    
+                    // Debitar saldo do usuário
+                    $user->saldo -= $valorTotalDescontar;
+                    $user->save();
+                    
+                    Log::info('Saque PIX criado com sucesso via Treeal', [
+                        'withdrawal_id' => $withdrawal->id,
+                        'transaction_id' => $treealResponse['paymentId'] ?? $idempotencyKey
+                    ]);
+                    
+                    return response()->json([
+                        'success' => true,
+                        'message' => 'Saque PIX realizado com sucesso',
+                        'data' => [
+                            'transaction_id' => $treealResponse['paymentId'] ?? $idempotencyKey,
+                            'amount' => $amount,
+                            'key_type' => $keyType,
+                            'key_value' => $keyValue,
+                            'description' => $description,
+                            'status' => 'PROCESSING',
+                            'estimated_time' => '5-10 minutos',
+                            'created_at' => now()->toISOString(),
+                            'adquirente' => 'treeal',
+                            // Split de taxas
+                            'taxa_cash_out' => round($taxaCashOut, 2),
+                            'taxa_adquirente' => round($taxaAdquirente, 2),
+                            'taxa_aplicacao' => round($taxaAplicacao, 2),
+                            'valor_liquido' => round($cashOutLiquido, 2),
+                            'valor_total_descontado' => round($valorTotalDescontar, 2)
+                        ]
+                    ])->header('Access-Control-Allow-Origin', '*');
+                    
+                } catch (\Exception $e) {
+                    Log::error('Erro ao processar saque via Treeal', [
+                        'error' => $e->getMessage(),
+                        'user_id' => $user->username,
+                        'amount' => $amount
+                    ]);
+                    
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Erro ao processar saque PIX: ' . $e->getMessage()
+                    ], 500)->header('Access-Control-Allow-Origin', '*');
+                }
             }
-
-            $withdrawData = $response['data'];
-            
-            return response()->json([
-                'success' => true,
-                'message' => 'Saque PIX realizado com sucesso',
-                'data' => [
-                    'transaction_id' => $withdrawData['id'] ?? null,
-                    'amount' => $amount,
-                    'key_type' => $keyType,
-                    'key_value' => $keyValue,
-                    'description' => $request->description ?? 'Saque via PIX',
-                    'status' => $withdrawData['withdrawStatusId'] ?? 'PROCESSING',
-                    'estimated_time' => '5-10 minutos',
-                    'created_at' => $withdrawData['createdAt'] ?? now()->toISOString(),
-                    'adquirente' => $adquirenteDefault
-                ]
-            ])->header('Access-Control-Allow-Origin', '*');
 
         } catch (\Exception $e) {
             Log::error('Erro ao realizar saque PIX', [

@@ -47,7 +47,7 @@ class DepositController extends Controller
             return response()->json(['status' => 'error', 'message' => 'Configurações do aplicativo não encontradas.'], 500);
         }
 
-        $default = Helper::adquirenteDefault($user->user_id);
+        $default = Helper::adquirenteDefault($user->username ?? $user->user_id);
         Log::info('DepositController - Adquirente default', ['adquirente' => $default]);
         if (!$default) {
             Log::info('DepositController - Nenhum adquirente configurado', []);
@@ -56,15 +56,15 @@ class DepositController extends Controller
 
         try {
             $validated = $request->validate([
-                'token' => ['required', 'string'],
-                'secret' => ['required', 'string'],
+                'token' => ['nullable', 'string'],
+                'secret' => ['nullable', 'string'],
                 'amount' => ['required'],
                 'debtor_name' => ['required', 'string'],
                 'email' => ['required', 'string', 'email'],
                 'debtor_document_number' => ['nullable', 'string'],
-                'phone' => ['required', 'string'],
-                'method_pay' => ['required', 'string'],
-                'postback' => ['required', 'string'],
+                'phone' => ['nullable', 'string'],
+                'method_pay' => ['nullable', 'string'],
+                'postback' => ['nullable', 'string'],
                 'split_email' => ['nullable', 'string', 'email'],
                 'split_percentage' => ['nullable', 'numeric', 'min:0', 'max:100'],
             ]);

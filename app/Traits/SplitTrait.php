@@ -8,7 +8,6 @@ use App\Models\SplitInternoExecutado;
 use App\Models\Solicitacoes;
 use App\Models\User;
 use App\Helpers\Helper;
-use App\Services\PushNotificationService;
 use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
 
@@ -254,14 +253,6 @@ trait SplitTrait
                 'amount' => $split->split_amount,
                 'novo_saldo' => $splitUser->fresh()->saldo
             ]);
-            
-            // Enviar notificação de comissão ao usuário de split
-            $pushService = app(PushNotificationService::class);
-            $pushService->sendCommissionNotification(
-                $splitUser->user_id,
-                $split->split_amount,
-                "Comissão de split recebida"
-            );
             
             // Debitar o valor do usuário original
             if ($originalUser) {
