@@ -5,7 +5,6 @@ namespace Tests\Feature\Api;
 use Tests\TestCase;
 use App\Models\User;
 use App\Models\UsersKey;
-use App\Models\NotificationPreference;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
@@ -254,76 +253,6 @@ class SettingsPerformanceTest extends TestCase
         // Vamos verificar que a maioria foi bem-sucedida
         $this->assertGreaterThan(50, $successfulRequests, "Apenas {$successfulRequests} de 100 requisições foram bem-sucedidas");
         $this->assertLessThan(30000, $duration, "100 requisições levaram {$duration}ms, esperado < 30000ms");
-    }
-
-    public function test_should_maintain_performance_with_notification_preferences()
-    {
-        // Criar 100 usuários e suas preferências
-        $users = [];
-        for ($i = 0; $i < 100; $i++) {
-            $user = AuthTestHelper::createTestUser([
-                'username' => 'testuser_pref_' . uniqid() . '_' . $i,
-                'email' => 'testuser_pref_' . uniqid() . '_' . $i . '@example.com',
-            ]);
-
-            NotificationPreference::create([
-                'user_id' => $user->username,
-                'push_enabled' => true,
-                'notify_transactions' => true,
-            ]);
-
-            $users[] = $user;
-        }
-
-        NotificationPreference::create([
-            'user_id' => $this->user->username,
-            'push_enabled' => true,
-            'notify_transactions' => true,
-        ]);
-
-        Cache::forget('notif_pref:' . $this->user->username);
-
-        $startTime = microtime(true);
-
-        $response = $this->withHeaders([
-            'Authorization' => 'Bearer ' . $this->token,
-        ])->getJson('/api/notification-preferences');
-
-        $duration = (microtime(true) - $startTime) * 1000;
-
-        $response->assertStatus(200);
-        $this->assertLessThan(500, $duration, "Get preferences levou {$duration}ms, esperado < 500ms");
-    }
-
-    public function test_should_handle_concurrent_notification_preference_updates()
-    {
-        NotificationPreference::create([
-            'user_id' => $this->user->username,
-            'push_enabled' => true,
-        ]);
-
-        $concurrentRequests = 20;
-        $successfulRequests = 0;
-        $startTime = microtime(true);
-
-        for ($i = 0; $i < $concurrentRequests; $i++) {
-            Cache::forget('notif_pref:' . $this->user->username);
-            
-            $response = $this->withHeaders([
-                'Authorization' => 'Bearer ' . $this->token,
-            ])->putJson('/api/notification-preferences', [
-                'push_enabled' => ($i % 2 === 0),
-            ]);
-
-            if ($response->status() === 200) {
-                $successfulRequests++;
-            }
-        }
-
-        $duration = (microtime(true) - $startTime) * 1000;
-
-        $this->assertGreaterThan(0, $successfulRequests);
-        $this->assertLessThan(5000, $duration, "20 requisições levaram {$duration}ms, esperado < 5000ms");
     }
 
     public function test_should_keep_memory_under_control()

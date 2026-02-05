@@ -5,8 +5,6 @@ namespace Tests\Feature\Api;
 use Tests\TestCase;
 use App\Models\User;
 use App\Models\UsersKey;
-use App\Models\NotificationPreference;
-use App\Constants\UserPermission;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
@@ -19,7 +17,6 @@ use Tests\Feature\Helpers\AuthTestHelper;
  * - Trocar senha
  * - 2FA (enable, disable, status, verify)
  * - Integração API (credentials, regenerate secret, IPs autorizados)
- * - Preferências de notificação
  */
 class SettingsIntegrationTest extends TestCase
 {
@@ -270,70 +267,6 @@ class SettingsIntegrationTest extends TestCase
 
         $ips = \App\Traits\IPManagementTrait::getAllowedIPs($this->user->fresh());
         $this->assertNotContains('192.168.1.1', $ips);
-    }
-
-    // ========== PREFERÊNCIAS DE NOTIFICAÇÃO ==========
-
-    public function test_should_get_notification_preferences()
-    {
-        NotificationPreference::create([
-            'user_id' => $this->user->username,
-            'push_enabled' => true,
-            'notify_transactions' => true,
-        ]);
-
-        $response = $this->withHeaders([
-            'Authorization' => 'Bearer ' . $this->token,
-        ])->getJson('/api/notification-preferences');
-
-        $response->assertStatus(200)
-            ->assertJson(['success' => true])
-            ->assertJsonStructure([
-                'success',
-                'data' => [
-                    'push_enabled',
-                    'notify_transactions',
-                    'notify_deposits',
-                    'notify_withdrawals',
-                    'notify_security',
-                    'notify_system',
-                ],
-            ]);
-    }
-
-    public function test_should_update_notification_preferences()
-    {
-        $response = $this->withHeaders([
-            'Authorization' => 'Bearer ' . $this->token,
-        ])->putJson('/api/notification-preferences', [
-            'push_enabled' => false,
-            'notify_transactions' => false,
-        ]);
-
-        $response->assertStatus(200)
-            ->assertJson(['success' => true]);
-
-        $preferences = NotificationPreference::where('user_id', $this->user->username)->first();
-        $this->assertFalse($preferences->push_enabled);
-        $this->assertFalse($preferences->notify_transactions);
-    }
-
-    public function test_should_toggle_notification_preference()
-    {
-        NotificationPreference::create([
-            'user_id' => $this->user->username,
-            'notify_transactions' => true,
-        ]);
-
-        $response = $this->withHeaders([
-            'Authorization' => 'Bearer ' . $this->token,
-        ])->postJson('/api/notification-preferences/toggle/notify_transactions');
-
-        $response->assertStatus(200)
-            ->assertJson(['success' => true]);
-
-        $preferences = NotificationPreference::where('user_id', $this->user->username)->first();
-        $this->assertFalse($preferences->notify_transactions);
     }
 }
 

@@ -557,129 +557,6 @@ class SettingsSecurityTest extends TestCase
         $this->assertNotContains('192.168.1.1', $data['ips'] ?? []);
     }
 
-    // ===== NOTIFICAÇÕES =====
-
-    /**
-     * Teste: Deve exigir autenticação para obter preferências
-     */
-    public function test_should_require_authentication_to_get_notification_preferences(): void
-    {
-        $response = $this->getJson('/api/notification-preferences');
-
-        $response->assertStatus(401);
-    }
-
-    /**
-     * Teste: Deve validar tipos de preferências
-     */
-    public function test_should_validate_notification_preference_types(): void
-    {
-        $response = $this->withHeaders([
-            'Authorization' => 'Bearer ' . $this->token,
-        ])->postJson('/api/notification-preferences/toggle/invalid_type');
-
-        // Deve retornar erro de tipo inválido
-        $this->assertContains($response->status(), [400, 422]);
-    }
-
-    /**
-     * Teste: Deve prevenir SQL Injection em preferências de notificação
-     */
-    public function test_should_prevent_sql_injection_in_notification_preferences(): void
-    {
-        $sqlInjectionPayloads = [
-            "' OR '1'='1",
-            "'; DROP TABLE users--",
-        ];
-
-        foreach ($sqlInjectionPayloads as $payload) {
-            $response = $this->withHeaders([
-                'Authorization' => 'Bearer ' . $this->token,
-            ])->putJson('/api/notification-preferences', [
-                'push_enabled' => $payload,
-            ]);
-
-            // Não deve retornar erros SQL
-            $this->assertStringNotContainsString('SQLSTATE', $response->getContent());
-            $this->assertContains($response->status(), [400, 422]);
-        }
-    }
-
-    /**
-     * Teste: Deve prevenir acesso a preferências de outros usuários (IDOR)
-     */
-    public function test_should_prevent_idor_access_to_other_users_notification_preferences(): void
-    {
-        // Atualizar preferências do primeiro usuário
-        $this->withHeaders([
-            'Authorization' => 'Bearer ' . $this->token,
-        ])->putJson('/api/notification-preferences', [
-            'push_enabled' => false,
-        ]);
-
-        // Fazer login com outro usuário
-        $loginResponse = $this->postJson('/api/auth/login', [
-            'username' => 'otheruser',
-            'password' => 'password123',
-        ]);
-
-        $otherToken = $loginResponse->json('token') ?? $loginResponse->json('data.token');
-
-        // Obter preferências com token do outro usuário
-        $response = $this->withHeaders([
-            'Authorization' => 'Bearer ' . $otherToken,
-        ])->getJson('/api/notification-preferences');
-
-        $response->assertStatus(200);
-        $data = $response->json('data');
-        
-        // Não deve retornar preferências do primeiro usuário
-        // Cada usuário deve ter suas próprias preferências
-        $this->assertNotNull($data);
-    }
-
-    /**
-     * Teste: Deve validar valores booleanos em preferências
-     */
-    public function test_should_validate_boolean_values_in_notification_preferences(): void
-    {
-        $invalidValues = [
-            'true',      // String ao invés de boolean
-            'false',    // String ao invés de boolean
-            '1',        // String ao invés de boolean
-            '0',        // String ao invés de boolean
-        ];
-
-        foreach ($invalidValues as $invalidValue) {
-            $response = $this->withHeaders([
-                'Authorization' => 'Bearer ' . $this->token,
-            ])->putJson('/api/notification-preferences', [
-                'push_enabled' => $invalidValue,
-            ]);
-
-            // Deve retornar erro de validação ou aceitar como boolean
-            $this->assertContains($response->status(), [200, 400, 422]);
-        }
-    }
-
-    /**
-     * Teste: Deve implementar rate limiting em preferências de notificação
-     */
-    public function test_should_implement_rate_limiting_in_notification_preferences(): void
-    {
-        // Fazer múltiplas requisições rapidamente
-        for ($i = 0; $i < 35; $i++) {
-            $response = $this->withHeaders([
-                'Authorization' => 'Bearer ' . $this->token,
-            ])->getJson('/api/notification-preferences');
-
-            // Após algumas tentativas, deve retornar 429
-            if ($i >= 29) {
-                $this->assertContains($response->status(), [200, 429]);
-            }
-        }
-    }
-
     // ===== SENSITIVE DATA EXPOSURE =====
 
     /**
@@ -690,7 +567,6 @@ class SettingsSecurityTest extends TestCase
         $endpoints = [
             '/api/integration/credentials',
             '/api/2fa/status',
-            '/api/notification-preferences',
         ];
 
         foreach ($endpoints as $endpoint) {

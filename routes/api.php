@@ -4,7 +4,6 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\BilletController;
 use App\Http\Controllers\Api\CallbackController;
-use App\Http\Controllers\Api\NotificationController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\SaqueController;
@@ -142,26 +141,6 @@ Route::middleware(['verify.jwt'])->group(function () {
         Route::get('admin/withdrawals/{id}', [App\Http\Controllers\Api\WithdrawalController::class, 'show'])->where('id', '[0-9]+');
         Route::post('admin/withdrawals/{id}/approve', [App\Http\Controllers\Api\WithdrawalController::class, 'approve'])->where('id', '[0-9]+');
         Route::post('admin/withdrawals/{id}/reject', [App\Http\Controllers\Api\WithdrawalController::class, 'reject'])->where('id', '[0-9]+');
-    });
-    
-    // Rotas de notificações (com rate limiting)
-    Route::middleware('throttle:60,1')->group(function () {
-        Route::post('notifications/register-token', [NotificationController::class, 'registerToken']);
-        Route::get('notifications', [NotificationController::class, 'getNotifications']);
-        Route::post('notifications/{id}/read', [NotificationController::class, 'markAsRead']);
-        Route::post('notifications/mark-all-read', [NotificationController::class, 'markAllAsRead']);
-        Route::get('notifications/stats', [NotificationController::class, 'getStats']);
-        Route::post('notifications/deactivate-token', [NotificationController::class, 'deactivateToken']);
-    });
-    
-    // Rotas de preferências de notificação (com rate limiting mais permissivo)
-    Route::middleware('throttle:30,1')->group(function () {
-        Route::get('notification-preferences', [App\Http\Controllers\Api\NotificationPreferenceController::class, 'getPreferences']);
-        Route::post('notification-preferences', [App\Http\Controllers\Api\NotificationPreferenceController::class, 'getPreferences']);
-        Route::put('notification-preferences', [App\Http\Controllers\Api\NotificationPreferenceController::class, 'updatePreferences']);
-        Route::post('notification-preferences/toggle/{type}', [App\Http\Controllers\Api\NotificationPreferenceController::class, 'togglePreference']);
-        Route::post('notification-preferences/disable-all', [App\Http\Controllers\Api\NotificationPreferenceController::class, 'disableAll']);
-        Route::post('notification-preferences/enable-all', [App\Http\Controllers\Api\NotificationPreferenceController::class, 'enableAll']);
     });
     
     // Rotas do 2FA
