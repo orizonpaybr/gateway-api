@@ -324,8 +324,8 @@ class SaqueController extends Controller
                 return response()->json($standardizedResponse, 200);
 
             } else {
-                // Saque manual - criar solicitação para aprovação
-                // Não debitar saldo ainda, apenas criar registro pendente
+                // APENAS saque MANUAL (API pixout). Débito na criação; em rejeição, valor + taxa são devolvidos.
+                // Saque automático é processado no bloco anterior (Treeal + débito na hora).
                 $transactionId = str()->uuid()->toString();
 
                 $cashOut = SolicitacoesCashOut::create([
@@ -346,9 +346,15 @@ class SaqueController extends Controller
                     'executor_ordem' => null, // Manual = sem executor automático
                 ]);
 
-                Log::info('SaqueController::processTreealWithdrawal - Saque manual criado', [
+                // Debitar valor + taxa na criação (em caso de rejeição, valor e taxa são devolvidos)
+                $balanceService = app(\App\Services\BalanceService::class);
+                $balanceService->decrementBalance($user, $valorTotalDescontar, 'saldo');
+                Helper::calculaSaldoLiquido($user->user_id);
+
+                Log::info('SaqueController::processTreealWithdrawal - Saque manual criado (valor + taxa debitados)', [
                     'transaction_id' => $transactionId,
                     'amount' => $amount,
+                    'valor_total_descontar' => $valorTotalDescontar,
                     'cash_out_id' => $cashOut->id
                 ]);
 

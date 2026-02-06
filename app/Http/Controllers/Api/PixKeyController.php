@@ -508,15 +508,94 @@ class PixKeyController extends Controller
                 ], 503)->header('Access-Control-Allow-Origin', '*');
             }
             
+            // Verificar se o saque deve ser processado automaticamente ou manualmente
+            $processarAutomatico = false;
+            if ($setting->saque_automatico) {
+                // Se saque_automatico está ativo, verificar limite
+                $temLimite = !is_null($setting->limite_saque_automatico) && (float)$setting->limite_saque_automatico > 0;
+                $dentroDoLimite = !$temLimite || ((float)$amount <= (float)$setting->limite_saque_automatico);
+                $processarAutomatico = $dentroDoLimite;
+            }
+            
             Log::info('Realizando saque PIX com chave', [
                 'user_id' => $user->username,
                 'amount' => $amount,
                 'key_type' => $keyType,
                 'key_value' => $keyValue,
-                'adquirente' => $adquirenteDefault
+                'adquirente' => $adquirenteDefault,
+                'processamento' => $processarAutomatico ? 'AUTOMATICO' : 'MANUAL',
+                'saque_automatico_config' => $setting->saque_automatico,
+                'limite_config' => $setting->limite_saque_automatico
             ]);
 
-            // Processar saque via Treeal
+            // Regra abaixo: APENAS saque MANUAL. Débito na criação; em rejeição, valor + taxa são devolvidos.
+            // Saque automático é processado na hora no bloco seguinte (Treeal + débito, sem aprovação).
+            if (!$processarAutomatico) {
+                $idempotencyKey = uniqid('withdraw_manual_', true);
+                $description = $request->description ?? 'Saque via PIX';
+                
+                // Criar registro de saque pendente
+                $withdrawal = \App\Models\SolicitacoesCashOut::create([
+                    'user_id' => $user->user_id ?? $user->username,
+                    'externalreference' => $idempotencyKey,
+                    'amount' => $amount,
+                    'beneficiaryname' => $user->name ?? 'Não informado',
+                    'beneficiarydocument' => $user->cpf_cnpj ?? '',
+                    'pix' => $keyValue,
+                    'pixkey' => $keyType,
+                    'idTransaction' => $idempotencyKey,
+                    'status' => 'PENDING',
+                    'type' => 'PIX',
+                    'date' => now(),
+                    'taxa_cash_out' => $taxaCashOut,
+                    'cash_out_liquido' => $cashOutLiquido,
+                    'descricao_transacao' => 'MANUAL',
+                    'executor_ordem' => null,
+                ]);
+                
+                // Debitar valor + taxa na criação (em caso de rejeição, valor e taxa são devolvidos)
+                $balanceService = app(\App\Services\BalanceService::class);
+                $balanceService->decrementBalance($user, $valorTotalDescontar, 'saldo');
+                \App\Helpers\Helper::calculaSaldoLiquido($user->user_id ?? $user->username);
+                
+                Log::info('Saque PIX manual criado - pendente de aprovação (valor + taxa debitados)', [
+                    'withdrawal_id' => $withdrawal->id,
+                    'user_id' => $user->username,
+                    'amount' => $amount,
+                    'valor_total_descontar' => $valorTotalDescontar,
+                    'motivo' => !$setting->saque_automatico
+                        ? 'Saque automático desativado'
+                        : 'Valor acima do limite de R$ ' . number_format($setting->limite_saque_automatico, 2, ',', '.')
+                ]);
+                
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Saque criado com sucesso e aguardando aprovação manual.',
+                    'data' => [
+                        'transaction_id' => $idempotencyKey,
+                        'withdrawal_id' => $withdrawal->id,
+                        'amount' => $amount,
+                        'key_type' => $keyType,
+                        'key_value' => $keyValue,
+                        'description' => $description,
+                        'status' => 'PENDING_APPROVAL',
+                        'tipo_processamento' => 'Manual',
+                        'motivo_manual' => !$setting->saque_automatico 
+                            ? 'Saque automático desativado no sistema' 
+                            : 'Valor acima do limite automático de R$ ' . number_format($setting->limite_saque_automatico, 2, ',', '.'),
+                        'created_at' => now()->toISOString(),
+                        // Split de taxas
+                        'taxa_cash_out' => round($taxaCashOut, 2),
+                        'taxa_adquirente' => round($taxaAdquirente, 2),
+                        'taxa_aplicacao' => round($taxaAplicacao, 2),
+                        'valor_liquido' => round($cashOutLiquido, 2),
+                        'valor_total_descontar' => round($valorTotalDescontar, 2),
+                        'observacao' => 'Valor e taxa já foram descontados. Em caso de rejeição, serão devolvidos.'
+                    ]
+                ])->header('Access-Control-Allow-Origin', '*');
+            }
+
+            // Saque AUTOMÁTICO: processado na hora (Treeal + débito), sem aprovação.
             if ($adquirenteDefault === 'treeal') {
                 try {
                     $treealService = app(\App\Services\TreealService::class);
@@ -525,7 +604,7 @@ class PixKeyController extends Controller
                         throw new \Exception('Adquirente Treeal não está configurada ou ativa');
                     }
                     
-                    $idempotencyKey = uniqid('withdraw_', true);
+                    $idempotencyKey = uniqid('withdraw_auto_', true);
                     $description = $request->description ?? 'Saque via PIX';
                     
                     // Criar saque via Treeal
@@ -544,23 +623,26 @@ class PixKeyController extends Controller
                         'amount' => $amount,
                         'beneficiaryname' => $user->name ?? 'Não informado',
                         'beneficiarydocument' => $user->cpf_cnpj ?? '',
-                        'pixkey' => $keyValue,
-                        'pix' => $keyType,
+                        'pix' => $keyValue,
+                        'pixkey' => $keyType,
                         'idTransaction' => $treealResponse['paymentId'] ?? $idempotencyKey,
-                        'status' => 'PENDING',
-                        'type' => 'automatico',
+                        'status' => 'PROCESSING',
+                        'type' => 'PIX',
                         'date' => now(),
                         'taxa_cash_out' => $taxaCashOut,
-                        'cash_out_liquido' => $cashOutLiquido
+                        'cash_out_liquido' => $cashOutLiquido,
+                        'descricao_transacao' => 'AUTOMATICO',
+                        'executor_ordem' => 'Treeal',
                     ]);
                     
                     // Debitar saldo do usuário
                     $user->saldo -= $valorTotalDescontar;
                     $user->save();
                     
-                    Log::info('Saque PIX criado com sucesso via Treeal', [
+                    Log::info('Saque PIX automático criado com sucesso via Treeal', [
                         'withdrawal_id' => $withdrawal->id,
-                        'transaction_id' => $treealResponse['paymentId'] ?? $idempotencyKey
+                        'transaction_id' => $treealResponse['paymentId'] ?? $idempotencyKey,
+                        'user_id' => $user->username
                     ]);
                     
                     return response()->json([
@@ -573,6 +655,7 @@ class PixKeyController extends Controller
                             'key_value' => $keyValue,
                             'description' => $description,
                             'status' => 'PROCESSING',
+                            'tipo_processamento' => 'Automático',
                             'estimated_time' => '5-10 minutos',
                             'created_at' => now()->toISOString(),
                             'adquirente' => 'treeal',
@@ -586,7 +669,7 @@ class PixKeyController extends Controller
                     ])->header('Access-Control-Allow-Origin', '*');
                     
                 } catch (\Exception $e) {
-                    Log::error('Erro ao processar saque via Treeal', [
+                    Log::error('Erro ao processar saque automático via Treeal', [
                         'error' => $e->getMessage(),
                         'user_id' => $user->username,
                         'amount' => $amount

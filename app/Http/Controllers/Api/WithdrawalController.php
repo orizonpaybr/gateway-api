@@ -9,6 +9,7 @@ use App\Http\Requests\WithdrawalStatsRequest;
 use App\Services\WithdrawalStatsService;
 use App\Services\TreealService;
 use App\Services\BalanceService;
+use App\Models\App;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
 use App\Models\Treeal;
@@ -20,8 +21,36 @@ use Illuminate\Support\Facades\Log;
 
 class WithdrawalController extends Controller
 {
+    /** Taxa fixa padrão da aplicação para cash out (saque) quando não há customização - R$ 1,00 */
+    private const TAXA_APLICACAO_CASH_OUT_PADRAO = 1.00;
+
     public function __construct(private readonly WithdrawalStatsService $statsService)
     {
+    }
+
+    /**
+     * Retorna a taxa efetiva de saque para o usuário do saque (respeita taxas customizadas pelo admin).
+     */
+    private function getTaxaEfetivaSaque(SolicitacoesCashOut $saque, ?App $setting = null): float
+    {
+        $setting = $setting ?? Cache::remember('app_settings', 300, fn () => App::first());
+        if (!$setting) {
+            return self::TAXA_APLICACAO_CASH_OUT_PADRAO;
+        }
+        $user = $saque->relationLoaded('user') ? $saque->user : User::where('user_id', $saque->user_id)->first();
+        if (!$user) {
+            return (float) ($setting->taxa_fixa_pix ?? self::TAXA_APLICACAO_CASH_OUT_PADRAO);
+        }
+        try {
+            $resultado = \App\Helpers\TaxaSaqueHelper::calcularTaxaSaque((float) $saque->amount, $setting, $user, true);
+            return (float) $resultado['taxa_cash_out'];
+        } catch (\Throwable $e) {
+            Log::warning('WithdrawalController::getTaxaEfetivaSaque - fallback para taxa padrão', [
+                'saque_id' => $saque->id,
+                'error' => $e->getMessage(),
+            ]);
+            return self::TAXA_APLICACAO_CASH_OUT_PADRAO;
+        }
     }
 
     /**
@@ -113,8 +142,9 @@ class WithdrawalController extends Controller
             // Paginação
             $saques = $query->paginate($perPage, ['*'], 'page', $page);
 
-            // Formatar dados
-            $data = $saques->map(function ($saque) {
+            $setting = Cache::remember('app_settings', 300, fn () => App::first());
+
+            $data = $saques->map(function ($saque) use ($setting) {
                 return [
                     'id' => $saque->id,
                     'transaction_id' => $saque->externalreference,
@@ -126,7 +156,7 @@ class WithdrawalController extends Controller
                     'pix_key' => $saque->pixkey,
                     'pix_type' => $saque->pix,
                     'amount' => (float) $saque->amount,
-                    'taxa' => (float) $saque->taxa_cash_out,
+                    'taxa' => (float) $this->getTaxaEfetivaSaque($saque, $setting),
                     'valor_liquido' => (float) $saque->cash_out_liquido,
                     'status' => $saque->status,
                     'status_legivel' => $this->getStatusLabel($saque->status),
@@ -188,7 +218,7 @@ class WithdrawalController extends Controller
                     'pix_key' => $saque->pixkey,
                     'pix_type' => $saque->pix,
                     'amount' => (float) $saque->amount,
-                    'taxa' => (float) $saque->taxa_cash_out,
+                    'taxa' => (float) $this->getTaxaEfetivaSaque($saque),
                     'valor_liquido' => (float) $saque->cash_out_liquido,
                     'status' => $saque->status,
                     'status_legivel' => $this->getStatusLabel($saque->status),
@@ -219,8 +249,9 @@ class WithdrawalController extends Controller
     }
 
     /**
-     * Aprovar uma solicitação de saque
-     * CORRIGIDO: Implementação completa de aprovação usando TreealService
+     * Aprovar uma solicitação de saque.
+     * Apenas saques MANUAIS (PENDING) são aprovados aqui. Saque automático é processado na hora (PixKeyController/SaqueController).
+     * Valor + taxa já foram debitados na criação do saque manual; aqui só enviamos à Treeal e atualizamos o registro.
      */
     public function approve($id, Request $request)
     {
@@ -254,14 +285,8 @@ class WithdrawalController extends Controller
                 ], 404);
             }
 
-            // Verificar saldo suficiente antes de processar
-            $valorTotalDescontar = $saque->amount + ($saque->taxa_cash_out ?? 0);
-            if ($userSaque->saldo < $valorTotalDescontar) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Saldo insuficiente para processar o saque. Saldo disponível: R$ ' . number_format($userSaque->saldo, 2, ',', '.') . ', necessário: R$ ' . number_format($valorTotalDescontar, 2, ',', '.')
-                ], 400);
-            }
+            // Valor + taxa já foram debitados na criação do saque; na aprovação só enviamos à Treeal e atualizamos o registro
+            $taxaEfetiva = $this->getTaxaEfetivaSaque($saque);
 
             // Determinar adquirente baseado no executor_ordem ou adquirente padrão
             $adquirente = $saque->executor_ordem ?? Helper::adquirenteDefault();
@@ -281,7 +306,7 @@ class WithdrawalController extends Controller
             // Processar aprovação baseado no adquirente
             switch (strtolower($adquirente)) {
                 case 'treeal':
-                    return $this->approveWithTreeal($saque, $userSaque, $valorTotalDescontar);
+                    return $this->approveWithTreeal($saque, $userSaque, $taxaEfetiva);
                 
                 case 'pagarme':
                     // Pagar.me não suporta saques PIX diretamente
@@ -314,8 +339,10 @@ class WithdrawalController extends Controller
 
     /**
      * Aprovar saque usando Treeal
+     * Valor + taxa já foram debitados na criação do saque; aqui só enviamos à Treeal e atualizamos o registro.
+     * @param float $taxaCashOut Taxa efetiva cobrada (respeita customização do usuário)
      */
-    private function approveWithTreeal(SolicitacoesCashOut $saque, User $userSaque, float $valorTotalDescontar)
+    private function approveWithTreeal(SolicitacoesCashOut $saque, User $userSaque, float $taxaCashOut)
     {
         try {
             $treealService = app(TreealService::class);
@@ -368,16 +395,12 @@ class WithdrawalController extends Controller
             // Mapear status da Treeal para status interno
             $statusInterno = $this->mapTreealStatusToInternal($status);
 
-            // Atualizar saque em transação para garantir atomicidade
-            // IMPORTANTE: O débito é feito aqui na aprovação porque a Treeal já iniciou o processamento
-            // Se o webhook chegar depois com LIQUIDATED, o PaymentProcessingService verificará idempotência
-            DB::transaction(function () use ($saque, $userSaque, $valorTotalDescontar, $transactionId, $statusInterno) {
-                // Lock no saque para evitar race condition
+            // Atualizar saque em transação (valor + taxa já foram debitados na criação do saque)
+            DB::transaction(function () use ($saque, $transactionId, $statusInterno, $taxaCashOut) {
                 $saqueAtualizado = SolicitacoesCashOut::where('id', $saque->id)
                     ->lockForUpdate()
                     ->first();
-                    
-                // Verificar idempotência - não debitar se já foi processado
+
                 if (in_array($saqueAtualizado->status, ['COMPLETED', 'PAID_OUT'])) {
                     Log::info('WithdrawalController::approveWithTreeal - Saque já processado', [
                         'saque_id' => $saque->id,
@@ -385,23 +408,18 @@ class WithdrawalController extends Controller
                     ]);
                     return;
                 }
-                
-                // Atualizar saque
+
                 $saqueAtualizado->update([
                     'status' => $statusInterno,
                     'externalreference' => $transactionId ?? $saqueAtualizado->externalreference,
                     'idTransaction' => $transactionId ?? $saqueAtualizado->idTransaction,
-                    'executor_ordem' => 'Treeal', // Marcar como processado pela Treeal
+                    'executor_ordem' => 'Treeal',
                     'end_to_end' => $transactionId ?? $saqueAtualizado->end_to_end,
+                    'taxa_cash_out' => $taxaCashOut,
                 ]);
-
-                // Debitar saldo do usuário (thread-safe)
-                $balanceService = app(BalanceService::class);
-                $balanceService->decrementBalance($userSaque, $valorTotalDescontar, 'saldo');
-                
-                // Recalcular saldo líquido
-                Helper::calculaSaldoLiquido($userSaque->user_id);
             });
+
+            Helper::calculaSaldoLiquido($userSaque->user_id);
 
             Log::info('WithdrawalController::approveWithTreeal - Saque aprovado com sucesso', [
                 'saque_id' => $saque->id,
@@ -446,7 +464,9 @@ class WithdrawalController extends Controller
     }
 
     /**
-     * Rejeitar uma solicitação de saque
+     * Rejeitar uma solicitação de saque.
+     * Apenas saques MANUAIS (PENDING) chegam aqui. Saque automático é processado na hora e não passa por aprovação/rejeição.
+     * Na rejeição devolvemos valor + taxa ao usuário (foram debitados na criação do saque manual).
      */
     public function reject($id, Request $request)
     {
@@ -475,20 +495,29 @@ class WithdrawalController extends Controller
             $saque->status = 'CANCELLED';
             $saque->save();
 
-            // Atualizar usuário (se existir)
+            // Devolver valor + taxa ao usuário (foram debitados na criação do saque; rejeição = saque não finalizado, não cobra taxa)
             if ($saque->user_id) {
                 $userModel = User::where('user_id', $saque->user_id)->first();
                 if ($userModel) {
                     $userModel->increment('transacoes_recused', 1);
-                    $userModel->decrement('saldo_bloqueado', $saque->amount);
+                    $valorDevolver = (float) $saque->amount + (float) ($saque->taxa_cash_out ?? 0);
+                    if ($valorDevolver > 0) {
+                        $balanceService = app(BalanceService::class);
+                        $balanceService->incrementBalance($userModel, $valorDevolver, 'saldo');
+                    }
                     $userModel->save();
 
                     Helper::calculaSaldoLiquido($userModel->user_id);
+
+                    Log::info('WithdrawalController::reject - Valor e taxa devolvidos ao usuário', [
+                        'saque_id' => $saque->id,
+                        'user_id' => $userModel->user_id,
+                        'valor_devolvido' => $valorDevolver,
+                    ]);
                 } else {
                     Log::warning("Usuário não encontrado ao rejeitar o saque ID: {$saque->id}, user_id: {$saque->user_id}");
                 }
             } else {
-                // Saque sem usuário associado (pode ocorrer em casos específicos)
                 Log::info("Saque rejeitado sem usuário associado - ID: {$saque->id}");
             }
 
