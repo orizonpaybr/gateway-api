@@ -960,7 +960,7 @@ class AdminDashboardController extends Controller
                     : ($setting->taxa_cash_in_padrao ?? 4.00)),
                 'taxa_fixa_deposito' => (float) ($user->taxa_fixa_deposito !== null 
                     ? $user->taxa_fixa_deposito 
-                    : ($setting->taxa_fixa_padrao ?? 0.00)),
+                    : ($setting->taxa_fixa_padrao ?? 1.00)),
                 'valor_minimo_deposito' => (float) ($user->valor_minimo_deposito !== null
                     ? $user->valor_minimo_deposito 
                     : ($setting->deposito_minimo ?? 1.00)),
@@ -973,7 +973,7 @@ class AdminDashboardController extends Controller
                     : 0.80),
                 'taxa_fixa_pix' => (float) ($user->taxa_fixa_pix !== null
                     ? $user->taxa_fixa_pix 
-                    : ($setting->taxa_fixa_pix ?? 0.00)),
+                    : ($setting->taxa_fixa_pix ?? 1.00)),
                 'valor_minimo_saque' => (float) ($user->valor_minimo_saque !== null
                     ? $user->valor_minimo_saque 
                     : ($setting->saque_minimo ?? 1.00)),
@@ -1039,12 +1039,12 @@ class AdminDashboardController extends Controller
             $defaultFees = [
                 // Taxas de depósito
                 'taxa_percentual_deposito' => (float) ($setting->taxa_cash_in_padrao ?? 4.00),
-                'taxa_fixa_deposito' => (float) ($setting->taxa_fixa_padrao ?? 0.00),
+                'taxa_fixa_deposito' => (float) ($setting->taxa_fixa_padrao ?? 1.00),
                 'valor_minimo_deposito' => (float) ($setting->deposito_minimo ?? 1.00),
                 // Taxas de saque
                 'taxa_percentual_pix' => (float) ($setting->taxa_cash_out_padrao ?? 4.00),
                 'taxa_minima_pix' => 0.80, // Valor fixo padrão
-                'taxa_fixa_pix' => (float) ($setting->taxa_fixa_pix ?? 0.00),
+                'taxa_fixa_pix' => (float) ($setting->taxa_fixa_pix ?? 1.00),
                 'valor_minimo_saque' => (float) ($setting->saque_minimo ?? 1.00),
                 // Limites e extras
                 'limite_mensal_pf' => (float) ($setting->limite_saque_mensal ?? 50000.00),

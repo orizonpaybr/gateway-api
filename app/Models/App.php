@@ -121,7 +121,7 @@ class App extends Model
      */
     public function getDepositTax(float $amount): float
     {
-        return (float) ($this->taxa_fixa_padrao ?? 0);
+        return (float) ($this->taxa_fixa_padrao ?? 1);
     }
 
     /**
@@ -129,6 +129,6 @@ class App extends Model
      */
     public function getWithdrawalTax(float $amount): float
     {
-        return (float) ($this->taxa_fixa_pix ?? 0);
+        return (float) ($this->taxa_fixa_pix ?? 1);
     }
 }

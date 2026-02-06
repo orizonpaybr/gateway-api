@@ -2245,10 +2245,10 @@ class UserController extends Controller
     {
         if ($hasPersonalizedTaxes) {
             // Taxa fixa personalizada do usuário
-            $fixed = (float) ($user->taxa_fixa_deposito ?? $setting->taxa_fixa_padrao ?? 0);
+            $fixed = (float) ($user->taxa_fixa_deposito ?? $setting->taxa_fixa_padrao ?? 1);
         } else {
             // Taxa fixa global do sistema
-            $fixed = (float) ($setting->taxa_fixa_padrao ?? 0);
+            $fixed = (float) ($setting->taxa_fixa_padrao ?? 1);
         }
 
         return [
@@ -2269,10 +2269,10 @@ class UserController extends Controller
     {
         if ($hasPersonalizedTaxes) {
             // Taxa fixa personalizada do usuário
-            $fixed = (float) ($user->taxa_fixa_pix ?? $setting->taxa_fixa_pix ?? 0);
+            $fixed = (float) ($user->taxa_fixa_pix ?? $setting->taxa_fixa_pix ?? 1);
         } else {
             // Taxa fixa global do sistema
-            $fixed = (float) ($setting->taxa_fixa_pix ?? 0);
+            $fixed = (float) ($setting->taxa_fixa_pix ?? 1);
         }
 
         return [

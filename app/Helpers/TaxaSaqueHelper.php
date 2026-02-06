@@ -71,7 +71,7 @@ class TaxaSaqueHelper
         // Obter taxa fixa configurada (taxa total cobrada do cliente)
         if ($taxasPersonalizadasAtivas) {
             // Usar taxa fixa personalizada do usuário
-            $taxaTotal = $user->taxa_fixa_pix ?? $setting->taxa_fixa_pix ?? 0.00;
+            $taxaTotal = $user->taxa_fixa_pix ?? $setting->taxa_fixa_pix ?? 1.00;
             $descricao = $isInterfaceWeb ? "PERSONALIZADA_INTERFACE_WEB_FIXA" : "PERSONALIZADA_API_FIXA";
             
             Log::info('TaxaSaqueHelper::calcularTaxaSaque - Usando taxa personalizada', [
@@ -82,7 +82,7 @@ class TaxaSaqueHelper
             ]);
         } else {
             // Usar taxa fixa global
-            $taxaTotal = $setting->taxa_fixa_pix ?? 0.00;
+            $taxaTotal = $setting->taxa_fixa_pix ?? 1.00;
             $descricao = $isInterfaceWeb ? "GLOBAL_INTERFACE_WEB_FIXA" : "GLOBAL_API_FIXA";
         }
         
@@ -194,9 +194,9 @@ class TaxaSaqueHelper
         
         // Taxa fixa
         if ($taxasPersonalizadasAtivas) {
-            $taxaFixa = $user->taxa_fixa_pix ?? $setting->taxa_fixa_pix ?? 0;
+            $taxaFixa = $user->taxa_fixa_pix ?? $setting->taxa_fixa_pix ?? 1;
         } else {
-            $taxaFixa = $setting->taxa_fixa_pix ?? 0;
+            $taxaFixa = $setting->taxa_fixa_pix ?? 1;
         }
         
         $taxaFixa = max(0, (float) $taxaFixa);

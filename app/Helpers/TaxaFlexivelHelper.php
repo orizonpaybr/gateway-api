@@ -65,7 +65,7 @@ class TaxaFlexivelHelper
         // Obter taxa fixa configurada (taxa total cobrada do cliente)
         if ($taxasPersonalizadasAtivas) {
             // Usar taxa fixa personalizada do usuário
-            $taxaTotal = (float) ($user->taxa_fixa_deposito ?? $setting->taxa_fixa_padrao ?? 0.00);
+            $taxaTotal = (float) ($user->taxa_fixa_deposito ?? $setting->taxa_fixa_padrao ?? 1.00);
             $descricao = "PERSONALIZADA_FIXA";
             
             \Illuminate\Support\Facades\Log::info('TaxaFlexivelHelper::calcularTaxaDeposito - Usando taxa personalizada', [
@@ -77,7 +77,7 @@ class TaxaFlexivelHelper
             ]);
         } else {
             // Usar taxa fixa global
-            $taxaTotal = (float) ($setting->taxa_fixa_padrao ?? 0.00);
+            $taxaTotal = (float) ($setting->taxa_fixa_padrao ?? 1.00);
             $descricao = "GLOBAL_FIXA";
             
             \Illuminate\Support\Facades\Log::info('TaxaFlexivelHelper::calcularTaxaDeposito - Usando taxa global', [
