@@ -69,7 +69,7 @@ jobs:
           DB_DATABASE: gateway_orizon_test
           DB_USERNAME: gateway
           DB_PASSWORD: 123456
-          ENCRYPTION_KEY: base64:iVoKOkyma32te1Ai0lq7UmR8RCCv3R9OsYAiAH8ZFMY=
+          APP_KEY: base64:iVoKOkyma32te1Ai0lq7UmR8RCCv3R9OsYAiAH8ZFMY=
           CACHE_STORE: redis
           REDIS_HOST: 127.0.0.1
           REDIS_PORT: 6379
