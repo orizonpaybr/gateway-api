@@ -5,6 +5,10 @@
          colors="true"
 >
     <testsuites>
+        <testsuite name="Pipeline">
+            <directory>tests/Unit</directory>
+            <directory>tests/Feature</directory>
+        </testsuite>
         <testsuite name="Unit">
             <directory>tests/Unit</directory>
         </testsuite>
@@ -21,13 +25,14 @@
         <env name="APP_ENV" value="testing"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
+        <env name="ENCRYPTION_KEY" value="base64:iVoKOkyma32te1Ai0lq7UmR8RCCv3R9OsYAiAH8ZFMY="/>
         <!-- Cache: usar array para testes (mais rápido) ou redis para testes de cache -->
         <env name="CACHE_STORE" value="array"/>
         <!-- Database: MySQL para testes de integração (compatível com produção) -->
         <env name="DB_CONNECTION" value="mysql"/>
-        <env name="DB_DATABASE" value="gateway_orizon_test"/>
-        <env name="DB_USERNAME" value="gateway"/>
-        <env name="DB_PASSWORD" value="123456"/>
+        <env name="DB_DATABASE" value="gateway_api_test"/>
+        <env name="DB_USERNAME" value="root"/>
+        <env name="DB_PASSWORD" value=""/>
         <env name="DB_HOST" value="127.0.0.1"/>
         <env name="DB_PORT" value="3306"/>
         <env name="MAIL_MAILER" value="array"/>
