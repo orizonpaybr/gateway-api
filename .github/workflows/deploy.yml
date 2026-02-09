@@ -70,6 +70,7 @@ jobs:
           DB_USERNAME: gateway
           DB_PASSWORD: 123456
           APP_KEY: base64:iVoKOkyma32te1Ai0lq7UmR8RCCv3R9OsYAiAH8ZFMY=
+          JWT_SECRET: test_jwt_secret_key_for_automated_tests_only_do_not_use_in_production
           CACHE_STORE: redis
           REDIS_HOST: 127.0.0.1
           REDIS_PORT: 6379
