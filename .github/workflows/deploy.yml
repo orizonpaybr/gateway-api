@@ -39,6 +39,13 @@ jobs:
       - name: 📥 Checkout code
         uses: actions/checkout@v4
 
+      - name: 📦 Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: php-${{ hashFiles('**/composer.lock') }}
+          restore-keys: php-
+
       - name: 🐘 Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -54,7 +61,7 @@ jobs:
           cp .env.example .env || cp env_example.txt .env || true
           php artisan key:generate
 
-      - name: 🧪 Run PHPUnit tests
+      - name: 🧪 Run PHPUnit tests (suite Pipeline – testes essenciais do back-end)
         env:
           DB_CONNECTION: mysql
           DB_HOST: 127.0.0.1
@@ -62,12 +69,13 @@ jobs:
           DB_DATABASE: gateway_orizon_test
           DB_USERNAME: gateway
           DB_PASSWORD: 123456
+          ENCRYPTION_KEY: base64:iVoKOkyma32te1Ai0lq7UmR8RCCv3R9OsYAiAH8ZFMY=
           CACHE_STORE: redis
           REDIS_HOST: 127.0.0.1
           REDIS_PORT: 6379
         run: |
           php artisan migrate --env=testing --force || true
-          vendor/bin/pest --colors=always || vendor/bin/phpunit --colors=always
+          php artisan test --testsuite=Pipeline --colors=always
 
   # Job 2: Deploy para produção
   deploy:

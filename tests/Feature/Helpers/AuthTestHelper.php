@@ -4,6 +4,7 @@ namespace Tests\Feature\Helpers;
 
 use App\Models\User;
 use App\Models\UsersKey;
+use App\Services\JWTService;
 use App\Constants\UserPermission;
 use App\Constants\UserStatus;
 use Illuminate\Support\Facades\Hash;
@@ -84,32 +85,15 @@ class AuthTestHelper
     }
 
     /**
-     * Gera token JWT simples para testes
+     * Gera token JWT válido para testes (rotas com middleware verify.jwt).
      */
     public static function generateTestToken(User $user): string
     {
-        $userKeys = UsersKey::where('user_id', $user->user_id ?? $user->username)->first();
-        
-        if (!$userKeys) {
-            // Criar chaves se não existirem
-            $userKeys = UsersKey::create([
-                'user_id' => $user->user_id ?? $user->username,
-                'token' => \Illuminate\Support\Str::uuid()->toString(),
-                'secret' => \Illuminate\Support\Str::uuid()->toString(),
-                'status' => 'active',
-            ]);
-        }
-        
-        return base64_encode(json_encode([
-            'user_id' => $user->username,
-            'token' => $userKeys->token,
-            'secret' => $userKeys->secret,
-            'expires_at' => now()->addHours(24)->timestamp
-        ]));
+        return app(JWTService::class)->generateToken($user->username ?? $user->user_id);
     }
 
     /**
-     * Alias para generateTestToken - compatibilidade com testes existentes
+     * Alias para generateTestToken - compatibilidade com testes existentes.
      */
     public static function getAuthToken(User $user): string
     {
