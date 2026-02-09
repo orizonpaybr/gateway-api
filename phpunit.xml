@@ -26,6 +26,7 @@
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="APP_KEY" value="base64:iVoKOkyma32te1Ai0lq7UmR8RCCv3R9OsYAiAH8ZFMY="/>
+        <env name="JWT_SECRET" value="test_jwt_secret_key_for_automated_tests_only_do_not_use_in_production"/>
         <!-- Cache: usar array para testes (mais rápido) ou redis para testes de cache -->
         <env name="CACHE_STORE" value="array"/>
         <!-- Database: MySQL para testes de integração (compatível com produção) -->
