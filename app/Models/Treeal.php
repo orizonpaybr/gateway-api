@@ -2,31 +2,21 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class Treeal extends Model
 {
-    use HasFactory;
-    
-    protected $table = 'treeal'; // Adicione esta linha
-    
-    /**
-     * Colunas removidas do banco pela migration remove_sensitive_columns_from_treeal_table:
-     * certificate_path, certificate_password, client_id, client_secret,
-     * qrcodes_client_id, qrcodes_client_secret, pix_key_secondary (agora vêm do .env)
-     */
     protected $fillable = [
         'environment',
         'qrcodes_api_url',
         'accounts_api_url',
-        // 'certificate_path',
-        // 'certificate_password',
-        // 'client_id', // Para Accounts API
-        // 'client_secret', // Para Accounts API
-        // 'qrcodes_client_id', // Para QR Codes API
-        // 'qrcodes_client_secret', // Para QR Codes API
-        // 'pix_key_secondary',
+        'certificate_path',
+        'certificate_password',
+        'client_id', // Para Accounts API
+        'client_secret', // Para Accounts API
+        'qrcodes_client_id', // Para QR Codes API
+        'qrcodes_client_secret', // Para QR Codes API
+        'pix_key_secondary',
         'taxa_pix_cash_in',
         'taxa_pix_cash_out',
         'webhook_secret',
