@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Cache;
 /**
  * Service Layer para gerenciar configurações do gateway
  * Centraliza lógica de negócio e cache
- * Sistema simplificado: apenas taxas fixas em centavos
+ * Taxas fixas: cash-in (depósito) e cash-out (saque PIX), em reais (ex.: 1.00 = R$ 1,00)
  */
 class GatewaySettingsService
 {
@@ -32,7 +32,6 @@ class GatewaySettingsService
                     'taxa_fixa_pix' => 1.00,
                     'taxa_fixa_padrao_cash_out' => 0.00,
                     'saque_minimo' => 5.00,
-                    'limite_saque_mensal' => 10000000.00, // 10 milhões de reais
                 ]);
             }
             
@@ -91,13 +90,12 @@ class GatewaySettingsService
     public function formatSettingsResponse(App $settings): array
     {
         return [
-            // Taxas de Depósito (apenas fixa em centavos)
+            // Taxa fixa cash-in (depósito), em reais
             'taxa_fixa_deposito' => (float) ($settings->taxa_fixa_padrao ?? 1.00),
-            
-            // Taxas de Saque PIX (apenas fixa em centavos)
+
+            // Taxa fixa cash-out (saque PIX), em reais
             'taxa_fixa_pix' => (float) ($settings->taxa_fixa_pix ?? 1.00),
-            'limite_mensal_pf' => (float) ($settings->limite_saque_mensal ?? 10000000.00), // 10 milhões de reais
-            
+
             // Personalização de Relatórios - Entradas
             'relatorio_entradas_mostrar_meio' => (bool) ($settings->relatorio_entradas_mostrar_meio ?? true),
             'relatorio_entradas_mostrar_transacao_id' => (bool) ($settings->relatorio_entradas_mostrar_transacao_id ?? true),
@@ -140,7 +138,6 @@ class GatewaySettingsService
         return [
             'taxa_fixa_deposito' => 'taxa_fixa_padrao',
             'taxa_fixa_pix' => 'taxa_fixa_pix',
-            'limite_mensal_pf' => 'limite_saque_mensal',
         ];
     }
 
@@ -180,8 +177,7 @@ class GatewaySettingsService
             // Taxas (fixas em centavos)
             'taxa_fixa_deposito' => 'nullable|numeric|min:0',
             'taxa_fixa_pix' => 'nullable|numeric|min:0',
-            'limite_mensal_pf' => 'nullable|numeric|min:0',
-            
+
             // Personalização de Relatórios
             'relatorio_entradas_mostrar_meio' => 'nullable|boolean',
             'relatorio_entradas_mostrar_transacao_id' => 'nullable|boolean',
