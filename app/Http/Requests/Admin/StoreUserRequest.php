@@ -80,7 +80,6 @@ class StoreUserRequest extends FormRequest
             // Relacionamentos
             'indicador_ref' => 'nullable|string|exists:users,code_ref',
             'gerente_id' => 'nullable|integer|exists:users,id',
-            'gerente_percentage' => 'nullable|numeric|min:0|max:100',
         ], $this->addressRules(), $this->businessRules());
     }
 
