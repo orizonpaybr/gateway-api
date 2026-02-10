@@ -90,15 +90,6 @@ class CacheKeyService
     }
     
     /**
-     * Cache key para clientes de um gerente
-     */
-    public static function managerClients(int $managerId, array $filters = []): string
-    {
-        $hash = md5(json_encode($filters));
-        return "admin:manager:{$managerId}:clients:{$hash}";
-    }
-    
-    /**
      * Cache key para lista de adquirentes
      */
     public static function acquirersList(array $filters = []): string
