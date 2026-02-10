@@ -101,7 +101,6 @@ class AdminDashboardController extends Controller
             // Verificação de admin ou gerente feita pelo middleware 'ensure.admin_or_manager'
             $status = $request->input('status');
             $search = $request->input('search');
-            $gerenteId = $request->input('gerente_id');
             $perPage = $request->input('per_page', 20);
             $orderBy = $request->input('order_by', 'created_at');
             $orderDirection = $request->input('order_direction', 'desc');
@@ -111,10 +110,6 @@ class AdminDashboardController extends Controller
             // Filtros
             if ($status !== null) {
                 $query->where('status', $status);
-            }
-
-            if ($gerenteId !== null) {
-                $query->where('gerente_id', $gerenteId);
             }
 
             if ($search) {
@@ -816,7 +811,6 @@ class AdminDashboardController extends Controller
                         'telefone', 
                         'status', 
                         'permission',
-                        'gerente_percentage',
                         'created_at'
                     ], 'page', $page);
                 
@@ -841,7 +835,69 @@ class AdminDashboardController extends Controller
             return $this->errorResponse('Erro ao listar gerentes', 500);
         }
     }
-    
+
+    /**
+     * Listar adquirentes para gerenciamento
+     * GET /api/admin/acquirers?per_page=100
+     */
+    public function listAcquirers(Request $request)
+    {
+        try {
+            $perPage = (int) $request->input('per_page', 50);
+            $perPage = $perPage >= 1 && $perPage <= 100 ? $perPage : 50;
+            $search = $request->input('search');
+            $status = $request->input('status');
+
+            $query = Adquirente::query();
+
+            if ($search && is_string($search)) {
+                $term = trim($search);
+                if ($term !== '') {
+                    $query->where(function ($q) use ($term) {
+                        $q->where('adquirente', 'like', '%' . $term . '%')
+                            ->orWhere('referencia', 'like', '%' . $term . '%');
+                    });
+                }
+            }
+
+            if ($status !== null && $status !== '') {
+                $query->where('status', (int) $status);
+            }
+
+            $acquirers = $query->orderBy('adquirente')->paginate($perPage);
+
+            $items = $acquirers->getCollection()->map(function ($row) {
+                return [
+                    'id' => (int) $row->id,
+                    'adquirente' => (string) ($row->adquirente ?? ''),
+                    'status' => (int) ($row->status ?? 0),
+                    'url' => (string) ($row->url ?? ''),
+                    'referencia' => (string) ($row->referencia ?? ''),
+                    'is_default' => (int) ($row->is_default ?? 0),
+                    'is_default_card_billet' => (int) ($row->is_default_card_billet ?? 0),
+                    'created_at' => $row->created_at?->format('c'),
+                    'updated_at' => $row->updated_at?->format('c'),
+                ];
+            });
+
+            return $this->successResponse([
+                'acquirers' => $items->values()->all(),
+                'pagination' => [
+                    'current_page' => $acquirers->currentPage(),
+                    'per_page' => $acquirers->perPage(),
+                    'total' => $acquirers->total(),
+                    'last_page' => $acquirers->lastPage(),
+                ]
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Erro ao listar adquirentes', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return $this->errorResponse('Erro ao listar adquirentes', 500);
+        }
+    }
+
     /**
      * Listar adquirentes ativos para PIX
      */
@@ -978,9 +1034,6 @@ class AdminDashboardController extends Controller
                     ? $user->valor_minimo_saque 
                     : ($setting->saque_minimo ?? 1.00)),
                 // Limites e extras
-                'limite_mensal_pf' => (float) ($user->limite_mensal_pf !== null
-                    ? $user->limite_mensal_pf 
-                    : ($setting->limite_saque_mensal ?? 50000.00)),
                 'taxa_saque_api' => (float) ($user->taxa_saque_api !== null
                     ? $user->taxa_saque_api 
                     : ($setting->taxa_saque_api_padrao ?? 5.00)),
@@ -1047,7 +1100,6 @@ class AdminDashboardController extends Controller
                 'taxa_fixa_pix' => (float) ($setting->taxa_fixa_pix ?? 1.00),
                 'valor_minimo_saque' => (float) ($setting->saque_minimo ?? 1.00),
                 // Limites e extras
-                'limite_mensal_pf' => (float) ($setting->limite_saque_mensal ?? 50000.00),
                 'taxa_saque_api' => (float) ($setting->taxa_saque_api_padrao ?? 5.00),
                 'taxa_saque_crypto' => (float) ($setting->taxa_saque_cripto_padrao ?? 1.00),
                 // Sistema flexível

@@ -43,7 +43,6 @@ class TaxValidationService
             // Taxas fixas (em centavos)
             'taxa_fixa_deposito' => 'nullable|numeric|min:0',
             'taxa_fixa_pix' => 'nullable|numeric|min:0',
-            'limite_mensal_pf' => 'nullable|numeric|min:0',
         ];
     }
 
@@ -61,8 +60,7 @@ class TaxValidationService
             'taxa_fixa_deposito' => 'nullable|numeric|min:0',
             'taxa_fixa_pix' => 'nullable|numeric|min:0',
             'valor_minimo_saque' => 'nullable|numeric|min:0',
-            'limite_mensal_pf' => 'nullable|numeric|min:0',
-            
+
             // Observações
             'observacoes_taxas' => 'nullable|string|max:1000',
         ];
@@ -105,7 +103,6 @@ class TaxValidationService
         $numericFields = [
             'taxa_fixa_deposito',
             'taxa_fixa_pix',
-            'limite_mensal_pf',
         ];
 
         $booleanFields = [

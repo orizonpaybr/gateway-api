@@ -122,7 +122,7 @@ class AdminUserService
             $optionalFields = [
                 'gender', 'cpf', 'data_nascimento', 'nome_fantasia', 'razao_social', 
                 'cep', 'rua', 'estado', 'cidade', 'bairro', 'numero_residencia', 'complemento',
-                'media_faturamento', 'indicador_ref', 'gerente_id', 'gerente_percentage',
+                'media_faturamento', 'indicador_ref', 'gerente_id',
                 'permission', 'status'
             ];
             
@@ -190,7 +190,7 @@ class AdminUserService
                 'nome_fantasia', 'razao_social', 'status', 'permission', 'saldo',
                 'cep', 'rua', 'estado', 'cidade', 'bairro', 'numero_residencia', 'complemento',
                 'media_faturamento', 'taxa_cash_in', 'taxa_cash_out', 
-                'taxa_cash_in_fixa', 'taxa_cash_out_fixa', 'gerente_id', 'gerente_percentage',
+                'taxa_cash_in_fixa', 'taxa_cash_out_fixa', 'gerente_id',
                 // Taxas fixas (em centavos)
                 'taxas_personalizadas_ativas', 'taxa_fixa_deposito', 'taxa_fixa_pix',
                 'limite_mensal_pf',
