@@ -115,8 +115,10 @@ jobs:
             
             echo "📥 Fazendo pull do código..."
             git fetch origin
-            git checkout main || git checkout master
-            git pull origin main || git pull origin master
+            git reset --hard HEAD
+            git clean -fd
+            git checkout main
+            git reset --hard origin/main
             
             echo "📦 Instalando dependências..."
             composer install --no-interaction --prefer-dist --optimize-autoloader --no-dev
