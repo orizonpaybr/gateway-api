@@ -131,9 +131,6 @@ Route::middleware(['verify.jwt'])->group(function () {
         // Ver taxas padrão
         Route::get('admin/default-fees', [App\Http\Controllers\Api\AdminDashboardController::class, 'getDefaultFees']);
         
-        // Configurações de afiliado
-        Route::post('admin/users/{id}/affiliate-settings', [App\Http\Controllers\Api\AdminDashboardController::class, 'saveAffiliateSettings']);
-        
         // Rotas de gerenciamento de saques (Admin e Gerente)
         Route::get('admin/withdrawals', [App\Http\Controllers\Api\WithdrawalController::class, 'index']);
         Route::get('admin/withdrawals/stats', [App\Http\Controllers\Api\WithdrawalController::class, 'stats']);

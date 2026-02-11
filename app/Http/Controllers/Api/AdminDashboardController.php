@@ -7,8 +7,8 @@ use App\Models\{User, Solicitacoes, SolicitacoesCashOut, AffiliateCommission};
 use App\Services\{AdminUserService, CacheKeyService};
 use App\Models\UsersKey;
 use App\Models\Adquirente;
-use App\Http\Requests\Admin\{StoreUserRequest, UpdateUserRequest, AffiliateSettingsRequest};
-use App\Constants\{UserStatus, UserPermission, AffiliateSettings};
+use App\Http\Requests\Admin\{StoreUserRequest, UpdateUserRequest};
+use App\Constants\{UserStatus, UserPermission};
 use App\Helpers\{UserStatusHelper, AppSettingsHelper};
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\{Cache, DB, Log};
@@ -1348,103 +1348,6 @@ class AdminDashboardController extends Controller
         }
     }
 
-    /**
-     * Salvar configurações de afiliados
-     * 
-     * @param Request $request
-     * @param int $id
-     * @return \Illuminate\Http\JsonResponse
-     */
-    public function saveAffiliateSettings(AffiliateSettingsRequest $request, int $id)
-    {
-        try {
-            // Validação e autorização já feitas pelo Form Request e middleware
-            $admin = $request->user() ?? $request->user_auth;
-            $user = User::findOrFail($id);
-            
-            // Validação já feita pelo Form Request
-            $isAffiliate = $request->input('is_affiliate', false);
-            $affiliatePercentage = $request->input('affiliate_percentage', 0);
-            
-            if ($isAffiliate) {
-                // Validar porcentagem usando constant (já validado pelo Form Request, mas manter para segurança)
-                if (!AffiliateSettings::isValidPercentage($affiliatePercentage)) {
-                    return $this->errorResponse(
-                        'A porcentagem de affiliate deve estar entre ' . AffiliateSettings::MIN_PERCENTAGE . ' e ' . AffiliateSettings::MAX_PERCENTAGE . '.', 
-                        400
-                    );
-                }
-                
-                // Gerar código de affiliate se não existe
-                if (!$user->affiliate_code) {
-                    $codigoBase = strtoupper(substr($user->user_id, 0, 4));
-                    $numeroAleatorio = rand(1000, 9999);
-                    $codigoCompleto = $codigoBase . $numeroAleatorio;
-                    
-                    // Verificar se código já existe
-                    while (User::where('affiliate_code', $codigoCompleto)->exists()) {
-                        $numeroAleatorio = rand(1000, 9999);
-                        $codigoCompleto = $codigoBase . $numeroAleatorio;
-                    }
-                    
-                    $user->affiliate_code = $codigoCompleto;
-                    $user->affiliate_link = config('app.url') . '/register?ref=' . $user->affiliate_code;
-                }
-                
-                // Atualizar campos de affiliate
-                $user->update([
-                    'is_affiliate' => true,
-                    'affiliate_percentage' => $affiliatePercentage,
-                    'affiliate_code' => $user->affiliate_code,
-                    'affiliate_link' => $user->affiliate_link
-                ]);
-
-                Log::info('[ADMIN AFILIADOS API] Affiliate configurado pelo admin', [
-                    'user_id' => $user->id,
-                    'affiliate_percentage' => $affiliatePercentage,
-                    'affiliate_code' => $user->affiliate_code,
-                    'admin_id' => $admin->id ?? null
-                ]);
-            } else {
-                // Desativar affiliate
-                $user->update([
-                    'is_affiliate' => false,
-                    'affiliate_percentage' => 0
-                ]);
-
-                Log::info('[ADMIN AFILIADOS API] Affiliate desativado pelo admin', [
-                    'user_id' => $user->id,
-                    'admin_id' => $admin->id ?? null
-                ]);
-            }
-            
-            // Limpar cache
-            CacheKeyService::forgetUser($id);
-            CacheKeyService::forgetUsersStats();
-            
-            // Buscar usuário atualizado
-            $updatedUser = $this->userService->getUserById($id, true);
-            
-            return $this->successResponse([
-                'message' => 'Configurações de afiliados salvas com sucesso!',
-                'user' => [
-                    'is_affiliate' => (bool) ($updatedUser->is_affiliate ?? false),
-                    'affiliate_percentage' => (float) ($updatedUser->affiliate_percentage ?? 0),
-                    'affiliate_code' => $updatedUser->affiliate_code,
-                    'affiliate_link' => $updatedUser->affiliate_link,
-                ]
-            ]);
-            
-        } catch (\Exception $e) {
-            Log::error('[ADMIN AFILIADOS API] Erro ao salvar configurações de afiliados', [
-                'user_id' => $id,
-                'error' => $e->getMessage()
-            ]);
-            
-            return $this->errorResponse('Erro ao salvar configurações de afiliados.', 500);
-        }
-    }
-    
     // ========== Métodos Privados (Helpers) ==========
     
     /**
