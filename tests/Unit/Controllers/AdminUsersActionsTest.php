@@ -18,7 +18,6 @@ use Tests\Feature\Helpers\AuthTestHelper;
  * - toggleBlockUser
  * - toggleWithdrawBlock
  * - adjustBalance
- * - saveAffiliateSettings
  * - deleteUser
  * - showUser
  * - updateUser

@@ -248,7 +248,6 @@ use App\Constants\UserStatus;
 **Constants disponíveis:**
 - `UserStatus` - Status de usuários
 - `UserPermission` - Permissões de usuários
-- `AffiliateSettings` - Configurações de afiliados
 
 #### Cache Keys Centralizadas
 
