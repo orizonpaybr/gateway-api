@@ -2243,16 +2243,19 @@ class UserController extends Controller
      */
     private function getDepositTaxes($user, $setting, bool $hasPersonalizedTaxes): array
     {
-        if ($hasPersonalizedTaxes) {
-            // Taxa fixa personalizada do usuário
-            $fixed = (float) ($user->taxa_fixa_deposito ?? $setting->taxa_fixa_padrao ?? 1);
-        } else {
-            // Taxa fixa global do sistema
-            $fixed = (float) ($setting->taxa_fixa_padrao ?? 1);
-        }
+        $globalFixed = (float) ($setting->taxa_fixa_padrao ?? 1);
+        $customFixed = $hasPersonalizedTaxes && isset($user->taxa_fixa_deposito)
+            ? (float) $user->taxa_fixa_deposito
+            : null;
+        $fixed = $hasPersonalizedTaxes && $customFixed !== null
+            ? $customFixed
+            : $globalFixed;
 
         return [
             'fixed' => $fixed,
+            'global_fixed' => $globalFixed,
+            'custom_fixed' => $customFixed,
+            'is_custom' => $hasPersonalizedTaxes && $customFixed !== null,
         ];
     }
 
@@ -2267,15 +2270,19 @@ class UserController extends Controller
      */
     private function getWithdrawTaxes($user, $setting, bool $hasPersonalizedTaxes): array
     {
-        if ($hasPersonalizedTaxes) {
-            // Taxa fixa personalizada do usuário
-            $fixed = (float) ($user->taxa_fixa_pix ?? $setting->taxa_fixa_pix ?? 1);
-        } else {
-            // Taxa fixa global do sistema
-            $fixed = (float) ($setting->taxa_fixa_pix ?? 1);
-        }
+        $globalFixed = (float) ($setting->taxa_fixa_pix ?? 1);
+        $customFixed = $hasPersonalizedTaxes && isset($user->taxa_fixa_pix)
+            ? (float) $user->taxa_fixa_pix
+            : null;
+        $fixed = $hasPersonalizedTaxes && $customFixed !== null
+            ? $customFixed
+            : $globalFixed;
 
         return [
+            'fixed' => $fixed,
+            'global_fixed' => $globalFixed,
+            'custom_fixed' => $customFixed,
+            'is_custom' => $hasPersonalizedTaxes && $customFixed !== null,
             'dashboard' => [
                 'fixed' => $fixed,
             ],
@@ -2311,14 +2318,17 @@ class UserController extends Controller
         return [
             'deposit' => [
                 'fixed' => 0,
+                'global_fixed' => 0,
+                'custom_fixed' => null,
+                'is_custom' => false,
             ],
             'withdraw' => [
-                'dashboard' => [
-                    'fixed' => 0,
-                ],
-                'api' => [
-                    'fixed' => 0,
-                ],
+                'fixed' => 0,
+                'global_fixed' => 0,
+                'custom_fixed' => null,
+                'is_custom' => false,
+                'dashboard' => ['fixed' => 0],
+                'api' => ['fixed' => 0],
             ],
             'affiliate' => [
                 'fixed' => 0,
@@ -2364,13 +2374,25 @@ class UserController extends Controller
             }
 
             $affiliatesCount = $user->clientesAffiliate()->count();
+
+            $totalEarned = (float) \App\Models\AffiliateCommission::where('affiliate_id', $user->id)
+                ->where('status', 'paid')
+                ->sum('commission_value');
+
+            $monthlyEarned = (float) \App\Models\AffiliateCommission::where('affiliate_id', $user->id)
+                ->where('status', 'paid')
+                ->whereMonth('created_at', now()->month)
+                ->whereYear('created_at', now()->year)
+                ->sum('commission_value');
             
             return response()->json([
                 'success' => true,
                 'data' => [
                     'affiliate_code' => $user->affiliate_code,
                     'affiliate_link' => $user->affiliate_link,
-                    'affiliates_count' => $affiliatesCount
+                    'affiliates_count' => $affiliatesCount,
+                    'total_earned' => $totalEarned,
+                    'monthly_earned' => $monthlyEarned,
                 ]
             ]);
         } catch (\Exception $e) {
@@ -2382,47 +2404,6 @@ class UserController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Erro ao gerar link de afiliado'
-            ], 500);
-        }
-    }
-
-    /**
-     * Visualizar comissões de afiliados recebidas pelo usuário
-     *
-     * @param Request $request
-     * @return \Illuminate\Http\JsonResponse
-     */
-    public function getAffiliateCommissions(Request $request)
-    {
-        try {
-            $user = $request->user();
-            
-            if (!$user) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Usuário não autenticado'
-                ], 401);
-            }
-
-            $commissions = \App\Models\AffiliateCommission::where('affiliate_id', $user->id)
-                ->where('status', 'paid')
-                ->with(['user:id,user_id,username,name', 'solicitacao:id,idTransaction,amount', 'solicitacaoCashOut:id,idTransaction,amount'])
-                ->orderBy('created_at', 'desc')
-                ->paginate(20);
-            
-            return response()->json([
-                'success' => true,
-                'data' => $commissions
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Erro ao buscar comissões de afiliados', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Erro ao buscar comissões de afiliados'
             ], 500);
         }
     }

@@ -244,6 +244,8 @@ class AdminUserService
             CacheKeyService::forgetUser($userId);
             CacheKeyService::forgetUsersStats();
             CacheKeyService::forgetDashboardStats();
+            // Limpar cache do perfil (Dados da Conta) para exibir taxas atualizadas
+            Cache::forget('user_profile_' . $user->username);
             
             // Se for gerente, limpar cache de gerentes
             if ($user->permission == UserPermission::MANAGER) {
