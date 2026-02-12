@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class Treeal extends Model
 {
+    protected $table = 'treeal';
+
     protected $fillable = [
         'environment',
         'qrcodes_api_url',
