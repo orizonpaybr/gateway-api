@@ -130,4 +130,79 @@ class BalanceService
             return $user->fresh();
         });
     }
+
+    /**
+     * Obtém o saldo total disponível (saldo principal + saldo de afiliados)
+     * 
+     * @param User $user
+     * @return float Saldo total disponível
+     */
+    public function getTotalAvailableBalance(User $user): float
+    {
+        return (float) ($user->saldo + $user->saldo_afiliado);
+    }
+
+    /**
+     * Debita valor do saldo combinado (saldo_afiliado primeiro, depois saldo)
+     * Thread-safe, com lock pessimista
+     * 
+     * @param User $user
+     * @param float $amount Valor total a debitar
+     * @return User Usuário atualizado
+     * @throws \Exception Se saldo total insuficiente
+     */
+    public function decrementCombinedBalance(User $user, float $amount): User
+    {
+        return DB::transaction(function () use ($user, $amount) {
+            // Lock pessimista
+            $user = User::where('id', $user->id)
+                ->lockForUpdate()
+                ->first();
+            
+            if (!$user) {
+                throw new \Exception("Usuário não encontrado: {$user->id}");
+            }
+            
+            $totalDisponivel = $user->saldo + $user->saldo_afiliado;
+            
+            // Verificar saldo total suficiente
+            if ($totalDisponivel < $amount) {
+                throw new \Exception(
+                    "Saldo insuficiente. Disponível: R$ " . number_format($totalDisponivel, 2, ',', '.') . 
+                    ", Necessário: R$ " . number_format($amount, 2, ',', '.')
+                );
+            }
+            
+            $saldoAfiliadoAntes = $user->saldo_afiliado;
+            $saldoAntes = $user->saldo;
+            $restante = $amount;
+            
+            // 1. Debitar primeiro de saldo_afiliado
+            if ($user->saldo_afiliado > 0) {
+                $debitoAfiliado = min($user->saldo_afiliado, $restante);
+                User::where('id', $user->id)->decrement('saldo_afiliado', $debitoAfiliado);
+                $restante -= $debitoAfiliado;
+            }
+            
+            // 2. Se ainda sobrar, debitar do saldo principal
+            if ($restante > 0) {
+                User::where('id', $user->id)->decrement('saldo', $restante);
+            }
+            
+            $user = $user->fresh();
+            
+            Log::info("Saldo combinado debitado com sucesso", [
+                'user_id' => $user->user_id,
+                'amount_total' => $amount,
+                'saldo_afiliado_before' => $saldoAfiliadoAntes,
+                'saldo_afiliado_after' => $user->saldo_afiliado,
+                'saldo_before' => $saldoAntes,
+                'saldo_after' => $user->saldo,
+                'total_before' => $saldoAfiliadoAntes + $saldoAntes,
+                'total_after' => $user->saldo_afiliado + $user->saldo,
+            ]);
+            
+            return $user;
+        });
+    }
 }

@@ -120,7 +120,7 @@ class AdminUserService
             
             // Campos opcionais (permission e status podem ser sobrescritos se fornecidos)
             $optionalFields = [
-                'gender', 'cpf', 'data_nascimento', 'nome_fantasia', 'razao_social', 
+                'gender', 'cpf', 'nome_fantasia', 'razao_social', 
                 'cep', 'rua', 'estado', 'cidade', 'bairro', 'numero_residencia', 'complemento',
                 'media_faturamento', 'indicador_ref', 'gerente_id',
                 'permission', 'status'
@@ -186,7 +186,7 @@ class AdminUserService
             
             // Campos que podem ser atualizados
             $allowedFields = [
-                'name', 'email', 'telefone', 'cpf', 'data_nascimento',
+                'name', 'email', 'telefone', 'cpf',
                 'nome_fantasia', 'razao_social', 'status', 'permission', 'saldo',
                 'cep', 'rua', 'estado', 'cidade', 'bairro', 'numero_residencia', 'complemento',
                 'media_faturamento', 'taxa_cash_in', 'taxa_cash_out', 
@@ -203,7 +203,7 @@ class AdminUserService
             
             $updateData = [];
             // Campos que devem ser convertidos de string vazia para null
-            $nullableFields = ['telefone', 'data_nascimento', 'cpf', 'cep', 'rua', 'estado', 'cidade', 'bairro', 'numero_residencia', 'complemento', 'observacoes_taxas'];
+            $nullableFields = ['telefone', 'cpf', 'cep', 'rua', 'estado', 'cidade', 'bairro', 'numero_residencia', 'complemento', 'observacoes_taxas'];
             
             foreach ($allowedFields as $field) {
                 if (array_key_exists($field, $data)) {
@@ -244,7 +244,6 @@ class AdminUserService
             CacheKeyService::forgetUser($userId);
             CacheKeyService::forgetUsersStats();
             CacheKeyService::forgetDashboardStats();
-            // Limpar cache do perfil (Dados da Conta) para exibir taxas atualizadas
             Cache::forget('user_profile_' . $user->username);
             
             // Se for gerente, limpar cache de gerentes

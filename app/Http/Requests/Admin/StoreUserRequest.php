@@ -72,7 +72,6 @@ class StoreUserRequest extends FormRequest
             'telefone' => 'nullable|string|min:10|max:20',
             'cpf_cnpj' => $this->cpfCnpjRules(),
             'cpf' => 'nullable|string|size:11',
-            'data_nascimento' => 'nullable|date|before:today',
             'saldo' => 'nullable|numeric|min:0',
             'status' => $this->statusRules(),
             'permission' => $this->permissionRules(),

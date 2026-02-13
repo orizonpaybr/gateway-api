@@ -407,22 +407,37 @@ class AuthController extends Controller
             if ($request->hasFile('documentoFrente')) {
                 $file = $request->file('documentoFrente');
                 $filename = 'doc_frente_' . time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-                $file->storeAs('uploads/documentos', $filename, 'public');
-                $fotoRgFrente = '/storage/uploads/documentos/' . $filename;
+                $saved = $file->storeAs('uploads/documentos', $filename, 'public');
+                if ($saved) {
+                    $fotoRgFrente = '/storage/uploads/documentos/' . $filename;
+                    Log::info('[REGISTRO] Documento frente salvo', ['path' => $fotoRgFrente]);
+                } else {
+                    Log::error('[REGISTRO] Falha ao salvar documento frente');
+                }
             }
             
             if ($request->hasFile('documentoVerso')) {
                 $file = $request->file('documentoVerso');
                 $filename = 'doc_verso_' . time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-                $file->storeAs('uploads/documentos', $filename, 'public');
-                $fotoRgVerso = '/storage/uploads/documentos/' . $filename;
+                $saved = $file->storeAs('uploads/documentos', $filename, 'public');
+                if ($saved) {
+                    $fotoRgVerso = '/storage/uploads/documentos/' . $filename;
+                    Log::info('[REGISTRO] Documento verso salvo', ['path' => $fotoRgVerso]);
+                } else {
+                    Log::error('[REGISTRO] Falha ao salvar documento verso');
+                }
             }
             
             if ($request->hasFile('selfieDocumento')) {
                 $file = $request->file('selfieDocumento');
                 $filename = 'selfie_' . time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-                $file->storeAs('uploads/documentos', $filename, 'public');
-                $selfieRg = '/storage/uploads/documentos/' . $filename;
+                $saved = $file->storeAs('uploads/documentos', $filename, 'public');
+                if ($saved) {
+                    $selfieRg = '/storage/uploads/documentos/' . $filename;
+                    Log::info('[REGISTRO] Selfie salvo', ['path' => $selfieRg]);
+                } else {
+                    Log::error('[REGISTRO] Falha ao salvar selfie');
+                }
             }
 
             $indicador_ref = $request->input('ref') ?? NULL;
@@ -452,6 +467,21 @@ class AuthController extends Controller
                 }
             }
 
+            // Gerar código e link de afiliado único (automaticamente para todos os usuários)
+            // Remover espaços e caracteres especiais do user_id para gerar código limpo
+            $userIdClean = preg_replace('/[^a-zA-Z0-9]/', '', $request->username);
+            $codigoBase = strtoupper(substr($userIdClean, 0, 4));
+            $numeroAleatorio = rand(1000, 9999);
+            $affiliateCode = $codigoBase . $numeroAleatorio;
+            
+            // Verificar unicidade do código de afiliado
+            while (User::where('affiliate_code', $affiliateCode)->exists()) {
+                $numeroAleatorio = rand(1000, 9999);
+                $affiliateCode = $codigoBase . $numeroAleatorio;
+            }
+            
+            $affiliateLink = config('app.url') . '/register?ref=' . $affiliateCode;
+
             // Criando usuário
             $user = User::create([
                 'username' => $request->username,
@@ -475,6 +505,14 @@ class AuthController extends Controller
                 'foto_rg_frente' => $fotoRgFrente,
                 'foto_rg_verso' => $fotoRgVerso,
                 'selfie_rg' => $selfieRg,
+                'affiliate_code' => $affiliateCode,
+                'affiliate_link' => $affiliateLink,
+            ]);
+            
+            Log::info('[REGISTRO] Código de afiliado gerado automaticamente', [
+                'user_id' => $request->username,
+                'affiliate_code' => $affiliateCode,
+                'affiliate_link' => $affiliateLink,
             ]);
 
             // Criar chaves de API para o usuário

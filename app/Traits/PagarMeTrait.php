@@ -192,12 +192,15 @@ trait PagarMeTrait
 
 
 
-        // Verificar saldo considerando taxa por fora
+        // Verificar saldo total disponível (saldo principal + saldo de afiliados)
+        $balanceService = app(\App\Services\BalanceService::class);
+        $saldoTotalDisponivel = $balanceService->getTotalAvailableBalance($user);
         $saldo_necessario = $taxaPorFora ? $valor_total_descontar : $cashout_liquido;
-        if ($user->saldo < $saldo_necessario) {
+        
+        if ($saldoTotalDisponivel < $saldo_necessario) {
             return response()->json([
                 'status' => 'error',
-                'message' => "Saldo insuficiente. Necessário: R$ " . number_format($saldo_necessario, 2, ',', '.') . ", Disponível: R$ " . number_format($user->saldo, 2, ',', '.'),
+                'message' => "Saldo insuficiente. Disponível: R$ " . number_format($saldoTotalDisponivel, 2, ',', '.') . ", Necessário: R$ " . number_format($saldo_necessario, 2, ',', '.'),
             ], 401);
         }
 
@@ -206,7 +209,7 @@ trait PagarMeTrait
         if($request->baasPostbackUrl === 'web'){
             if ($request->has('saque_automatico') && $request->saque_automatico) {
                 // Processar saque automático diretamente via API
-                return self::processarSaqueAutomatico($request, $taxa_cash_out, $cashout_liquido, $real_data, $descricao, $user);
+                return self::processarSaqueAutomatico($request, $taxa_cash_out, $cashout_liquido, $valor_total_descontar, $real_data, $descricao, $user);
             } else {
                 // Processar como manual (criar solicitação para aprovação)
                 return self::generateTransactionPaymentManualPagarme($request, $taxa_cash_out, $cashout_liquido, $real_data, $descricao, $user);
@@ -444,7 +447,7 @@ trait PagarMeTrait
     /**
      * Processa saque automático diretamente via API
      */
-    protected static function processarSaqueAutomatico($request, $taxa_cash_out, $cashout_liquido, $real_data, $descricao, $user)
+    protected static function processarSaqueAutomatico($request, $taxa_cash_out, $cashout_liquido, $valor_total_descontar, $real_data, $descricao, $user)
     {
         if(self::generateCredentialsPagarme()){
             $callback = url("Pagarme/callback/withdraw");
@@ -504,8 +507,9 @@ trait PagarMeTrait
 
                 $cashout = SolicitacoesCashOut::create($pixcashout);
 
-                // Atualizar saldo do usuário
-                Helper::decrementAmount($user, $cashout_liquido, 'saldo');
+                // Debitar do saldo combinado (saldo_afiliado primeiro, depois saldo)
+                $balanceService = app(\App\Services\BalanceService::class);
+                $balanceService->decrementCombinedBalance($user, $valor_total_descontar);
                 Helper::incrementAmount($user, $request->amount, 'valor_sacado');
                 Helper::calculaSaldoLiquido($user->user_id);
 

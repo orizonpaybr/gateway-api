@@ -91,10 +91,10 @@ class AffiliateCommissionService
             $balanceBeforeChild = $user->saldo; // Para log apenas
             $balanceAfterChild = $user->saldo; // Não alteramos o saldo do filho aqui
 
-            // Creditar R$0,50 no saldo do pai
-            $balanceBeforeAffiliate = $affiliate->saldo;
-            $this->balanceService->incrementBalance($affiliate, self::COMMISSION_VALUE, 'saldo');
-            $balanceAfterAffiliate = $affiliate->fresh()->saldo;
+            // Creditar R$0,50 no saldo_afiliado do pai (separado do saldo principal)
+            $balanceBeforeAffiliate = $affiliate->saldo_afiliado;
+            $this->balanceService->incrementBalance($affiliate, self::COMMISSION_VALUE, 'saldo_afiliado');
+            $balanceAfterAffiliate = $affiliate->fresh()->saldo_afiliado;
 
             // Atualizar status da comissão para paga
             $commission->update(['status' => 'paid']);
@@ -195,10 +195,10 @@ class AffiliateCommissionService
             $balanceBeforeChild = $user->saldo; // Para log apenas
             $balanceAfterChild = $user->saldo; // Não alteramos o saldo do filho aqui
 
-            // Creditar R$0,50 no saldo do pai
-            $balanceBeforeAffiliate = $affiliate->saldo;
-            $this->balanceService->incrementBalance($affiliate, self::COMMISSION_VALUE, 'saldo');
-            $balanceAfterAffiliate = $affiliate->fresh()->saldo;
+            // Creditar R$0,50 no saldo_afiliado do pai (separado do saldo principal)
+            $balanceBeforeAffiliate = $affiliate->saldo_afiliado;
+            $this->balanceService->incrementBalance($affiliate, self::COMMISSION_VALUE, 'saldo_afiliado');
+            $balanceAfterAffiliate = $affiliate->fresh()->saldo_afiliado;
 
             // Atualizar status da comissão para paga
             $commission->update(['status' => 'paid']);

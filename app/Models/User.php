@@ -31,6 +31,7 @@ class User extends Authenticatable
         "data_nascimento",
         "telefone",
         "saldo",
+        "saldo_afiliado",
         "total_transacoes",
         "permission",
         "avatar",
@@ -106,6 +107,7 @@ class User extends Authenticatable
         'affiliate_percentage' => 'decimal:2',
         'is_affiliate' => 'boolean',
         'twofa_enabled' => 'boolean',
+        'saldo_afiliado' => 'decimal:2',
     ];
 
     /**

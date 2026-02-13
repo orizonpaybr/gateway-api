@@ -241,11 +241,14 @@ class SaqueController extends Controller
             $cashOutLiquido = $taxaCalculada['saque_liquido'];
             $valorTotalDescontar = $taxaCalculada['valor_total_descontar'];
 
-            // Verificar saldo disponível considerando a taxa total a ser descontada
-            if ($user->saldo < $valorTotalDescontar) {
+            // Verificar saldo total disponível (saldo principal + saldo de afiliados)
+            $balanceService = app(\App\Services\BalanceService::class);
+            $saldoTotalDisponivel = $balanceService->getTotalAvailableBalance($user);
+            
+            if ($saldoTotalDisponivel < $valorTotalDescontar) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Saldo insuficiente. Valor necessário: R$ ' . number_format($valorTotalDescontar, 2, ',', '.') . ' (incluindo taxa de R$ ' . number_format($taxaTotal, 2, ',', '.') . ')'
+                    'message' => 'Saldo insuficiente. Disponível: R$ ' . number_format($saldoTotalDisponivel, 2, ',', '.') . ', Necessário: R$ ' . number_format($valorTotalDescontar, 2, ',', '.') . ' (incluindo taxa de R$ ' . number_format($taxaTotal, 2, ',', '.') . ')'
                 ], 401);
             }
 
@@ -295,10 +298,9 @@ class SaqueController extends Controller
                     'executor_ordem' => 'Treeal',
                 ]);
 
-                // Debitar saldo do usuário (thread-safe)
-                // Descontar o valor total (valor solicitado + taxa)
+                // Debitar do saldo combinado (saldo_afiliado primeiro, depois saldo)
                 $balanceService = app(\App\Services\BalanceService::class);
-                $balanceService->decrementBalance($user, $valorTotalDescontar, 'saldo');
+                $balanceService->decrementCombinedBalance($user, $valorTotalDescontar);
                 Helper::calculaSaldoLiquido($user->user_id);
 
                 Log::info('SaqueController::processTreealWithdrawal - Saque automático criado', [
@@ -346,9 +348,9 @@ class SaqueController extends Controller
                     'executor_ordem' => null, // Manual = sem executor automático
                 ]);
 
-                // Debitar valor + taxa na criação (em caso de rejeição, valor e taxa são devolvidos)
+                // Debitar do saldo combinado (saldo_afiliado primeiro, depois saldo)
                 $balanceService = app(\App\Services\BalanceService::class);
-                $balanceService->decrementBalance($user, $valorTotalDescontar, 'saldo');
+                $balanceService->decrementCombinedBalance($user, $valorTotalDescontar);
                 Helper::calculaSaldoLiquido($user->user_id);
 
                 Log::info('SaqueController::processTreealWithdrawal - Saque manual criado (valor + taxa debitados)', [
