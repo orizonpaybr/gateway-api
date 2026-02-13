@@ -2358,7 +2358,9 @@ class UserController extends Controller
 
             // Gerar código único se não existe
             if (!$user->affiliate_code) {
-                $codigoBase = strtoupper(substr($user->user_id, 0, 4));
+                // Remover espaços e caracteres especiais para código limpo
+                $userIdClean = preg_replace('/[^a-zA-Z0-9]/', '', $user->user_id);
+                $codigoBase = strtoupper(substr($userIdClean, 0, 4));
                 $numeroAleatorio = rand(1000, 9999);
                 $codigoCompleto = $codigoBase . $numeroAleatorio;
                 
@@ -2371,19 +2373,29 @@ class UserController extends Controller
                 $user->affiliate_code = $codigoCompleto;
                 $user->affiliate_link = config('app.url') . '/register?ref=' . $user->affiliate_code;
                 $user->save();
+                
+                Log::info('[AFFILIATE LINK] Código gerado para usuário existente', [
+                    'user_id' => $user->user_id,
+                    'affiliate_code' => $codigoCompleto,
+                ]);
             }
 
             $affiliatesCount = $user->clientesAffiliate()->count();
 
+            // Total histórico de comissões pagas (todas as comissões registradas)
             $totalEarned = (float) \App\Models\AffiliateCommission::where('affiliate_id', $user->id)
                 ->where('status', 'paid')
                 ->sum('commission_value');
 
+            // Comissões do mês atual
             $monthlyEarned = (float) \App\Models\AffiliateCommission::where('affiliate_id', $user->id)
                 ->where('status', 'paid')
                 ->whereMonth('created_at', now()->month)
                 ->whereYear('created_at', now()->year)
                 ->sum('commission_value');
+
+            // Saldo disponível de afiliados (pode ser menor que total_earned se já sacou)
+            $currentBalance = (float) $user->saldo_afiliado;
             
             return response()->json([
                 'success' => true,
@@ -2393,6 +2405,7 @@ class UserController extends Controller
                     'affiliates_count' => $affiliatesCount,
                     'total_earned' => $totalEarned,
                     'monthly_earned' => $monthlyEarned,
+                    'current_balance' => $currentBalance,
                 ]
             ]);
         } catch (\Exception $e) {

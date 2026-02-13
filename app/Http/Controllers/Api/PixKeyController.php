@@ -459,11 +459,14 @@ class PixKeyController extends Controller
             $cashOutLiquido = $taxaCalculada['saque_liquido'];        // Valor que o cliente recebe
             $valorTotalDescontar = $taxaCalculada['valor_total_descontar']; // Total a debitar do saldo
 
-            // Verificar saldo (valor solicitado + taxa)
-            if ($user->saldo < $valorTotalDescontar) {
+            // Verificar saldo total disponível (saldo principal + saldo de afiliados)
+            $balanceService = app(\App\Services\BalanceService::class);
+            $saldoTotalDisponivel = $balanceService->getTotalAvailableBalance($user);
+            
+            if ($saldoTotalDisponivel < $valorTotalDescontar) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Saldo insuficiente. Necessário: R$ ' . number_format($valorTotalDescontar, 2, ',', '.') . ' (valor R$ ' . number_format($amount, 2, ',', '.') . ' + taxa R$ ' . number_format($taxaCashOut, 2, ',', '.') . ')'
+                    'message' => 'Saldo insuficiente. Disponível: R$ ' . number_format($saldoTotalDisponivel, 2, ',', '.') . ', Necessário: R$ ' . number_format($valorTotalDescontar, 2, ',', '.') . ' (valor R$ ' . number_format($amount, 2, ',', '.') . ' + taxa R$ ' . number_format($taxaCashOut, 2, ',', '.') . ')'
                 ], 400)->header('Access-Control-Allow-Origin', '*');
             }
 
@@ -553,9 +556,9 @@ class PixKeyController extends Controller
                     'executor_ordem' => null,
                 ]);
                 
-                // Debitar valor + taxa na criação (em caso de rejeição, valor e taxa são devolvidos)
+                // Debitar do saldo combinado (saldo_afiliado primeiro, depois saldo)
                 $balanceService = app(\App\Services\BalanceService::class);
-                $balanceService->decrementBalance($user, $valorTotalDescontar, 'saldo');
+                $balanceService->decrementCombinedBalance($user, $valorTotalDescontar);
                 \App\Helpers\Helper::calculaSaldoLiquido($user->user_id ?? $user->username);
                 
                 Log::info('Saque PIX manual criado - pendente de aprovação (valor + taxa debitados)', [

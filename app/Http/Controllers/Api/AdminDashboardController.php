@@ -984,7 +984,6 @@ class AdminDashboardController extends Controller
                 // Identificação
                 'cpf' => $user->cpf,
                 'cpf_cnpj' => $user->cpf_cnpj,
-                'data_nascimento' => $user->data_nascimento,
                 'telefone' => $user->telefone,
                 // Empresa
                 'razao_social' => $user->razao_social,
@@ -1002,11 +1001,11 @@ class AdminDashboardController extends Controller
                 // Integrações
                 'token' => $keys->token ?? null,
                 'secret' => $keys->secret ?? null,
-                // Documentação (caminhos relativos - serão resolvidos pelo frontend)
+                // Documentação (URLs absolutas para o frontend exibir corretamente)
                 'documents' => [
-                    'rg_frente' => $user->foto_rg_frente,
-                    'rg_verso' => $user->foto_rg_verso,
-                    'selfie_rg' => $user->selfie_rg,
+                    'rg_frente' => $user->foto_rg_frente ? url($user->foto_rg_frente) : null,
+                    'rg_verso' => $user->foto_rg_verso ? url($user->foto_rg_verso) : null,
+                    'selfie_rg' => $user->selfie_rg ? url($user->selfie_rg) : null,
                 ],
                 // Taxas - SEMPRE retornar valores salvos no banco (se existirem), senão usar padrão
                 // Converter para float para garantir que retorne número e não string
