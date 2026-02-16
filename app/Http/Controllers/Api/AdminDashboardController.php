@@ -1054,7 +1054,9 @@ class AdminDashboardController extends Controller
                 'is_affiliate' => (bool) ($user->is_affiliate ?? false),
                 'affiliate_percentage' => (float) ($user->affiliate_percentage ?? 0),
                 'affiliate_code' => $user->affiliate_code,
-                'affiliate_link' => $user->affiliate_link,
+                'affiliate_link' => $user->affiliate_code
+                    ? (config('app.affiliado_url') . '/cadastro?ref=' . $user->affiliate_code)
+                    : ($user->affiliate_link ?? ''),
                 // Observações
                 'observacoes_taxas' => $user->observacoes_taxas ?? null,
             ];

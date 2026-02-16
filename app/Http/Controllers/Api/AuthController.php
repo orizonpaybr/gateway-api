@@ -480,7 +480,7 @@ class AuthController extends Controller
                 $affiliateCode = $codigoBase . $numeroAleatorio;
             }
             
-            $affiliateLink = env('AFFILIADO_URL', 'http://localhost:3000') . '/cadastro?ref=' . $affiliateCode;
+            $affiliateLink = config('app.affiliado_url') . '/cadastro?ref=' . $affiliateCode;
 
             // Criando usuário
             $user = User::create([
