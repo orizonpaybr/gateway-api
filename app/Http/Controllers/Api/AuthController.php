@@ -131,6 +131,10 @@ class AuthController extends Controller
                 'permission' => $user->permission,
             ]);
 
+            // Obter token e secret descriptografados (accessors do Model fazem isso automaticamente)
+            $apiToken = $userKeys->token; // Accessor descriptografa
+            $apiSecret = $userKeys->secret; // Accessor descriptografa
+
             Log::info('Login bem-sucedido via API', [
                 'username' => $username,
                 'ip' => $request->ip()
@@ -150,8 +154,8 @@ class AuthController extends Controller
                         'status' => $user->status ?? null,
                     ],
                     'token' => $token,
-                    'api_token' => $userKeys->token,
-                    'api_secret' => $userKeys->secret,
+                    'api_token' => $apiToken,
+                    'api_secret' => $apiSecret,
                 ]
             ]);
 
