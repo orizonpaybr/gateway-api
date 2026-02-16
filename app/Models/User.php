@@ -247,7 +247,7 @@ class User extends Authenticatable
             }
             
             $this->affiliate_code = $codigoCompleto;
-            $this->affiliate_link = config('app.url') . '/register?ref=' . $this->affiliate_code;
+            $this->affiliate_link = env('AFFILIADO_URL', 'http://localhost:3000') . '/cadastro?ref=' . $this->affiliate_code;
             $this->save();
         }
         return $this->affiliate_code;
