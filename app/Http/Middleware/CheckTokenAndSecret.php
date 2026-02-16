@@ -23,6 +23,18 @@ class CheckTokenAndSecret
 
         // Verifique se ambos os parâmetros token e secret foram enviados
         if (!$token || !$secret) {
+            Log::warning('CheckTokenAndSecret - Token ou Secret ausentes', [
+                'ip' => $request->ip(),
+                'has_body_token' => !is_null($request->input('token')),
+                'has_query_token' => !is_null($request->query('token')),
+                'has_header_api_token' => !is_null($request->header('api_token')),
+                'has_header_api_hyphen_token' => !is_null($request->header('api-token')),
+                'has_body_secret' => !is_null($request->input('secret')),
+                'has_query_secret' => !is_null($request->query('secret')),
+                'has_header_api_secret' => !is_null($request->header('api_secret')),
+                'has_header_api_hyphen_secret' => !is_null($request->header('api-secret')),
+                'all_headers' => $request->headers->all(),
+            ]);
             return Response::json([
                 'error' => 'Token ou Secret ausentes',
                 'message' => 'Você precisa fornecer tanto o token quanto o secret.'
