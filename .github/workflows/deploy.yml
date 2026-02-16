@@ -146,13 +146,19 @@ jobs:
             echo "✅ Deploy concluído com sucesso!"
           EOF
 
+      # Após trocar domínio/certificado: atualizar no GitHub (Settings → Secrets):
+      # - SERVER_HOST = novo domínio (ex: api.seudominio.com.br) ou IP
+      # - HEALTH_CHECK_URL = URL completa do health check (ex: https://api.seudominio.com.br/up)
       - name: ✅ Health Check
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          HEALTH_CHECK_URL: ${{ secrets.HEALTH_CHECK_URL }}
         run: |
           echo "🔍 Verificando saúde da aplicação..."
           sleep 5
-          curl -f http://$SERVER_HOST/up || exit 1
+          URL="${HEALTH_CHECK_URL:-https://$SERVER_HOST/up}"
+          echo "URL do health check: $URL"
+          curl -f --connect-timeout 15 --max-time 20 "$URL" || exit 1
           echo "✅ Aplicação está respondendo!"
 
       - name: 📢 Notify deployment
