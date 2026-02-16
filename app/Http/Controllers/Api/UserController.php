@@ -2371,7 +2371,7 @@ class UserController extends Controller
                 }
                 
                 $user->affiliate_code = $codigoCompleto;
-                $user->affiliate_link = env('AFFILIADO_URL', 'http://localhost:3000') . '/cadastro?ref=' . $user->affiliate_code;
+                $user->affiliate_link = config('app.affiliado_url') . '/cadastro?ref=' . $user->affiliate_code;
                 $user->save();
                 
                 Log::info('[AFFILIATE LINK] Código gerado para usuário existente', [
@@ -2396,12 +2396,22 @@ class UserController extends Controller
 
             // Saldo disponível de afiliados (pode ser menor que total_earned se já sacou)
             $currentBalance = (float) $user->saldo_afiliado;
+
+            // Sempre montar o link a partir do config (valor correto em prod, evita antigo no banco)
+            $baseUrl = config('app.affiliado_url');
+            $affiliateLink = $user->affiliate_code
+                ? ($baseUrl . '/cadastro?ref=' . $user->affiliate_code)
+                : ($user->affiliate_link ?? '');
+
+            if ($user->affiliate_code && $user->affiliate_link !== $affiliateLink) {
+                $user->update(['affiliate_link' => $affiliateLink]);
+            }
             
             return response()->json([
                 'success' => true,
                 'data' => [
                     'affiliate_code' => $user->affiliate_code,
-                    'affiliate_link' => $user->affiliate_link,
+                    'affiliate_link' => $affiliateLink,
                     'affiliates_count' => $affiliatesCount,
                     'total_earned' => $totalEarned,
                     'monthly_earned' => $monthlyEarned,
