@@ -16,10 +16,12 @@ class CheckTokenAndSecret
         // Token e secret: body, query ou headers (api_token / api_secret para frontend)
         $token = $request->input('token')
             ?: $request->query('token')
-            ?: $request->header('api_token');
+            ?: $request->header('api_token')
+            ?: $request->header('api-token');
         $secret = $request->input('secret')
             ?: $request->query('secret')
-            ?: $request->header('api_secret');
+            ?: $request->header('api_secret')
+            ?: $request->header('api-secret');
 
         // Verifique se ambos os parâmetros token e secret foram enviados
         if (!$token || !$secret) {
