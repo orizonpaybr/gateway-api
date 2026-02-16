@@ -16,6 +16,7 @@ use App\Services\PagarMeService;
 use App\DTO\PagarMeDTO\CardDepositDTO;
 use App\Services\TreealService;
 use App\Models\Treeal;
+use App\Helpers\UserStatusHelper;
 
 /**
  * @OA\Info(
@@ -41,7 +42,18 @@ class DepositController extends Controller
         if (!$user) {
             return response()->json(['status' => 'error', 'message' => 'Usuário não autenticado'], 401);
         }
-        
+
+        // Contas não aprovadas não podem realizar depósito
+        if (!UserStatusHelper::isApproved($user)) {
+            Log::info('DepositController - Tentativa de depósito com conta não aprovada', [
+                'user_id' => $user->user_id ?? $user->id,
+            ]);
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Contas não aprovadas não são permitidas para depósito.',
+            ], 403);
+        }
+
         $setting = App::first();
         if (!$setting) {
             return response()->json(['status' => 'error', 'message' => 'Configurações do aplicativo não encontradas.'], 500);
