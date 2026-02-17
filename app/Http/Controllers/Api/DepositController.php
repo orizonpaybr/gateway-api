@@ -561,9 +561,16 @@ class DepositController extends Controller
                 $user = \App\Models\User::where('user_id', $user->user_id)->first();
             }
             
+            // Preencher CPF/CNPJ do usuário logado se não for fornecido no request (evita erro de NOT NULL na primeira tentativa)
+            $debtorDocument = $request->debtor_document_number ?? $user->cpf_cnpj ?? null;
+            $debtorName = $request->debtor_name ?? $user->name ?? 'Cliente';
+            $debtorEmail = $request->email ?? $user->email ?? null;
+            $debtorPhone = $request->phone ?? $user->telefone ?? null;
+            
             Log::info('DepositController::processTreealDeposit - Dados antes do cálculo de taxa', [
                 'user_id' => $user->user_id ?? 'N/A',
                 'amount' => $amount,
+                'debtor_document' => $debtorDocument ? substr($debtorDocument, 0, 3) . '***' : 'N/A',
                 'taxas_personalizadas_ativas' => $user->taxas_personalizadas_ativas ?? false,
                 'taxa_fixa_deposito' => $user->taxa_fixa_deposito ?? 'N/A',
                 'taxa_fixa_padrao_global' => $setting->taxa_fixa_padrao ?? 'N/A',
@@ -617,10 +624,10 @@ class DepositController extends Controller
                 'user_id' => $user->username,
                 'externalreference' => $txid,
                 'amount' => $amount,
-                'client_name' => $request->debtor_name,
-                'client_document' => $request->debtor_document_number,
-                'client_email' => $request->email,
-                'client_telefone' => $request->phone,
+                'client_name' => $debtorName,
+                'client_document' => $debtorDocument,
+                'client_email' => $debtorEmail,
+                'client_telefone' => $debtorPhone,
                 'date' => Carbon::now(),
                 'status' => 'WAITING_FOR_APPROVAL',
                 'idTransaction' => $txid,
