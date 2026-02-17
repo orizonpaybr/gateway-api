@@ -11,7 +11,7 @@ use App\Http\Requests\Admin\{StoreUserRequest, UpdateUserRequest};
 use App\Constants\{UserStatus, UserPermission};
 use App\Helpers\{UserStatusHelper, AppSettingsHelper};
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\{Cache, DB, Log};
+use Illuminate\Support\Facades\{Cache, DB, Log, Storage};
 use Carbon\Carbon;
 
 /**
@@ -935,6 +935,56 @@ class AdminDashboardController extends Controller
     }
     
     /**
+     * Servir documento do usuário (RG frente/verso, selfie) — rota autenticada (admin/gerente).
+     * Evita expor documentos sensíveis em URL pública.
+     *
+     * @param Request $request
+     * @param int $id
+     * @param string $type rg_frente|rg_verso|selfie_rg
+     * @return \Illuminate\Http\Response|\Illuminate\Http\JsonResponse
+     */
+    public function getUserDocument(Request $request, int $id, string $type)
+    {
+        $allowed = ['rg_frente' => 'foto_rg_frente', 'rg_verso' => 'foto_rg_verso', 'selfie_rg' => 'selfie_rg'];
+        if (!isset($allowed[$type])) {
+            return $this->errorResponse('Tipo de documento inválido', 400);
+        }
+
+        $user = User::find($id);
+        if (!$user) {
+            return $this->errorResponse('Usuário não encontrado', 404);
+        }
+
+        $column = $allowed[$type];
+        $pathStored = $user->{$column};
+        if (empty($pathStored)) {
+            return $this->errorResponse('Documento não encontrado', 404);
+        }
+
+        // Path no disco: DB guarda /storage/uploads/documentos/filename.ext
+        $filename = basename($pathStored);
+        $relativePath = 'uploads/documentos/' . $filename;
+
+        if (!Storage::disk('public')->exists($relativePath)) {
+            Log::warning('Documento de usuário não encontrado no disco', ['user_id' => $id, 'type' => $type, 'path' => $relativePath]);
+            return $this->errorResponse('Arquivo não encontrado', 404);
+        }
+
+        $fullPath = Storage::disk('public')->path($relativePath);
+        $mime = match (strtolower(pathinfo($filename, PATHINFO_EXTENSION))) {
+            'pdf' => 'application/pdf',
+            'png' => 'image/png',
+            'jpg', 'jpeg' => 'image/jpeg',
+            default => 'application/octet-stream',
+        };
+
+        return response()->file($fullPath, [
+            'Content-Type' => $mime,
+            'Content-Disposition' => 'inline; filename="' . $filename . '"',
+        ]);
+    }
+
+    /**
      * Obter detalhes de um usuário específico
      * 
      * @param Request $request
@@ -1001,11 +1051,11 @@ class AdminDashboardController extends Controller
                 // Integrações
                 'token' => $keys->token ?? null,
                 'secret' => $keys->secret ?? null,
-                // Documentação (URLs absolutas para o frontend exibir corretamente)
+                // Documentação: URLs do endpoint autenticado (não expõe arquivos em URL pública)
                 'documents' => [
-                    'rg_frente' => $user->foto_rg_frente ? url($user->foto_rg_frente) : null,
-                    'rg_verso' => $user->foto_rg_verso ? url($user->foto_rg_verso) : null,
-                    'selfie_rg' => $user->selfie_rg ? url($user->selfie_rg) : null,
+                    'rg_frente' => $user->foto_rg_frente ? url("/api/admin/users/{$user->id}/documents/rg_frente") : null,
+                    'rg_verso' => $user->foto_rg_verso ? url("/api/admin/users/{$user->id}/documents/rg_verso") : null,
+                    'selfie_rg' => $user->selfie_rg ? url("/api/admin/users/{$user->id}/documents/selfie_rg") : null,
                 ],
                 // Taxas - SEMPRE retornar valores salvos no banco (se existirem), senão usar padrão
                 // Converter para float para garantir que retorne número e não string
