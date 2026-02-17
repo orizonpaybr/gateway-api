@@ -116,7 +116,12 @@ Route::middleware(['verify.jwt'])->group(function () {
         // Estatísticas de usuários (cards: total, mês, pendentes, banidos)
         Route::get('admin/dashboard/users-stats', [App\Http\Controllers\Api\AdminDashboardController::class, 'getUserStats']);
         
-        // Visualizar usuário específico
+        // Documentos do usuário (autenticado; não expõe RG/CPF em URL pública)
+        Route::get('admin/users/{id}/documents/{type}', [App\Http\Controllers\Api\AdminDashboardController::class, 'getUserDocument'])->where([
+            'id' => '[0-9]+',
+            'type' => 'rg_frente|rg_verso|selfie_rg',
+        ]);
+        
         Route::get('admin/users/{id}', [App\Http\Controllers\Api\AdminDashboardController::class, 'showUser']);
         
         // Editar usuário
