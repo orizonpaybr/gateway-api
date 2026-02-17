@@ -114,6 +114,14 @@ class SaqueController extends Controller
             ], 422); // Status code 422 para erros de validação
         }
 
+        // Limite máximo por saque PIX (ex.: R$ 100.000,00)
+        $limiteMaximoSaque = (float) config('saque.limite_maximo_por_saque', 100000);
+        if ((float) $request->amount > $limiteMaximoSaque) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Valor acima do limite máximo por saque de R$ ' . number_format($limiteMaximoSaque, 2, ',', '.') . '.',
+            ], 422);
+        }
 
         // Verificar se o saque automático está ativo
         if ($setting->saque_automatico) {
