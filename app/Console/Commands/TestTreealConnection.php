@@ -50,20 +50,30 @@ class TestTreealConnection extends Command
         $this->line("   Ambiente: {$environment}");
         $this->line("   QR Codes API: {$qrcodesUrl}");
         $this->line("   Accounts API: {$accountsUrl}");
-        $this->line("   Certificado: " . ($certPath ?: 'Não configurado'));
+        $qrcodesCert = config('treeal.qrcodes_certificate_path') ?: $certPath;
+        $accountsCert = config('treeal.accounts_certificate_path') ?: $certPath;
+        $this->line("   Certificado QR Codes (Cash In): " . ($qrcodesCert ?: 'Não configurado'));
+        $this->line("   Certificado Accounts (Cash Out): " . ($accountsCert ?: 'Não configurado'));
         $this->line("   Status: " . ($config->status ? 'Ativo' : 'Inativo'));
         $this->line("   Fonte: .env ✅ (credenciais sensíveis não estão mais no banco)");
         $this->newLine();
 
-        // Verificar certificado
-        $certificatePath = $config->getCertificateFullPath();
-        if (!$certificatePath || !file_exists($certificatePath)) {
-            $this->error('❌ Certificado digital não encontrado: ' . ($certificatePath ?: 'Não configurado'));
-            $this->line('   Certificado esperado em: storage/app/certificates/PIX-HMG-CLIENTE.pfx');
+        // Verificar certificados (Cash In e Cash Out podem ser iguais em sandbox)
+        $qrcodesPath = $config->getQrcodesCertificateFullPath();
+        $accountsPath = $config->getAccountsCertificateFullPath();
+        if (!$qrcodesPath || !file_exists($qrcodesPath)) {
+            $this->error('❌ Certificado Cash In (QR Codes) não encontrado: ' . ($qrcodesPath ?: 'Não configurado'));
+            $this->line('   Coloque o .pfx em storage/app/certificates/ e configure TREEAL_QRCODES_CERTIFICATE_PATH ou TREEAL_CERTIFICATE_PATH');
+            return 1;
+        }
+        if (!$accountsPath || !file_exists($accountsPath)) {
+            $this->error('❌ Certificado Cash Out (Accounts) não encontrado: ' . ($accountsPath ?: 'Não configurado'));
+            $this->line('   Coloque o .pfx em storage/app/certificates/ e configure TREEAL_ACCOUNTS_CERTIFICATE_PATH ou TREEAL_CERTIFICATE_PATH');
             return 1;
         }
 
-        $this->info('✅ Certificado encontrado: ' . $certificatePath);
+        $this->info('✅ Certificado Cash In: ' . $qrcodesPath);
+        $this->info('✅ Certificado Cash Out: ' . $accountsPath);
         $this->newLine();
 
         // Testar serviço
