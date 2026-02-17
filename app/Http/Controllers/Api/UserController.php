@@ -1969,6 +1969,8 @@ class UserController extends Controller
             // Cache Redis para dados do perfil (TTL: 5 minutos)
             $cacheKey = self::CACHE_PREFIX_PROFILE . $user->username;
             $profileData = \Illuminate\Support\Facades\Cache::remember($cacheKey, self::CACHE_TTL, function() use ($user) {
+                $user = User::where('id', $user->id)->first() ?? $user;
+
                 // Calcular informações derivadas (tipo PF/PJ e status legível)
                 $doc = preg_replace('/\D/', '', (string) ($user->cpf_cnpj ?? ''));
                 $tipoPessoa = ($doc && strlen($doc) > 11) ? 'PJ' : 'PF';
