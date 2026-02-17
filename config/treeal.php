@@ -50,12 +50,24 @@ return [
     | Certificado Digital
     |--------------------------------------------------------------------------
     |
-    | Certificado .PFX para autenticação mTLS.
-    | Em produção, usar certificado de produção.
+    | Cash In (QR Codes) e Cash Out (Accounts) podem usar certificados diferentes.
+    |
+    | Opção 1 - Dois certificados (produção: pastas QRCODES-MTLS e ACCOUNTS):
+    |   TREEAL_QRCODES_CERTIFICATE_PATH / TREEAL_QRCODES_CERTIFICATE_PASSWORD
+    |   TREEAL_ACCOUNTS_CERTIFICATE_PATH / TREEAL_ACCOUNTS_CERTIFICATE_PASSWORD
+    |
+    | Opção 2 - Um único certificado (sandbox):
+    |   TREEAL_CERTIFICATE_PATH / TREEAL_CERTIFICATE_PASSWORD (usado para ambos)
     |
     */
     'certificate_path' => env('TREEAL_CERTIFICATE_PATH', 'PIX-HMG-CLIENTE.pfx'),
     'certificate_password' => env('TREEAL_CERTIFICATE_PASSWORD'),
+
+    'qrcodes_certificate_path' => env('TREEAL_QRCODES_CERTIFICATE_PATH'),
+    'qrcodes_certificate_password' => env('TREEAL_QRCODES_CERTIFICATE_PASSWORD'),
+
+    'accounts_certificate_path' => env('TREEAL_ACCOUNTS_CERTIFICATE_PATH'),
+    'accounts_certificate_password' => env('TREEAL_ACCOUNTS_CERTIFICATE_PASSWORD'),
 
     /*
     |--------------------------------------------------------------------------
@@ -148,6 +160,19 @@ return [
     
     // Timeout de conexão em segundos
     'connect_timeout' => env('TREEAL_CONNECT_TIMEOUT', 10),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Verificação SSL
+    |--------------------------------------------------------------------------
+    |
+    | Em produção, use true. Se o servidor da API usar certificado assinado por
+    | CA que não está no sistema (erro 60 "unable to get local issuer certificate"),
+    | pode definir false temporariamente para testar e pedir à Treeal o certificado
+    | CA para instalar no servidor (update-ca-certificates).
+    |
+    */
+    'verify_ssl' => env('TREEAL_VERIFY_SSL', true),
 
     /*
     |--------------------------------------------------------------------------

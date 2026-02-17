@@ -27,6 +27,8 @@ class TreealService
     // Credenciais sensíveis (vêm apenas do .env, não do banco)
     private ?string $certificatePath = null;
     private ?string $certificatePassword = null;
+    private ?string $qrcodesCertificatePassword = null;
+    private ?string $accountsCertificatePassword = null;
     private ?string $accountsClientId = null;
     private ?string $accountsClientSecret = null;
     private ?string $qrcodesClientId = null;
@@ -50,6 +52,8 @@ class TreealService
         // Carregar credenciais sensíveis apenas do .env (não existem mais no banco)
         $this->certificatePath = config('treeal.certificate_path');
         $this->certificatePassword = config('treeal.certificate_password');
+        $this->qrcodesCertificatePassword = config('treeal.qrcodes_certificate_password') ?: config('treeal.certificate_password');
+        $this->accountsCertificatePassword = config('treeal.accounts_certificate_password') ?: config('treeal.certificate_password');
         $this->accountsClientId = config('treeal.accounts_client_id');
         $this->accountsClientSecret = config('treeal.accounts_client_secret');
         $this->qrcodesClientId = config('treeal.qrcodes_client_id');
@@ -84,6 +88,8 @@ class TreealService
         // Recarregar credenciais sensíveis do .env (sempre do .env, não do banco)
         $this->certificatePath = config('treeal.certificate_path');
         $this->certificatePassword = config('treeal.certificate_password');
+        $this->qrcodesCertificatePassword = config('treeal.qrcodes_certificate_password') ?: config('treeal.certificate_password');
+        $this->accountsCertificatePassword = config('treeal.accounts_certificate_password') ?: config('treeal.certificate_password');
         $this->accountsClientId = config('treeal.accounts_client_id');
         $this->accountsClientSecret = config('treeal.accounts_client_secret');
         $this->qrcodesClientId = config('treeal.qrcodes_client_id');
@@ -119,13 +125,16 @@ class TreealService
 
     /**
      * Converte certificado .PFX para formato PEM (certificado + chave)
-     * 
+     * Permite usar certificado de Cash In (QR Codes) ou Cash Out (Accounts).
+     *
+     * @param string|null $pfxPath Caminho do .pfx (null = certificado único)
+     * @param string|null $password Senha do .pfx (null = certificado único)
      * @return array ['cert' => caminho do cert PEM, 'key' => caminho da key PEM]
      */
-    private function convertPfxToPem(): array
+    private function convertPfxToPem(?string $pfxPath = null, ?string $password = null): array
     {
-        $pfxPath = $this->config->getCertificateFullPath();
-        $password = $this->certificatePassword;
+        $pfxPath = $pfxPath ?? $this->config->getCertificateFullPath();
+        $password = $password ?? $this->certificatePassword;
         
         if (!$pfxPath || !file_exists($pfxPath)) {
             throw new \Exception("Certificado digital não encontrado: {$pfxPath}");
@@ -252,19 +261,19 @@ class TreealService
             return $cachedToken;
         }
 
-        $certificatePath = $this->config->getCertificateFullPath();
-        $certificatePassword = $this->certificatePassword;
+        $certificatePath = $this->config->getQrcodesCertificateFullPath();
+        $certificatePassword = $this->qrcodesCertificatePassword;
         
         // Usar credenciais específicas da QR Codes API se disponíveis, senão usar as genéricas
         $clientId = $this->qrcodesClientId ?? $this->accountsClientId;
         $clientSecret = $this->qrcodesClientSecret ?? $this->accountsClientSecret;
 
         if (!$certificatePath || !file_exists($certificatePath)) {
-            throw new \Exception("Certificado digital não encontrado: {$certificatePath}");
+            throw new \Exception("Certificado digital (Cash In/QR Codes) não encontrado: {$certificatePath}");
         }
 
         if (!$certificatePassword) {
-            throw new \Exception("Senha do certificado não configurada");
+            throw new \Exception("Senha do certificado QR Codes não configurada");
         }
 
         if (!$clientId || !$clientSecret) {
@@ -280,11 +289,11 @@ class TreealService
                 'has_qrcodes_credentials' => !empty($this->qrcodesClientId),
             ]);
 
-            // Converter .PFX para PEM
-            $pemFiles = $this->convertPfxToPem();
+            // Converter .PFX para PEM (certificado Cash In / QR Codes)
+            $pemFiles = $this->convertPfxToPem($certificatePath, $certificatePassword);
 
-            // Em ambiente sandbox, desabilitar verificação SSL
-            $verifySSL = $this->config->environment !== 'sandbox';
+            // Em sandbox SSL desligado; em produção usa config (TREEAL_VERIFY_SSL)
+            $verifySSL = $this->config->environment === 'sandbox' ? false : (bool) config('treeal.verify_ssl', true);
 
             // Preparar payload - garantir que não há espaços ou caracteres especiais
             // Tentar primeiro sem scope, já que pode ser opcional
@@ -376,19 +385,19 @@ class TreealService
      */
     private function getQRCodesHttpClient()
     {
-        $certificatePath = $this->config->getCertificateFullPath();
-        $certificatePassword = $this->certificatePassword;
+        $certificatePath = $this->config->getQrcodesCertificateFullPath();
+        $certificatePassword = $this->qrcodesCertificatePassword;
 
         if (!$certificatePath || !file_exists($certificatePath)) {
-            throw new \Exception("Certificado digital não encontrado: {$certificatePath}");
+            throw new \Exception("Certificado digital (Cash In/QR Codes) não encontrado: {$certificatePath}");
         }
 
         if (!$certificatePassword) {
-            throw new \Exception("Senha do certificado não configurada");
+            throw new \Exception("Senha do certificado QR Codes não configurada");
         }
 
-        // Converter .PFX para PEM
-        $pemFiles = $this->convertPfxToPem();
+        // Converter .PFX para PEM (certificado Cash In)
+        $pemFiles = $this->convertPfxToPem($certificatePath, $certificatePassword);
 
         // A QR Codes API requer OAuth2, mas pode precisar de credenciais diferentes
         // Ou pode funcionar apenas com certificado digital
@@ -424,9 +433,8 @@ class TreealService
             }
         }
 
-        // Em ambiente sandbox, desabilitar verificação SSL (certificados auto-assinados)
-        // Em produção, manter verificação SSL ativa
-        $verifySSL = $this->config->environment !== 'sandbox';
+        // Em sandbox SSL desligado; em produção usa config (TREEAL_VERIFY_SSL)
+        $verifySSL = $this->config->environment === 'sandbox' ? false : (bool) config('treeal.verify_ssl', true);
 
         $headers = [
             'Content-Type' => 'application/json',
@@ -467,17 +475,17 @@ class TreealService
             return $cachedToken;
         }
 
-        $certificatePath = $this->config->getCertificateFullPath();
-        $certificatePassword = $this->certificatePassword;
+        $certificatePath = $this->config->getAccountsCertificateFullPath();
+        $certificatePassword = $this->accountsCertificatePassword;
         $clientId = $this->accountsClientId;
         $clientSecret = $this->accountsClientSecret;
 
         if (!$certificatePath || !file_exists($certificatePath)) {
-            throw new \Exception("Certificado digital não encontrado: {$certificatePath}");
+            throw new \Exception("Certificado digital (Cash Out/Accounts) não encontrado: {$certificatePath}");
         }
 
         if (!$certificatePassword) {
-            throw new \Exception("Senha do certificado não configurada");
+            throw new \Exception("Senha do certificado Accounts não configurada");
         }
 
         if (!$clientId || !$clientSecret) {
@@ -489,15 +497,14 @@ class TreealService
                 'accounts_api_url' => $this->config->accounts_api_url,
             ]);
 
-            // Converter .PFX para PEM para compatibilidade com Guzzle
-            $pemFiles = $this->convertPfxToPem();
+            // Converter .PFX para PEM (certificado Cash Out)
+            $pemFiles = $this->convertPfxToPem($certificatePath, $certificatePassword);
 
-            // Em ambiente sandbox, desabilitar verificação SSL (certificados auto-assinados)
-            // Em produção, manter verificação SSL ativa
-            $verifySSL = $this->config->environment !== 'sandbox';
+            // Em sandbox SSL desligado; em produção usa config (TREEAL_VERIFY_SSL)
+            $verifySSL = $this->config->environment === 'sandbox' ? false : (bool) config('treeal.verify_ssl', true);
 
             $response = Http::withOptions([
-                'verify' => $verifySSL, // Desabilitar verificação SSL em sandbox
+                'verify' => $verifySSL,
                 'cert' => $pemFiles['cert'],
                 'ssl_key' => [$pemFiles['key'], $certificatePassword],
             ])->asForm()->post($this->config->accounts_api_url . '/oauth/token', [
@@ -553,19 +560,18 @@ class TreealService
      */
     private function getAccountsHttpClient()
     {
-        $certificatePath = $this->config->getCertificateFullPath();
-        $certificatePassword = $this->certificatePassword;
+        $certificatePath = $this->config->getAccountsCertificateFullPath();
+        $certificatePassword = $this->accountsCertificatePassword;
         $accessToken = $this->getAccessToken();
 
-        // Converter .PFX para PEM para compatibilidade com Guzzle
-        $pemFiles = $this->convertPfxToPem();
+        // Converter .PFX para PEM (certificado Cash Out)
+        $pemFiles = $this->convertPfxToPem($certificatePath, $certificatePassword);
 
-        // Em ambiente sandbox, desabilitar verificação SSL (certificados auto-assinados)
-        // Em produção, manter verificação SSL ativa
-        $verifySSL = $this->config->environment !== 'sandbox';
+        // Em sandbox SSL desligado; em produção usa config (TREEAL_VERIFY_SSL)
+        $verifySSL = $this->config->environment === 'sandbox' ? false : (bool) config('treeal.verify_ssl', true);
 
         return Http::withOptions([
-            'verify' => $verifySSL, // Desabilitar verificação SSL em sandbox
+            'verify' => $verifySSL,
             'cert' => $pemFiles['cert'],
             'ssl_key' => [$pemFiles['key'], $certificatePassword],
         ])->withHeaders([

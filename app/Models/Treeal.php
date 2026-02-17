@@ -33,14 +33,17 @@ class Treeal extends Model
 
     /**
      * Verifica se está configurado
-     * Agora lê apenas do .env (colunas removidas do banco)
+     * Exige certificado(s): ou o único (sandbox) ou ambos Cash In + Cash Out (produção).
      */
     public function isConfigured(): bool
     {
-        $certPath = config('treeal.certificate_path');
-        $certPassword = config('treeal.certificate_password');
-        
-        return !empty($certPath) && !empty($certPassword);
+        $singlePath = config('treeal.certificate_path');
+        $singlePass = config('treeal.certificate_password');
+        $qrcodesPath = config('treeal.qrcodes_certificate_path') ?: $singlePath;
+        $qrcodesPass = config('treeal.qrcodes_certificate_password') ?: $singlePass;
+        $accountsPath = config('treeal.accounts_certificate_path') ?: $singlePath;
+        $accountsPass = config('treeal.accounts_certificate_password') ?: $singlePass;
+        return (!empty($qrcodesPath) && !empty($qrcodesPass)) && (!empty($accountsPath) && !empty($accountsPass));
     }
 
     /**
@@ -52,24 +55,35 @@ class Treeal extends Model
     }
 
     /**
-     * Retorna o caminho completo do certificado
-     * 
-     * Agora lê apenas do .env (coluna removida do banco)
+     * Retorna o caminho completo do certificado (fallback único)
      */
     public function getCertificateFullPath(): ?string
     {
-        $certPath = config('treeal.certificate_path');
-        
+        return $this->resolveCertificatePath(config('treeal.certificate_path'));
+    }
+
+    /** Certificado para QR Codes API (Cash In) – pasta QRCODES-MTLS. */
+    public function getQrcodesCertificateFullPath(): ?string
+    {
+        $path = config('treeal.qrcodes_certificate_path') ?: config('treeal.certificate_path');
+        return $this->resolveCertificatePath($path);
+    }
+
+    /** Certificado para Accounts API (Cash Out) – pasta ACCOUNTS. */
+    public function getAccountsCertificateFullPath(): ?string
+    {
+        $path = config('treeal.accounts_certificate_path') ?: config('treeal.certificate_path');
+        return $this->resolveCertificatePath($path);
+    }
+
+    private function resolveCertificatePath(?string $certPath): ?string
+    {
         if (!$certPath) {
             return null;
         }
-
-        // Se já é um caminho absoluto, retornar direto
         if (str_starts_with($certPath, '/')) {
             return $certPath;
         }
-
-        // Caso contrário, assumir que está em storage/app/certificates
         return storage_path('app/certificates/' . $certPath);
     }
 }
