@@ -486,6 +486,10 @@ class AuthController extends Controller
             
             $affiliateLink = config('app.affiliado_url') . '/cadastro?ref=' . $affiliateCode;
 
+            $setting = AppSettingsHelper::getSettings();
+            $taxaFixaDeposito = $setting ? (float) ($setting->taxa_fixa_padrao ?? 1.00) : 1.00;
+            $taxaFixaPix = $setting ? (float) ($setting->taxa_fixa_pix ?? 1.00) : 1.00;
+
             // Criando usuário
             $user = User::create([
                 'username' => $request->username,
@@ -511,6 +515,8 @@ class AuthController extends Controller
                 'selfie_rg' => $selfieRg,
                 'affiliate_code' => $affiliateCode,
                 'affiliate_link' => $affiliateLink,
+                'taxa_fixa_deposito' => $taxaFixaDeposito,
+                'taxa_fixa_pix' => $taxaFixaPix,
             ]);
             
             Log::info('[REGISTRO] Código de afiliado gerado automaticamente', [

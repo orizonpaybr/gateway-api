@@ -20,7 +20,7 @@ return new class extends Migration
             $table->boolean('manutencao')->default(false);
             $table->decimal('taxa_cash_in_padrao', 10, 2)->default(4.00);
             $table->decimal('taxa_cash_out_padrao', 10, 2)->default(4.00);
-            $table->decimal('taxa_fixa_padrao', 10, 2)->default(5.00);
+            $table->decimal('taxa_fixa_padrao', 10, 2)->default(1.00);
             $table->string('sms_url_cadastro_pendente')->nullable();
             $table->string('sms_url_cadastro_ativo')->nullable();
             $table->string('sms_url_notificacao_user')->nullable();
