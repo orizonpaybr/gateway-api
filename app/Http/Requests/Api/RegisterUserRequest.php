@@ -35,9 +35,9 @@ class RegisterUserRequest extends FormRequest
                 'min:8',
                 'regex:/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&+#^~`|\\/:";\'<>,.=\-_\[\]{}()])[A-Za-z\d@$!%*?&+#^~`|\\/:";\'<>,.=\-_\[\]{}()]+$/',
             ],
-            'documentoFrente' => 'nullable|file|mimes:jpeg,jpg,png,pdf|max:5120',
-            'documentoVerso' => 'nullable|file|mimes:jpeg,jpg,png,pdf|max:5120',
-            'selfieDocumento' => 'nullable|file|mimes:jpeg,jpg,png,pdf|max:5120',
+            'documentoFrente' => 'nullable|file|mimes:jpeg,jpg,png|max:5120',
+            'documentoVerso' => 'nullable|file|mimes:jpeg,jpg,png|max:5120',
+            'selfieDocumento' => 'nullable|file|mimes:jpeg,jpg,png|max:5120',
             'ref' => 'nullable|string|max:50', // Código de referência de afiliado
         ];
     }
@@ -60,12 +60,12 @@ class RegisterUserRequest extends FormRequest
             'gender.required' => 'O gênero é obrigatório.',
             'gender.in' => 'Gênero inválido. Selecione masculino ou feminino.',
             'password.regex' => 'A senha deve conter pelo menos uma letra minúscula, uma letra maiúscula, um número e um caractere especial.',
-            'documentoFrente.mimes' => 'O documento deve ser uma imagem (JPEG, JPG, PNG) ou PDF.',
-            'documentoFrente.max' => 'O documento não pode exceder 5MB.',
-            'documentoVerso.mimes' => 'O documento deve ser uma imagem (JPEG, JPG, PNG) ou PDF.',
-            'documentoVerso.max' => 'O documento não pode exceder 5MB.',
-            'selfieDocumento.mimes' => 'A selfie deve ser uma imagem (JPEG, JPG, PNG) ou PDF.',
-            'selfieDocumento.max' => 'A selfie não pode exceder 5MB.',
+            'documentoFrente.mimes' => 'Envie apenas uma foto (JPEG, JPG ou PNG). Documentos em PDF não são aceitos.',
+            'documentoFrente.max' => 'A foto não pode exceder 5MB.',
+            'documentoVerso.mimes' => 'Envie apenas uma foto (JPEG, JPG ou PNG). Documentos em PDF não são aceitos.',
+            'documentoVerso.max' => 'A foto não pode exceder 5MB.',
+            'selfieDocumento.mimes' => 'Envie apenas uma foto (JPEG, JPG ou PNG). Documentos em PDF não são aceitos.',
+            'selfieDocumento.max' => 'A foto não pode exceder 5MB.',
         ];
     }
 
