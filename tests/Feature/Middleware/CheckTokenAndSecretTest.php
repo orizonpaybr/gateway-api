@@ -182,18 +182,19 @@ class CheckTokenAndSecretTest extends TestCase
     }
 
     /** @test */
-    public function deve_permitir_usuario_pendente_acessar_apis_externas(): void
+    public function deve_bloquear_usuario_pendente(): void
     {
-        $this->user->update(['status' => 2]); // Pendente
+        $this->user->update(['status' => 2]); // Pendente - aguardando aprovação
 
         $response = $this->postJson('/test-middleware', [
             'token' => 'valid_middleware_token',
             'secret' => 'valid_middleware_secret',
         ]);
 
-        $response->assertStatus(200)
+        $response->assertStatus(403)
             ->assertJson([
-                'success' => true,
+                'status' => 'error',
+                'message' => 'Sua conta está aguardando aprovação. Você poderá acessar o dashboard após aprovação pelo administrador.',
             ]);
     }
 
