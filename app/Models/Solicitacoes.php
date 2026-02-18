@@ -43,7 +43,8 @@ class Solicitacoes extends Model
         "expire_at",
         "billet_download",
         "banking_billet",
-        "days_availability"
+        "days_availability",
+        "end_to_end"
     ];
 
     public function user()
