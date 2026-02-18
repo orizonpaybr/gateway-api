@@ -70,18 +70,30 @@ class WebhookService
                 'error'          => null,
             ]);
         } else {
-            // Criar registro (firstOrCreate protege contra race condition)
-            $webhookLog = WebhookLog::firstOrCreate(
-                [
+            try {
+                // Criar registro (firstOrCreate protege contra race condition)
+                $webhookLog = WebhookLog::firstOrCreate(
+                    [
+                        'idempotency_key' => $idempotencyKey,
+                        'adquirente'      => $adquirente,
+                    ],
+                    [
+                        'transaction_id' => $transactionId,
+                        'status'         => 'QUEUED',
+                        'payload'        => $request->all(),
+                    ]
+                );
+            } catch (\Throwable $e) {
+                Log::error('[WebhookService] Falha ao criar WebhookLog (firstOrCreate)', [
                     'idempotency_key' => $idempotencyKey,
                     'adquirente'      => $adquirente,
-                ],
-                [
-                    'transaction_id' => $transactionId,
-                    'status'         => 'QUEUED',
-                    'payload'        => $request->all(),
-                ]
-            );
+                    'transaction_id'  => $transactionId,
+                    'error'           => $e->getMessage(),
+                    'trace'           => $e->getTraceAsString(),
+                ]);
+
+                return response()->json(['status' => 'success', 'message' => 'Webhook recebido'], 200);
+            }
 
             // Race condition: outro processo criou antes
             if (!$webhookLog->wasRecentlyCreated) {
