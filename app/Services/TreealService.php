@@ -718,6 +718,117 @@ class TreealService
     }
 
     /**
+     * Registra (ou atualiza) a URL de webhook para a chave PIX configurada.
+     *
+     * BACEN PIX API: PUT /webhook/{chave}
+     * Deve ser chamado UMA VEZ por chave PIX (ou ao trocar a URL).
+     * Sem este registro a Treeal NÃO envia notificações de pagamento.
+     *
+     * @param string $webhookUrl URL pública do endpoint que receberá os POSTs da Treeal
+     * @return array ['success' => bool, 'message' => string, 'data' => array]
+     */
+    public function registerWebhook(string $webhookUrl): array
+    {
+        if (!$this->isActive()) {
+            throw new \Exception("Treeal não está configurado ou ativo");
+        }
+
+        if (!$this->pixKeySecondary) {
+            throw new \Exception("Chave PIX secundária (TREEAL_PIX_KEY_SECONDARY) não configurada");
+        }
+
+        $chave = urlencode($this->pixKeySecondary);
+
+        try {
+            $response = $this->getQRCodesHttpClient()
+                ->put($this->config->qrcodes_api_url . '/webhook/' . $chave, [
+                    'webhookUrl' => $webhookUrl,
+                ]);
+
+            Log::info('TreealService::registerWebhook - Resposta da API', [
+                'status'      => $response->status(),
+                'body'        => $response->body(),
+                'webhook_url' => $webhookUrl,
+                'chave'       => $this->pixKeySecondary,
+            ]);
+
+            if ($response->successful() || $response->status() === 204) {
+                return [
+                    'success' => true,
+                    'message' => 'Webhook registrado com sucesso',
+                    'data'    => $response->json() ?? [],
+                ];
+            }
+
+            return [
+                'success' => false,
+                'message' => 'Erro ao registrar webhook: ' . $response->body(),
+                'data'    => $response->json() ?? [],
+            ];
+
+        } catch (\Exception $e) {
+            Log::error('TreealService::registerWebhook - Exceção', [
+                'error' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
+     * Consulta a URL de webhook atualmente registrada para a chave PIX.
+     *
+     * BACEN PIX API: GET /webhook/{chave}
+     *
+     * @return array ['success' => bool, 'webhook_url' => string|null, 'data' => array]
+     */
+    public function getWebhookInfo(): array
+    {
+        if (!$this->isActive()) {
+            throw new \Exception("Treeal não está configurado ou ativo");
+        }
+
+        if (!$this->pixKeySecondary) {
+            throw new \Exception("Chave PIX secundária (TREEAL_PIX_KEY_SECONDARY) não configurada");
+        }
+
+        $chave = urlencode($this->pixKeySecondary);
+
+        try {
+            $response = $this->getQRCodesHttpClient()
+                ->get($this->config->qrcodes_api_url . '/webhook/' . $chave);
+
+            if ($response->status() === 404) {
+                return [
+                    'success'     => false,
+                    'webhook_url' => null,
+                    'message'     => 'Nenhum webhook registrado para esta chave PIX',
+                    'data'        => [],
+                ];
+            }
+
+            if (!$response->successful()) {
+                throw new \Exception("Erro ao consultar webhook: " . $response->body());
+            }
+
+            $data        = $response->json() ?? [];
+            $webhookUrl  = $data['webhookUrl'] ?? null;
+
+            return [
+                'success'     => true,
+                'webhook_url' => $webhookUrl,
+                'message'     => 'Webhook encontrado',
+                'data'        => $data,
+            ];
+
+        } catch (\Exception $e) {
+            Log::error('TreealService::getWebhookInfo - Exceção', [
+                'error' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
      * Consulta status de uma cobrança (Cash In)
      * 
      * Endpoint: GET /cob/{txid}
