@@ -139,11 +139,21 @@ class PaymentProcessingService
             $username = $user->username;
             $userNumericId = $user->id;
 
-            Cache::forget("dashboard:stats:{$username}:" . now()->format('Y-m-d'));
+            // Saldo (user_balance_ inclui totalInflows / totalOutflows)
+            Cache::forget("user_balance_{$username}");
 
-            $this->forgetCacheByPattern("dashboard:summary:{$username}:");
-            $this->forgetCacheByPattern("dashboard:interactive:{$username}:");
+            // Dashboard stats — "Entradas do Mês", tickets, conversão, etc.
+            $this->forgetCacheByPattern("dash:stats:{$username}:");
 
+            // Dashboard summary e gráfico interativo
+            $this->forgetCacheByPattern("dash:summary:{$username}:");
+            $this->forgetCacheByPattern("dash:interactive:{$username}:");
+
+            // Extrato e lista de transações (chaves compostas com parâmetros)
+            $this->forgetCacheByPattern("user_transactions_{$username}_");
+            $this->forgetCacheByPattern("extrato:{$username}:");
+
+            // Gamificação / jornada
             Cache::forget("gamification_data_user_{$userNumericId}");
             $this->forgetCacheByPattern("sidebar_gamification_user_{$userNumericId}");
 
