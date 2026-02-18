@@ -5,9 +5,15 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * Model para rastreamento de webhooks processados
- * 
- * Garante idempotência através de idempotency_key
+ * Model para rastreamento de webhooks processados.
+ *
+ * Status possíveis:
+ *   - QUEUED     → webhook recebido, job na fila aguardando processamento
+ *   - PROCESSING → status legado (equivalente a QUEUED)
+ *   - PROCESSED  → job executado com sucesso, saldo creditado/debitado
+ *   - FAILED     → falha no processamento (permite reprocessamento)
+ *
+ * Garante idempotência através de idempotency_key.
  */
 class WebhookLog extends Model
 {

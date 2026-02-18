@@ -47,7 +47,7 @@ class WebhookService
         $existing = WebhookLog::findByKey($idempotencyKey, $adquirente);
 
         if ($existing) {
-            if (in_array($existing->status, ['PROCESSED', 'QUEUED'])) {
+            if (in_array($existing->status, ['PROCESSED', 'QUEUED', 'PROCESSING'])) {
                 Log::info("Webhook já aceito/processado, ignorando duplicata", [
                     'idempotency_key' => $idempotencyKey,
                     'adquirente'      => $adquirente,
@@ -97,7 +97,7 @@ class WebhookService
 
             // Race condition: outro processo criou antes
             if (!$webhookLog->wasRecentlyCreated) {
-                if (in_array($webhookLog->status, ['PROCESSED', 'QUEUED'])) {
+                if (in_array($webhookLog->status, ['PROCESSED', 'QUEUED', 'PROCESSING'])) {
                     return response()->json([
                         'status'  => 'success',
                         'message' => 'Webhook já aceito anteriormente',
