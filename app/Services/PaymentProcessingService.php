@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use App\Traits\SplitTrait;
@@ -117,8 +118,74 @@ class PaymentProcessingService
             
             // Tudo ou nada - se qualquer coisa falhar, rollback completo
         });
+
+        // Invalidar caches FORA da transaction (após commit bem-sucedido)
+        $this->invalidateCachesAfterPayment($cashin->user_id);
+    }
+
+    /**
+     * Invalida todos os caches relacionados ao usuário após um pagamento ser creditado.
+     * Chamado fora da DB::transaction para garantir que o commit já ocorreu.
+     */
+    private function invalidateCachesAfterPayment(string $userId): void
+    {
+        try {
+            // 1. Dashboard stats (Saldo disponível, Entradas do Mês, Saídas, Splits)
+            Cache::forget("dashboard:stats:{$userId}:" . now()->format('Y-m-d'));
+
+            // 2. Dashboard summary (Qtd transações, Ticket Médio, QR Codes Pagos/Gerados, etc.)
+            // As chaves usam timestamp — remove todas as variações por padrão de prefixo
+            $this->forgetCacheByPattern("dashboard:summary:{$userId}:");
+            $this->forgetCacheByPattern("dashboard:interactive:{$userId}:");
+
+            // 3. Gamificação / Jornada
+            Cache::forget("gamification_data_user_{$userId}");
+            $this->forgetCacheByPattern("sidebar_gamification_user_{$userId}");
+
+            // 4. QR Codes listing
+            $user = User::where('user_id', $userId)->first();
+            if ($user) {
+                Cache::forget("user_profile_{$user->username}");
+                app(\App\Services\QRCodeService::class)->clearUserCache($user->username);
+            }
+
+            Log::debug("Caches invalidados após pagamento", ['user_id' => $userId]);
+        } catch (\Throwable $e) {
+            // Nunca deixar falha de cache quebrar o fluxo de pagamento
+            Log::warning("Erro ao invalidar caches após pagamento", [
+                'user_id' => $userId,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
     
+    /**
+     * Remove chaves de cache pelo prefixo usando Redis (quando disponível) ou fallback por lista fixa de períodos.
+     */
+    private function forgetCacheByPattern(string $prefix): void
+    {
+        try {
+            if (config('cache.default') === 'redis') {
+                $redis = \Illuminate\Support\Facades\Redis::connection(
+                    config('cache.stores.redis.connection', 'cache')
+                );
+                $cachePrefix = config('cache.prefix', '');
+                $pattern = ($cachePrefix ? $cachePrefix . ':' : '') . $prefix . '*';
+                $keys = $redis->keys($pattern);
+                if (!empty($keys)) {
+                    $redis->del($keys);
+                }
+            } else {
+                // Fallback para drivers sem suporte a padrão: limpar combinações conhecidas de período
+                foreach (['hoje', 'ontem', '7dias', '30dias'] as $periodo) {
+                    Cache::forget($prefix . $periodo);
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::debug("forgetCacheByPattern falhou silenciosamente", ['prefix' => $prefix, 'error' => $e->getMessage()]);
+        }
+    }
+
     /**
      * Processa saque de forma atômica
      */

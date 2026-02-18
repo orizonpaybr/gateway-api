@@ -201,28 +201,40 @@ class QRCodeService
     private function mapStatus(?string $status): string
     {
         $statusMap = [
-            'PAID_OUT' => 'ativo',
-            'COMPLETED' => 'ativo',
-            'PENDING' => 'ativo',
-            'PROCESSING' => 'ativo',
-            'FAILED' => 'inativo',
-            'CANCELLED' => 'inativo',
-            'EXPIRED' => 'expirado',
+            'PAID_OUT'           => 'pago',
+            'COMPLETED'          => 'pago',
+            'PENDING'            => 'ativo',
+            'WAITING_FOR_APPROVAL' => 'ativo',
+            'PROCESSING'         => 'ativo',
+            'FAILED'             => 'inativo',
+            'CANCELLED'          => 'inativo',
+            'EXPIRED'            => 'expirado',
         ];
 
         return $statusMap[$status] ?? 'ativo';
     }
 
     /**
-     * Limpar cache do usuário
+     * Limpar cache do usuário (compatível com Redis e file/database driver)
      */
     public function clearUserCache(string $username): void
     {
         try {
-            $store = Cache::getStore();
-            
-            if (method_exists($store, 'tags')) {
-                Cache::tags(['qrcodes', 'dynamic', $username])->flush();
+            if (config('cache.default') === 'redis') {
+                $redis = \Illuminate\Support\Facades\Redis::connection(
+                    config('cache.stores.redis.connection', 'cache')
+                );
+                $cachePrefix = config('cache.prefix', '');
+                $pattern = ($cachePrefix ? $cachePrefix . ':' : '') . "qrcodes:dynamic:{$username}:*";
+                $keys = $redis->keys($pattern);
+                if (!empty($keys)) {
+                    $redis->del($keys);
+                }
+            } else {
+                // Fallback: limpar combinações de página 1 com os filtros mais comuns
+                foreach (['all', null] as $status) {
+                    Cache::forget(sprintf('qrcodes:dynamic:%s:1:20:%s:null:null:%s', $username, $status ?: 'all', md5('')));
+                }
             }
         } catch (\Exception $e) {
             \Illuminate\Support\Facades\Log::warning('Erro ao limpar cache de QR codes', [
