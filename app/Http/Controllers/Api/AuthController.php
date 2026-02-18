@@ -79,16 +79,20 @@ class AuthController extends Controller
 
             // Verificar se usuário pode fazer login
             if (!UserStatusHelper::canLogin($user)) {
-                Log::warning('Tentativa de login com conta inativa/banida', [
+                $message = $user->status == UserStatus::PENDING
+                    ? 'Sua conta está aguardando aprovação. Você poderá acessar o dashboard após aprovação pelo administrador.'
+                    : 'Sua conta foi desativada ou bloqueada. Entre em contato com o suporte.';
+
+                Log::warning('Tentativa de login com conta não permitida', [
                     'username' => $username,
                     'status' => $user->status,
                     'banido' => $user->banido,
                     'ip' => $request->ip()
                 ]);
-                
+
                 return response()->json([
                     'success' => false,
-                    'message' => 'Sua conta foi desativada ou bloqueada. Entre em contato com o suporte.'
+                    'message' => $message
                 ], 403);
             }
 
@@ -226,16 +230,18 @@ class AuthController extends Controller
 
             // Verificar se usuário pode fazer login
             if (!UserStatusHelper::canLogin($user)) {
-                Log::warning('Tentativa de login 2FA com conta inativa/banida', [
+                $message = $user->status == UserStatus::PENDING
+                    ? 'Sua conta está aguardando aprovação. Você poderá acessar o dashboard após aprovação pelo administrador.'
+                    : 'Sua conta foi desativada ou bloqueada. Entre em contato com o suporte.';
+                Log::warning('Tentativa de login 2FA com conta não permitida', [
                     'username' => $user->username,
                     'status' => $user->status,
                     'banido' => $user->banido,
                     'ip' => $request->ip()
                 ]);
-                
                 return response()->json([
                     'success' => false,
-                    'message' => 'Sua conta foi desativada ou bloqueada. Entre em contato com o suporte.'
+                    'message' => $message
                 ], 403);
             }
 
@@ -324,16 +330,18 @@ class AuthController extends Controller
 
             // Verificar se usuário pode fazer login
             if (!UserStatusHelper::canLogin($user)) {
-                Log::warning('Tentativa de verificar token com conta inativa/banida', [
+                $message = $user->status == UserStatus::PENDING
+                    ? 'Sua conta está aguardando aprovação. Você poderá acessar o dashboard após aprovação pelo administrador.'
+                    : 'Sua conta foi desativada ou bloqueada. Entre em contato com o suporte.';
+                Log::warning('Tentativa de verificar token com conta não permitida', [
                     'username' => $user->username,
                     'status' => $user->status,
                     'banido' => $user->banido,
                     'ip' => $request->ip()
                 ]);
-                
                 return response()->json([
                     'success' => false,
-                    'message' => 'Sua conta foi desativada ou bloqueada. Entre em contato com o suporte.'
+                    'message' => $message
                 ], 403);
             }
 
@@ -593,17 +601,10 @@ class AuthController extends Controller
                 'status' => 'pendente_aprovacao'
             ]);
 
-            // Buscar as chaves criadas
-            $userKeys = UsersKey::where('user_id', $user->user_id)->first();
-
-            // Gerar token JWT de autenticação (sem dados sensíveis!)
-            $authToken = $this->jwtService->generateToken($user->username, [
-                'permission' => $user->permission,
-            ]);
-
+            // Não devolver token/credenciais: usuário só poderá logar após aprovação
             return response()->json([
                 'success' => true,
-                'message' => 'Cadastro realizado com sucesso! Sua conta está pendente de aprovação pelo administrador.',
+                'message' => 'Cadastro realizado. Sua conta está aguardando aprovação. Você poderá fazer login após a aprovação pelo administrador.',
                 'data' => [
                     'user' => [
                         'id' => $user->username,
@@ -614,9 +615,6 @@ class AuthController extends Controller
                         'status' => $user->status,
                         'status_text' => 'Pendente de Aprovação'
                     ],
-                    'token' => $authToken,
-                    'api_token' => $userKeys->token,
-                    'api_secret' => $userKeys->secret,
                     'pending_approval' => true
                 ]
             ], 201);

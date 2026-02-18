@@ -472,21 +472,6 @@ class UserController extends Controller
                 ], 401)->header('Access-Control-Allow-Origin', '*');
             }
 
-            // Verificar se usuário está aprovado (status = ACTIVE e não banido)
-            if (!\App\Helpers\UserStatusHelper::isApproved($user)) {
-                Log::warning('Tentativa de gerar QR Code PIX com conta não aprovada', [
-                    'username' => $user->username,
-                    'status' => $user->status,
-                    'banido' => $user->banido ?? false,
-                    'ip' => $request->ip()
-                ]);
-                
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Sua conta precisa estar aprovada para gerar QR Codes PIX. Entre em contato com o suporte.'
-                ], 403)->header('Access-Control-Allow-Origin', '*');
-            }
-
             $validator = Validator::make($request->all(), [
                 'amount' => 'required|numeric|min:0.01',
                 'description' => 'nullable|string|max:255'
@@ -1991,7 +1976,7 @@ class UserController extends Controller
                     'permission' => $user->permission ?? null,
                     'phone' => $user->telefone ?? '',
                     'cnpj' => $user->cpf_cnpj ?? '',
-                    'status' => $user->status == UserStatus::ACTIVE ? 'active' : ($user->status == UserStatus::PENDING ? 'pending' : 'inactive'),
+                    'status' => $user->status == UserStatus::ACTIVE ? 'active' : 'inactive',
                     'status_numeric' => $user->status,
                     'balance' => $user->saldo ?? 0,
                     'agency' => $user->agency ?? '',
