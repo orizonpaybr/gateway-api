@@ -206,14 +206,17 @@ class VerifyJWTTest extends TestCase
     }
 
     /** @test */
-    public function deve_permitir_usuario_pendente_acessar_rotas_internas(): void
+    public function deve_bloquear_usuario_pendente(): void
     {
-        // Usuários pendentes (status = 2) podem acessar o dashboard
-        $this->user->update(['status' => 2]);
+        $this->user->update(['status' => 2]); // Pendente - aguardando aprovação
 
         $response = $this->withHeader('Authorization', 'Bearer ' . $this->validToken)
             ->getJson('/test-jwt');
 
-        $response->assertStatus(200);
+        $response->assertStatus(403)
+            ->assertJson([
+                'success' => false,
+                'message' => 'Sua conta está aguardando aprovação. Você poderá acessar o dashboard após aprovação pelo administrador.',
+            ]);
     }
 }
