@@ -298,6 +298,8 @@ class PaymentProcessingService
                 'balance_after' => $balanceAfter,
             ]);
         });
+
+        $this->invalidateCachesAfterPayment($cashout->user_id);
     }
     
     /**
