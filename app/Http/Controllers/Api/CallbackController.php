@@ -13,377 +13,106 @@ use Carbon\Carbon;
 use App\Helpers\Helper;
 use App\Models\App;
 use App\Models\CheckoutOrders;
-use App\Models\Transactions;
-use App\Traits\SplitTrait;
 use App\Helpers\SecureLog;
-use App\Services\TreealService;
+use App\Jobs\ProcessTreealCashInJob;
+use App\Jobs\ProcessTreealCashOutJob;
 use App\Services\PaymentProcessingService;
 
 class CallbackController extends Controller
 {
     /**
-     * Webhook da Pagar.me com idempotência
-     * 
-     * REFATORADO: Usa WebhookService para garantir idempotência
-     */
-    public function webhookPagarme(Request $request)
-    {
-        $webhookService = app(\App\Services\WebhookService::class);
-        
-        return $webhookService->processWebhook($request, 'pagarme', function () use ($request) {
-            $data = $request->all();
-            SecureLog::webhook('PAGARME', 'WEBHOOK', $data);
-
-            $type = $data['type'] ?? null;
-            $transaction_id = $data['data']['id'] ?? null;
-            
-            // Obter status da cobrança/transação
-            $chargeStatus = $data['data']['charges'][0]['status'] ?? null;
-            $transactionStatus = $data['data']['charges'][0]['last_transaction']['status'] ?? null;
-            $paymentMethod = $data['data']['charges'][0]['payment_method'] ?? 'pix';
-
-            Log::debug("[PAGAR.ME] WEBHOOK RECEBIDO", [
-                'type' => $type,
-                'transaction_id' => $transaction_id,
-                'charge_status' => $chargeStatus,
-                'transaction_status' => $transactionStatus,
-                'payment_method' => $paymentMethod
-            ]);
-
-            // Determinar tipo de transação (PIX ou CARTÃO)
-            $isCardPayment = $paymentMethod === 'credit_card';
-            $typeTransaction = $isCardPayment ? 'CARD' : 'PIX';
-
-            // Processar eventos de pagamento
-            switch ($type) {
-                case 'order.paid':
-                    return $this->handlePagarmeOrderPaid($transaction_id, $typeTransaction, $data);
-                    
-                case 'order.payment_failed':
-                    return $this->handlePagarmePaymentFailed($transaction_id, $typeTransaction, $data);
-                    
-                case 'charge.refunded':
-                case 'charge.partial_refunded':
-                    return $this->handlePagarmeRefund($transaction_id, $data);
-                    
-                case 'charge.chargedback':
-                    return $this->handlePagarmeChargeback($transaction_id, $data);
-                    
-                default:
-                    Log::debug("[PAGAR.ME] Evento não tratado: {$type}");
-                    return response()->json(['status' => true, 'message' => 'Evento recebido']);
-            }
-        });
-    }
-
-    /**
-     * Processa pagamento aprovado da Pagar.me (PIX ou Cartão)
-     * 
-     * REFATORADO: Usa PaymentProcessingService para operação atômica e thread-safe
-     */
-    private function handlePagarmeOrderPaid($transaction_id, $typeTransaction, $data)
-    {
-        $cashin = Solicitacoes::where('idTransaction', $transaction_id)->first();
-        
-        if (!$cashin) {
-            Log::warning("[PAGAR.ME] Solicitação não encontrada: {$transaction_id}");
-            return response()->json(['status' => false, 'message' => 'Transação não encontrada']);
-        }
-
-        Log::debug("[PAGAR.ME] Processando pagamento aprovado", [
-            'transaction_id' => $transaction_id,
-            'type' => $typeTransaction,
-            'amount' => $cashin->amount
-        ]);
-
-        try {
-            // Atualizar end_to_end antes de processar
-            if (isset($data['data']['charges'][0]['last_transaction']['acquirer_nsu'])) {
-                $cashin->update([
-                    'end_to_end' => $data['data']['charges'][0]['last_transaction']['acquirer_nsu']
-                ]);
-            }
-
-            // Processar pagamento de forma atômica (com locks e transação)
-            $paymentService = app(\App\Services\PaymentProcessingService::class);
-            $paymentService->processPaymentReceived($cashin);
-            
-            Log::info("[PAGAR.ME] Pagamento processado com sucesso", [
-                'transaction_id' => $transaction_id,
-            ]);
-            
-        } catch (\Exception $e) {
-            Log::error("[PAGAR.ME] Erro ao processar pagamento", [
-                'transaction_id' => $transaction_id,
-                'error' => $e->getMessage(),
-            ]);
-            
-            // Se já foi processado (idempotência), retornar sucesso
-            $cashin->refresh();
-            if ($cashin->status === 'PAID_OUT' || $cashin->status === 'COMPLETED') {
-                return response()->json(['status' => true, 'message' => 'Já processado']);
-            }
-            
-            throw $e;
-        }
-
-        // Buscar usuário atualizado para operações pós-processamento
-        $cashin->refresh();
-        $user = User::where('user_id', $cashin->user_id)->first();
-
-        // Atualizar pedido de checkout se existir
-        $order = CheckoutOrders::where('idTransaction', $transaction_id)->first();
-        if ($order) {
-            $order->update(['status' => 'pago']);
-            // Webhook do cliente será enviado em background (implementar depois)
-        }
-
-        return response()->json(['status' => true]);
-    }
-
-    /**
-     * Processa falha de pagamento da Pagar.me
-     */
-    private function handlePagarmePaymentFailed($transaction_id, $typeTransaction, $data)
-    {
-        $cashin = Solicitacoes::where('idTransaction', $transaction_id)->first();
-        
-        if (!$cashin) {
-            return response()->json(['status' => false, 'message' => 'Transação não encontrada']);
-        }
-
-        $refusalReason = $data['data']['charges'][0]['last_transaction']['gateway_response']['errors'][0]['message'] ?? 'Pagamento recusado';
-
-        Log::warning("[PAGAR.ME] Pagamento falhou", [
-            'transaction_id' => $transaction_id,
-            'reason' => $refusalReason
-        ]);
-
-        $cashin->update([
-            'status' => 'FAILED',
-            'updated_at' => Carbon::now(),
-            'descricao' => $refusalReason,
-        ]);
-
-        // Enviar callback de falha
-        if ($cashin->callback && $cashin->callback != 'web') {
-            Http::withHeaders([
-                'Content-Type' => 'application/json',
-                'Accept' => 'application/json'
-            ])->post($cashin->callback, [
-                "status" => "failed",
-                "idTransaction" => $cashin->idTransaction,
-                "typeTransaction" => $typeTransaction,
-                "reason" => $refusalReason,
-            ]);
-        }
-
-        return response()->json(['status' => true]);
-    }
-
-    /**
-     * Processa estorno da Pagar.me
-     */
-    private function handlePagarmeRefund($transaction_id, $data)
-    {
-        $cashin = Solicitacoes::where('idTransaction', $transaction_id)->first();
-        
-        if (!$cashin) {
-            return response()->json(['status' => false, 'message' => 'Transação não encontrada']);
-        }
-
-        $refundAmount = ($data['data']['charges'][0]['last_transaction']['amount'] ?? 0) / 100;
-        $isPartial = $refundAmount < $cashin->amount;
-
-        Log::info("[PAGAR.ME] Estorno processado", [
-            'transaction_id' => $transaction_id,
-            'refund_amount' => $refundAmount,
-            'is_partial' => $isPartial
-        ]);
-
-        // Reverter saldo do usuário
-        $user = User::where('user_id', $cashin->user_id)->first();
-        if ($user && $cashin->status === 'PAID_OUT') {
-            $amountToDeduct = $isPartial ? $refundAmount : $cashin->deposito_liquido;
-            Helper::decrementAmount($user, $amountToDeduct, 'saldo');
-            Helper::calculaSaldoLiquido($user->user_id);
-        }
-
-        $cashin->update([
-            'status' => $isPartial ? 'PARTIAL_REFUNDED' : 'REFUNDED',
-            'updated_at' => Carbon::now(),
-        ]);
-
-        // Enviar callback de estorno
-        if ($cashin->callback && $cashin->callback != 'web') {
-            Http::withHeaders([
-                'Content-Type' => 'application/json',
-                'Accept' => 'application/json'
-            ])->post($cashin->callback, [
-                "status" => "refunded",
-                "idTransaction" => $cashin->idTransaction,
-                "refund_amount" => $refundAmount,
-                "is_partial" => $isPartial,
-            ]);
-        }
-
-        return response()->json(['status' => true]);
-    }
-
-    /**
-     * Processa chargeback da Pagar.me
-     */
-    private function handlePagarmeChargeback($transaction_id, $data)
-    {
-        $cashin = Solicitacoes::where('idTransaction', $transaction_id)->first();
-        
-        if (!$cashin) {
-            return response()->json(['status' => false, 'message' => 'Transação não encontrada']);
-        }
-
-        Log::warning("[PAGAR.ME] CHARGEBACK recebido", [
-            'transaction_id' => $transaction_id,
-            'amount' => $cashin->amount
-        ]);
-
-        // Reverter saldo do usuário
-        $user = User::where('user_id', $cashin->user_id)->first();
-        if ($user && $cashin->status === 'PAID_OUT') {
-            Helper::decrementAmount($user, $cashin->deposito_liquido, 'saldo');
-            Helper::calculaSaldoLiquido($user->user_id);
-        }
-
-        $cashin->update([
-            'status' => 'CHARGEBACK',
-            'updated_at' => Carbon::now(),
-        ]);
-
-        // Enviar callback de chargeback
-        if ($cashin->callback && $cashin->callback != 'web') {
-            Http::withHeaders([
-                'Content-Type' => 'application/json',
-                'Accept' => 'application/json'
-            ])->post($cashin->callback, [
-                "status" => "chargeback",
-                "idTransaction" => $cashin->idTransaction,
-                "amount" => $cashin->amount,
-            ]);
-        }
-
-        return response()->json(['status' => true]);
-    }
-
-    /**
-     * Webhook da Treeal/ONZ para depósitos PIX (Cash In)
-     * 
-     * Implementação limpa seguindo padrão PIX do Banco Central
-     * 
+     * Webhook da Treeal/ONZ para depósitos PIX (Cash In) e saques (Cash Out).
+     *
+     * Fluxo assíncrono:
+     * 1. WebhookService cria WebhookLog (QUEUED) — ~2 queries.
+     * 2. Job é despachado para a fila.
+     * 3. Responde 200 à Treeal em ~50–100 ms.
+     * 4. Job processa pagamento/saque em background e marca PROCESSED/FAILED.
+     *
      * @param Request $request
      * @return \Illuminate\Http\JsonResponse
      */
     public function webhookTreeal(Request $request)
     {
+        $start          = microtime(true);
         $webhookService = app(\App\Services\WebhookService::class);
-        
-        return $webhookService->processWebhook($request, 'treeal', function () use ($request) {
+
+        return $webhookService->processWebhook($request, 'treeal', function ($webhookLog) use ($request, $start) {
             $data = $request->all();
             SecureLog::webhook('TREEAL', 'WEBHOOK', $data);
 
-            Log::info('[TREEAL] Webhook recebido', [
-                'data' => $data
-            ]);
-
-            // Treeal pode enviar webhooks em diferentes formatos
-            // Verificar se é evento de cobrança (Cash In) ou pagamento (Cash Out)
-            $txid = $data['txid'] ?? $data['txId'] ?? $data['idTransaction'] ?? null;
-            $status = $data['status'] ?? $data['paymentStatus'] ?? null;
+            $txid       = $data['txid'] ?? $data['txId'] ?? $data['idTransaction'] ?? null;
+            $status     = $data['status'] ?? $data['paymentStatus'] ?? null;
             $endToEndId = $data['endToEndId'] ?? $data['end_to_end_id'] ?? null;
 
-            // Se for evento de cobrança (Cash In)
+            // ── Cash In (depósito) ────────────────────────────────────────────
             if (isset($data['txid']) || isset($data['txId'])) {
-                return $this->handleTreealCashInWebhook($txid, $status, $data);
+                return $this->handleTreealCashInWebhook($txid, $status, $data, $webhookLog, $start);
             }
 
-            // Se for evento de pagamento (Cash Out)
+            // ── Cash Out (saque) ──────────────────────────────────────────────
             if (isset($data['transactionId']) || isset($endToEndId)) {
-                return $this->handleTreealCashOutWebhook($txid ?? $data['transactionId'], $status, $data);
+                return $this->handleTreealCashOutWebhook(
+                    $txid ?? $data['transactionId'],
+                    $status,
+                    $data,
+                    $webhookLog,
+                    $start
+                );
             }
 
-            Log::warning('[TREEAL] Webhook com formato desconhecido', [
-                'data' => $data
-            ]);
+            Log::warning('[TREEAL] Webhook com formato desconhecido', ['data' => $data]);
 
             return response()->json(['status' => true, 'message' => 'Webhook recebido']);
         });
     }
 
     /**
-     * Processa webhook de depósito PIX (Cash In) da Treeal
+     * Processa webhook de depósito PIX (Cash In) da Treeal — modo assíncrono.
+     *
+     * Verifica se o pagamento é confirmado; se sim, despacha ProcessTreealCashInJob
+     * e retorna 200 imediatamente. O crédito ao saldo ocorre via job worker.
      */
-    private function handleTreealCashInWebhook($txid, $status, $data)
+    private function handleTreealCashInWebhook($txid, $status, $data, $webhookLog, float $start)
     {
         if (!$txid) {
             Log::warning('[TREEAL] Webhook Cash In sem txid', ['data' => $data]);
             return response()->json(['status' => false, 'message' => 'txid não encontrado'], 400);
         }
 
+        // Treeal pode enviar webhook sem campo "status" → considerar CONCLUIDA
+        $statusNormalized   = $status !== null && $status !== '' ? strtoupper((string) $status) : 'CONCLUIDA';
+        $isPaymentConfirmed = in_array($statusNormalized, ['CONCLUIDA', 'ATIVA', 'PAID', 'COMPLETED']);
+
+        if ($isPaymentConfirmed) {
+            // Enfileirar processamento assíncrono
+            ProcessTreealCashInJob::dispatch($txid, $webhookLog->id)->onQueue('webhooks');
+
+            $durationMs = round((microtime(true) - $start) * 1000, 2);
+            Log::info('[TREEAL] Cash In enfileirado', [
+                'txid'        => $txid,
+                'status'      => $status,
+                'duration_ms' => $durationMs,
+            ]);
+
+            return ['async' => true, 'response' => response()->json(['status' => true, 'message' => 'Webhook aceito'])];
+        }
+
+        // Pagamento ainda não confirmado → atualizar status apenas
+        $internalStatus = $this->mapTreealStatusToInternal($status);
         $cashin = Solicitacoes::where('idTransaction', $txid)
             ->orWhere('externalreference', $txid)
             ->first();
 
-        if (!$cashin) {
-            Log::warning('[TREEAL] Solicitação não encontrada', ['txid' => $txid]);
-            return response()->json(['status' => false, 'message' => 'Transação não encontrada'], 404);
+        if ($cashin && $cashin->status !== $internalStatus) {
+            $cashin->update(['status' => $internalStatus]);
         }
 
-        Log::info('[TREEAL] Processando webhook Cash In', [
-            'txid' => $txid,
-            'status' => $status,
-            'current_status' => $cashin->status
+        Log::info('[TREEAL] Cash In status intermediário', [
+            'txid'        => $txid,
+            'status'      => $status,
+            'duration_ms' => round((microtime(true) - $start) * 1000, 2),
         ]);
-
-        // Treeal pode enviar webhook de pagamento sem campo "status" (só txid, valor, endToEndId).
-        // Nesse caso considerar como pagamento confirmado (CONCLUIDA).
-        $statusNormalized = $status !== null && $status !== '' ? strtoupper((string) $status) : 'CONCLUIDA';
-        $isPaymentConfirmed = in_array($statusNormalized, ['CONCLUIDA', 'ATIVA', 'PAID', 'COMPLETED']);
-
-        // Mapear status da Treeal para status interno
-        $internalStatus = $this->mapTreealStatusToInternal($status);
-
-        // Se pagamento confirmado e ainda não foi processado
-        if ($isPaymentConfirmed && $cashin->status !== 'PAID_OUT') {
-            
-            // Atualizar end_to_end se disponível
-            if (isset($data['endToEndId'])) {
-                $cashin->update(['end_to_end' => $data['endToEndId']]);
-            }
-
-            // Processar pagamento de forma atômica (thread-safe)
-            try {
-                $paymentService = app(PaymentProcessingService::class);
-                $paymentService->processPaymentReceived($cashin);
-                
-                Log::info('[TREEAL] Pagamento processado com sucesso', [
-                    'txid' => $txid,
-                    'amount' => $cashin->amount
-                ]);
-            } catch (\Exception $e) {
-                Log::error('[TREEAL] Erro ao processar pagamento', [
-                    'txid' => $txid,
-                    'error' => $e->getMessage()
-                ]);
-                // Se já foi processado, continuar normalmente
-                $cashin->refresh();
-                if ($cashin->status !== 'PAID_OUT') {
-                    throw $e;
-                }
-            }
-        } else {
-            // Atualizar apenas o status se necessário
-            if ($cashin->status !== $internalStatus) {
-                $cashin->update(['status' => $internalStatus]);
-            }
-        }
 
         return response()->json(['status' => true, 'message' => 'Webhook processado']);
     }
@@ -399,14 +128,37 @@ class CallbackController extends Controller
      * - PARTIALLY_REFUNDED: Parcialmente estornada
      */
     /**
-     * Processa webhook de Cash Out (saque) da Treeal
-     * 
-     * CORRIGIDO: Agora processa o saldo corretamente quando:
-     * - Saque é confirmado (LIQUIDATED/COMPLETED) - debita saldo se ainda não foi debitado
-     * - Saque é cancelado (CANCELLED) - reverte saldo se já foi debitado
-     * - Saque é estornado (REFUNDED) - reverte saldo se já foi debitado
+     * Processa webhook de Cash Out (saque) da Treeal — modo assíncrono.
+     *
+     * Despacha ProcessTreealCashOutJob para a fila e responde 200 imediatamente.
+     * O processamento de saldo (débito, cancelamento, estorno) ocorre via job worker.
      */
-    private function handleTreealCashOutWebhook($transactionId, $status, $data)
+    private function handleTreealCashOutWebhook($transactionId, $status, $data, $webhookLog, float $start)
+    {
+        if (!$transactionId) {
+            Log::warning('[TREEAL] Webhook Cash Out sem transactionId', ['data' => $data]);
+            return response()->json(['status' => false, 'message' => 'transactionId não encontrado'], 400);
+        }
+
+        // Enfileirar processamento assíncrono
+        ProcessTreealCashOutJob::dispatch($transactionId, $status, $data, $webhookLog->id)->onQueue('webhooks');
+
+        $durationMs = round((microtime(true) - $start) * 1000, 2);
+        Log::info('[TREEAL] Cash Out enfileirado', [
+            'transaction_id' => $transactionId,
+            'status'         => $status,
+            'duration_ms'    => $durationMs,
+        ]);
+
+        return ['async' => true, 'response' => response()->json(['status' => true, 'message' => 'Webhook aceito'])];
+    }
+
+    /**
+     * Lógica completa de Cash Out — mantida para referência, agora executada via ProcessTreealCashOutJob.
+     *
+     * @deprecated Use ProcessTreealCashOutJob
+     */
+    private function handleTreealCashOutWebhookSync($transactionId, $status, $data)
     {
         if (!$transactionId) {
             Log::warning('[TREEAL] Webhook Cash Out sem transactionId', ['data' => $data]);

@@ -4,184 +4,182 @@ namespace App\Services;
 
 use App\Models\WebhookLog;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Service para processamento idempotente de webhooks
- * 
- * Garante que webhooks duplicados não sejam processados múltiplas vezes
+ * Service para processamento idempotente de webhooks.
+ *
+ * Fluxo assíncrono (padrão atual):
+ *   1. Cria WebhookLog com status QUEUED (~2 queries).
+ *   2. Chama o $processor($webhookLog) passando o log.
+ *   3. Se o processor retornar ['async' => true, 'response' => $resp]:
+ *      - Responde 200 imediatamente.
+ *      - O job é responsável por marcar PROCESSED/FAILED.
+ *   4. Se o processor retornar uma JsonResponse (processamento síncrono):
+ *      - Marca PROCESSED aqui mesmo.
+ *
+ * Idempotência:
+ *   - PROCESSED ou QUEUED → devolve 200 sem reprocessar.
+ *   - FAILED → permite reprocessar (a Treeal reenviou, tentamos de novo).
  */
 class WebhookService
 {
     /**
-     * Processa webhook de forma idempotente
-     * 
-     * @param Request $request Request do webhook
-     * @param string $adquirente Nome da adquirente (pixup, bspay, etc)
-     * @param callable $processor Função que processa o webhook
-     * @return \Illuminate\Http\JsonResponse
+     * Processa webhook de forma idempotente.
+     *
+     * O $processor recebe (WebhookLog $webhookLog) e deve retornar:
+     *   - array ['async' => true, 'response' => JsonResponse] para modo assíncrono.
+     *   - JsonResponse para modo síncrono (o log é marcado PROCESSED aqui).
+     *
+     * @param Request  $request
+     * @param string   $adquirente
+     * @param callable $processor  fn(WebhookLog): JsonResponse|array
      */
     public function processWebhook(
         Request $request,
         string $adquirente,
         callable $processor
     ) {
-        // Gerar idempotency key
         $idempotencyKey = $this->generateIdempotencyKey($request, $adquirente);
-        
-        // Verificar se já foi processado
+        $transactionId  = $this->extractTransactionId($request);
+
+        // Verificar se já foi aceito ou processado
         $existing = WebhookLog::findByKey($idempotencyKey, $adquirente);
-        
+
         if ($existing) {
-            if ($existing->status === 'PROCESSED') {
-                Log::info("Webhook já processado anteriormente", [
+            if (in_array($existing->status, ['PROCESSED', 'QUEUED'])) {
+                Log::info("Webhook já aceito/processado, ignorando duplicata", [
                     'idempotency_key' => $idempotencyKey,
-                    'adquirente' => $adquirente,
-                    'transaction_id' => $existing->transaction_id,
+                    'adquirente'      => $adquirente,
+                    'status'          => $existing->status,
+                    'transaction_id'  => $existing->transaction_id,
                 ]);
-                
+
                 return response()->json([
-                    'status' => 'success',
-                    'message' => 'Webhook já processado anteriormente'
+                    'status'  => 'success',
+                    'message' => 'Webhook já aceito anteriormente',
                 ], 200);
             }
-            
-            // Se está PROCESSING, pode ser requisição duplicada simultânea
-            // Aguardar um pouco e verificar novamente
-            if ($existing->status === 'PROCESSING') {
-                usleep(500000); // 0.5 segundos
-                $existing->refresh();
-                
-                if ($existing->status === 'PROCESSED') {
-                    return response()->json([
-                        'status' => 'success',
-                        'message' => 'Webhook processado por outra requisição simultânea'
-                    ], 200);
-                }
-            }
-            
-            // Se existe mas não está PROCESSED, usar o registro existente
+
+            // FAILED → reutilizar o registro e tentar novamente
             $webhookLog = $existing;
+            $webhookLog->update([
+                'transaction_id' => $transactionId ?? $webhookLog->transaction_id,
+                'payload'        => $request->all(),
+                'status'         => 'QUEUED',
+                'error'          => null,
+            ]);
         } else {
-            // Extrair transaction_id para logging
-            $transactionId = $this->extractTransactionId($request);
-            
-            // Criar registro ANTES de processar (usar firstOrCreate para evitar race condition)
+            // Criar registro (firstOrCreate protege contra race condition)
             $webhookLog = WebhookLog::firstOrCreate(
                 [
                     'idempotency_key' => $idempotencyKey,
-                    'adquirente' => $adquirente,
+                    'adquirente'      => $adquirente,
                 ],
                 [
                     'transaction_id' => $transactionId,
-                    'status' => 'PROCESSING',
-                    'payload' => $request->all(),
+                    'status'         => 'QUEUED',
+                    'payload'        => $request->all(),
                 ]
             );
-            
-            // Se já existia (race condition), verificar status
-            if ($webhookLog->status === 'PROCESSED') {
-                return response()->json([
-                    'status' => 'success',
-                    'message' => 'Webhook já processado anteriormente'
-                ], 200);
-            }
-            
-            // Atualizar payload e transaction_id se necessário
-            if ($webhookLog->wasRecentlyCreated === false) {
+
+            // Race condition: outro processo criou antes
+            if (!$webhookLog->wasRecentlyCreated) {
+                if (in_array($webhookLog->status, ['PROCESSED', 'QUEUED'])) {
+                    return response()->json([
+                        'status'  => 'success',
+                        'message' => 'Webhook já aceito anteriormente',
+                    ], 200);
+                }
+                // Atualizar para QUEUED caso esteja em estado desconhecido
                 $webhookLog->update([
                     'transaction_id' => $transactionId ?? $webhookLog->transaction_id,
-                    'payload' => $request->all(),
+                    'payload'        => $request->all(),
+                    'status'         => 'QUEUED',
                 ]);
             }
         }
-        
+
         try {
-            $result = DB::transaction(function () use ($processor, $webhookLog) {
-                // Processar webhook
-                $result = $processor();
-                
-                // Marcar como processado
-                $webhookLog->update(['status' => 'PROCESSED']);
-                
-                return $result;
-            });
-            
-            Log::info("Webhook processado com sucesso", [
+            $result = $processor($webhookLog);
+
+            // Modo assíncrono: o job vai marcar PROCESSED/FAILED
+            if (is_array($result) && !empty($result['async'])) {
+                Log::info("Webhook enfileirado para processamento assíncrono", [
+                    'idempotency_key' => $idempotencyKey,
+                    'adquirente'      => $adquirente,
+                    'transaction_id'  => $transactionId,
+                ]);
+
+                return $result['response'] ?? response()->json(['status' => 'success'], 200);
+            }
+
+            // Modo síncrono (fallback): marcar PROCESSED aqui
+            $webhookLog->update(['status' => 'PROCESSED']);
+
+            Log::info("Webhook processado de forma síncrona", [
                 'idempotency_key' => $idempotencyKey,
-                'adquirente' => $adquirente,
-                'transaction_id' => $transactionId,
+                'adquirente'      => $adquirente,
+                'transaction_id'  => $transactionId,
             ]);
-            
+
             return $result ?? response()->json(['status' => 'success'], 200);
-            
+
         } catch (\Throwable $e) {
             $webhookLog->update([
                 'status' => 'FAILED',
-                'error' => $e->getMessage(),
+                'error'  => $e->getMessage(),
             ]);
-            
+
             Log::error("Erro ao processar webhook", [
                 'idempotency_key' => $idempotencyKey,
-                'adquirente' => $adquirente,
-                'transaction_id' => $transactionId ?? null,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
+                'adquirente'      => $adquirente,
+                'transaction_id'  => $transactionId,
+                'error'           => $e->getMessage(),
+                'trace'           => $e->getTraceAsString(),
             ]);
-            
-            // Re-throw para que o controller possa tratar
+
             throw $e;
         }
     }
-    
+
     /**
      * Gera idempotency key única para o webhook
      */
     private function generateIdempotencyKey(Request $request, string $adquirente): string
     {
-        // Tentar obter do header primeiro (padrão)
-        $headerKey = $request->header('Idempotency-Key') 
+        $headerKey = $request->header('Idempotency-Key')
             ?? $request->header('X-Idempotency-Key');
-        
+
         if ($headerKey) {
             return md5($adquirente . ':' . $headerKey);
         }
-        
-        // Gerar baseado no payload + adquirente
-        $payload = $request->all();
+
         $transactionId = $this->extractTransactionId($request);
-        
-        // Usar transaction_id + adquirente + timestamp (se disponível)
-        $keyData = [
-            'adquirente' => $adquirente,
+
+        return md5(json_encode([
+            'adquirente'    => $adquirente,
             'transaction_id' => $transactionId,
-            'payload_hash' => md5(json_encode($payload)),
-        ];
-        
-        return md5(json_encode($keyData));
+            'payload_hash'  => md5(json_encode($request->all())),
+        ]));
     }
-    
+
     /**
-     * Extrai transaction_id do request
-     * 
-     * Suporta múltiplos formatos de diferentes adquirentes:
-     * - Treeal: txid, txId
-     * - Pagar.me: idTransaction, transaction_id
-     * - Outros: id, data.id, etc
+     * Extrai transaction_id do request (suporta formato Treeal e genérico)
      */
     private function extractTransactionId(Request $request): ?string
     {
         $data = $request->all();
-        
-        return $data['txid'] 
-            ?? $data['txId'] 
-            ?? $data['idTransaction'] 
-            ?? $data['transaction_id'] 
+
+        return $data['txid']
+            ?? $data['txId']
+            ?? $data['idTransaction']
+            ?? $data['transaction_id']
             ?? $data['transactionId']
-            ?? $data['data']['id'] 
-            ?? $data['data_id'] 
+            ?? $data['data']['id']
+            ?? $data['data_id']
             ?? $data['id']
-            ?? $data['requestBody']['external_id'] ?? null;
+            ?? $data['requestBody']['external_id']
+            ?? null;
     }
 }
