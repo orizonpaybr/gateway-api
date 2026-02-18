@@ -130,26 +130,27 @@ class PaymentProcessingService
     private function invalidateCachesAfterPayment(string $userId): void
     {
         try {
-            // 1. Dashboard stats (Saldo disponível, Entradas do Mês, Saídas, Splits)
-            Cache::forget("dashboard:stats:{$userId}:" . now()->format('Y-m-d'));
-
-            // 2. Dashboard summary (Qtd transações, Ticket Médio, QR Codes Pagos/Gerados, etc.)
-            // As chaves usam timestamp — remove todas as variações por padrão de prefixo
-            $this->forgetCacheByPattern("dashboard:summary:{$userId}:");
-            $this->forgetCacheByPattern("dashboard:interactive:{$userId}:");
-
-            // 3. Gamificação / Jornada
-            Cache::forget("gamification_data_user_{$userId}");
-            $this->forgetCacheByPattern("sidebar_gamification_user_{$userId}");
-
-            // 4. QR Codes listing
             $user = User::where('user_id', $userId)->first();
-            if ($user) {
-                Cache::forget("user_profile_{$user->username}");
-                app(\App\Services\QRCodeService::class)->clearUserCache($user->username);
+            if (!$user) {
+                Log::debug("Usuário não encontrado para invalidar cache", ['user_id' => $userId]);
+                return;
             }
 
-            Log::debug("Caches invalidados após pagamento", ['user_id' => $userId]);
+            $username = $user->username;
+            $userNumericId = $user->id;
+
+            Cache::forget("dashboard:stats:{$username}:" . now()->format('Y-m-d'));
+
+            $this->forgetCacheByPattern("dashboard:summary:{$username}:");
+            $this->forgetCacheByPattern("dashboard:interactive:{$username}:");
+
+            Cache::forget("gamification_data_user_{$userNumericId}");
+            $this->forgetCacheByPattern("sidebar_gamification_user_{$userNumericId}");
+
+            Cache::forget("user_profile_{$username}");
+            app(\App\Services\QRCodeService::class)->clearUserCache($username);
+
+            Log::debug("Caches invalidados após pagamento", ['user_id' => $userId, 'username' => $username, 'id' => $userNumericId]);
         } catch (\Throwable $e) {
             // Nunca deixar falha de cache quebrar o fluxo de pagamento
             Log::warning("Erro ao invalidar caches após pagamento", [
