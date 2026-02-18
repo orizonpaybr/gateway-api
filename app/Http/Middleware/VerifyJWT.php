@@ -5,6 +5,7 @@ namespace App\Http\Middleware;
 use Closure;
 use Illuminate\Http\Request;
 use App\Models\User;
+use App\Constants\UserStatus;
 use App\Services\JWTService;
 use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Log;
@@ -108,17 +109,19 @@ class VerifyJWT
                 'timestamp' => now()
             ]);
 
-            // Bloquear apenas usuários inativos (status = 0) ou banidos
-            // Usuários pendentes (status = 2) podem acessar todas as APIs (exceto integração)
-            if ($user->status == 0 || ($user->banido ?? false)) {
-                Log::warning('VerifyJWT - Conta inativa ou bloqueada', [
+            // Bloquear quem não pode usar a API: inativo, pendente ou banido (apenas ACTIVE pode)
+            if ($user->status != UserStatus::ACTIVE || ($user->banido ?? false)) {
+                $message = $user->status == UserStatus::PENDING
+                    ? 'Sua conta está aguardando aprovação. Você poderá acessar o dashboard após aprovação pelo administrador.'
+                    : 'Conta inativa ou bloqueada. Entre em contato com o suporte.';
+                Log::warning('VerifyJWT - Conta não permitida para acesso', [
                     'user_id' => $user->id,
                     'status' => $user->status,
                     'banido' => $user->banido,
                 ]);
                 return Response::json([
                     'success' => false,
-                    'message' => 'Conta inativa ou bloqueada. Entre em contato com o suporte.'
+                    'message' => $message
                 ], 403);
             }
 

@@ -47,10 +47,7 @@ class UserStatusHelper
      */
     public static function canLogin(User $user): bool
     {
-        // Não pode fazer login se:
-        // - Status é INACTIVE (excluído)
-        // - banido = true (bloqueado)
-        return $user->status != UserStatus::INACTIVE && !$user->banido;
+        return $user->status == UserStatus::ACTIVE && !($user->banido ?? false);
     }
     
     /**

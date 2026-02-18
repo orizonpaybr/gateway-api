@@ -6,6 +6,7 @@ use Closure;
 use Illuminate\Http\Request;
 use App\Models\User;
 use App\Models\UsersKey;
+use App\Constants\UserStatus;
 use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Log;
 
@@ -87,12 +88,14 @@ class CheckTokenAndSecret
             'timestamp' => now()
         ]);
         
-        // Bloquear apenas usuários inativos (status = 0) ou banidos
-        // Usuários pendentes (status = 2) podem acessar todas as APIs (exceto integração)
-        if ($user->status == 0 || ($user->banido ?? false)) {
+        // Bloquear quem não pode usar a API: inativo, pendente ou banido (apenas ACTIVE pode)
+        if ($user->status != UserStatus::ACTIVE || ($user->banido ?? false)) {
+            $message = $user->status == UserStatus::PENDING
+                ? 'Sua conta está aguardando aprovação. Você poderá acessar o dashboard após aprovação pelo administrador.'
+                : 'Conta inativa ou bloqueada. Entre em contato com o suporte.';
             return Response::json([
-                'status' => "error",
-                'message' => 'Conta inativa ou bloqueada. Entre em contato com o suporte.'
+                'status' => 'error',
+                'message' => $message
             ], 403);
         }
         
