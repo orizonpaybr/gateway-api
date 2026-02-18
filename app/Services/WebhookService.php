@@ -116,7 +116,7 @@ class WebhookService
             
             return $result ?? response()->json(['status' => 'success'], 200);
             
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $webhookLog->update([
                 'status' => 'FAILED',
                 'error' => $e->getMessage(),
@@ -125,7 +125,7 @@ class WebhookService
             Log::error("Erro ao processar webhook", [
                 'idempotency_key' => $idempotencyKey,
                 'adquirente' => $adquirente,
-                'transaction_id' => $transactionId,
+                'transaction_id' => $transactionId ?? null,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);

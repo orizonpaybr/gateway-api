@@ -661,8 +661,12 @@ class CallbackController extends Controller
      * - CANCELED: Cancelado
      * - REFUNDED: Estornado
      */
-    private function mapTreealStatusToInternal(string $status): string
+    private function mapTreealStatusToInternal(?string $status): string
     {
+        if ($status === null || $status === '') {
+            return 'WAITING_FOR_APPROVAL';
+        }
+
         $statusUpper = strtoupper($status);
         
         $statusMap = [
