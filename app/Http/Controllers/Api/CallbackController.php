@@ -342,12 +342,16 @@ class CallbackController extends Controller
             'current_status' => $cashin->status
         ]);
 
+        // Treeal pode enviar webhook de pagamento sem campo "status" (só txid, valor, endToEndId).
+        // Nesse caso considerar como pagamento confirmado (CONCLUIDA).
+        $statusNormalized = $status !== null && $status !== '' ? strtoupper((string) $status) : 'CONCLUIDA';
+        $isPaymentConfirmed = in_array($statusNormalized, ['CONCLUIDA', 'ATIVA', 'PAID', 'COMPLETED']);
+
         // Mapear status da Treeal para status interno
         $internalStatus = $this->mapTreealStatusToInternal($status);
 
-        // Se status for CONCLUIDA/ATIVA e ainda não foi processado
-        if (in_array(strtoupper($status ?? ''), ['CONCLUIDA', 'ATIVA', 'PAID', 'COMPLETED']) 
-            && $cashin->status !== 'PAID_OUT') {
+        // Se pagamento confirmado e ainda não foi processado
+        if ($isPaymentConfirmed && $cashin->status !== 'PAID_OUT') {
             
             // Atualizar end_to_end se disponível
             if (isset($data['endToEndId'])) {
