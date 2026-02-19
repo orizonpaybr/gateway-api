@@ -52,8 +52,13 @@ class CallbackController extends Controller
 
             // ── Cash Out (saque) ──────────────────────────────────────────────
             if (isset($data['transactionId']) || isset($endToEndId)) {
+                $cashOutId = $txid ?? $data['transactionId'] ?? $endToEndId ?? null;
+                if (!$cashOutId) {
+                    Log::warning('[TREEAL] Webhook Cash Out sem transactionId/endToEndId', ['data' => $data]);
+                    return response()->json(['status' => false, 'message' => 'transactionId ou endToEndId não encontrado'], 400);
+                }
                 return $this->handleTreealCashOutWebhook(
-                    $txid ?? $data['transactionId'],
+                    (string) $cashOutId,
                     $status,
                     $data,
                     $webhookLog,

@@ -72,7 +72,9 @@ class ListWebhookLogs extends Command
 
         $this->line('Para ver o payload completo de um registro, use:');
         $this->line('  php artisan tinker');
-        $this->line('  >>> App\\Models\\WebhookLog::find(ID)->payload');
+        $this->line('  App\\Models\\WebhookLog::find(ID)->payload');
+        $this->newLine();
+        $this->line('(dentro do tinker, digite só a linha acima sem o prompt >>>)');
         $this->newLine();
         $this->line('Para ver POSTs no endpoint do webhook (nginx):');
         $this->line('  grep "treeal/webhook" /var/log/nginx/access.log | tail -30');

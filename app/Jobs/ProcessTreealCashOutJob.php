@@ -50,7 +50,8 @@ class ProcessTreealCashOutJob implements ShouldQueue
 
         $cashOut = SolicitacoesCashOut::where('idTransaction', $this->transactionId)
             ->orWhere('externalreference', $this->transactionId)
-            ->when($endToEndId, fn($q) => $q->orWhere('end_to_end', $endToEndId))
+            ->orWhere('end_to_end', $this->transactionId)
+            ->when($endToEndId && $endToEndId !== $this->transactionId, fn($q) => $q->orWhere('end_to_end', $endToEndId))
             ->first();
 
         if (!$cashOut) {
