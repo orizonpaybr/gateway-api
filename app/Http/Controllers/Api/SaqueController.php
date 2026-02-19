@@ -311,6 +311,8 @@ class SaqueController extends Controller
                 $balanceService->decrementCombinedBalance($user, $valorTotalDescontar);
                 Helper::calculaSaldoLiquido($user->user_id);
 
+                app(\App\Services\PaymentProcessingService::class)->invalidateCachesAfterPayment($cashOut->user_id);
+
                 Log::info('SaqueController::processTreealWithdrawal - Saque automático criado', [
                     'transaction_id' => $transactionId,
                     'amount' => $amount,
@@ -360,6 +362,8 @@ class SaqueController extends Controller
                 $balanceService = app(\App\Services\BalanceService::class);
                 $balanceService->decrementCombinedBalance($user, $valorTotalDescontar);
                 Helper::calculaSaldoLiquido($user->user_id);
+
+                app(\App\Services\PaymentProcessingService::class)->invalidateCachesAfterPayment($cashOut->user_id);
 
                 Log::info('SaqueController::processTreealWithdrawal - Saque manual criado (valor + taxa debitados)', [
                     'transaction_id' => $transactionId,

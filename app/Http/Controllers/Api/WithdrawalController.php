@@ -314,6 +314,7 @@ class WithdrawalController extends Controller
                         $this->statsService->invalidateCache();
                         $this->financialService->invalidateWalletsCache();
                         $this->financialService->invalidateStatsCache();
+                        app(\App\Services\PaymentProcessingService::class)->invalidateCachesAfterPayment($saque->user_id);
                     }
                     return $response;
                 
@@ -530,6 +531,9 @@ class WithdrawalController extends Controller
                 Log::info("Saque rejeitado sem usuário associado - ID: {$saque->id}");
             }
 
+            if ($saque->user_id) {
+                app(\App\Services\PaymentProcessingService::class)->invalidateCachesAfterPayment($saque->user_id);
+            }
             $this->statsService->invalidateCache();
             $this->financialService->invalidateWalletsCache();
             $this->financialService->invalidateStatsCache();

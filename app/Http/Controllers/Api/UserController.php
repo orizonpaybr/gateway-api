@@ -60,8 +60,10 @@ class UserController extends Controller
                     ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
                     ->sum('amount');
 
-                // Calcular totais de saques (saídas) - apenas COMPLETED e PAID_OUT
-                $totalOutflows = \App\Models\SolicitacoesCashOut::where('user_id', $user->user_id)
+                // Calcular totais de saques (saídas) - apenas COMPLETED e PAID_OUT (user_id na tabela pode ser user_id ou username)
+                $totalOutflows = \App\Models\SolicitacoesCashOut::where(function ($q) use ($user) {
+                    $q->where('user_id', $user->user_id)->orWhere('user_id', $user->username);
+                })
                     ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
                     ->sum('amount');
 
@@ -177,8 +179,10 @@ class UserController extends Controller
                     DB::raw("'deposito' as tipo")
                 ]);
 
-            // Buscar saques
-            $saquesQuery = \App\Models\SolicitacoesCashOut::where('user_id', $user->user_id)
+            // Buscar saques (user_id na tabela pode ser user_id ou username conforme origem do saque)
+            $saquesQuery = \App\Models\SolicitacoesCashOut::where(function ($q) use ($user) {
+                $q->where('user_id', $user->user_id)->orWhere('user_id', $user->username);
+            })
                 ->select([
                     'id',
                     'idTransaction',
@@ -370,8 +374,10 @@ class UserController extends Controller
                     ];
                 }
 
-                // Se não encontrou em depósitos, procurar em saques (saídas)
-                $saque = \App\Models\SolicitacoesCashOut::where('user_id', $user->username)
+                // Se não encontrou em depósitos, procurar em saques (saídas) (user_id na tabela pode ser user_id ou username)
+                $saque = \App\Models\SolicitacoesCashOut::where(function ($q) use ($user) {
+                    $q->where('user_id', $user->user_id)->orWhere('user_id', $user->username);
+                })
                     ->where(function($query) use ($id) {
                         $query->where('id', $id)
                               ->orWhere('idTransaction', $id)
@@ -831,8 +837,10 @@ class UserController extends Controller
                     });
                 }
 
-                // Buscar dados de saídas (saques) - apenas COMPLETED e PAID_OUT
-                $saidasQuery = \App\Models\SolicitacoesCashOut::where('user_id', $user->username)
+                // Buscar dados de saídas (saques) - apenas COMPLETED e PAID_OUT (user_id na tabela pode ser user_id ou username)
+                $saidasQuery = \App\Models\SolicitacoesCashOut::where(function ($q) use ($user) {
+                    $q->where('user_id', $user->user_id)->orWhere('user_id', $user->username);
+                })
                     ->whereIn('status', ['PAID_OUT', 'COMPLETED']);
                 
                 // Aplicar filtro de data apenas se houver período ou datas específicas
@@ -1052,8 +1060,8 @@ class UserController extends Controller
             // Cache leve (60s) por usuário + período
             $cacheKey = sprintf('dash:interactive:%s:%s:%s:%s', $user->username, $periodo, $dates['inicio']->format('YmdHis'), $dates['fim']->format('YmdHis'));
             $payload = cache()->remember($cacheKey, 60, function () use ($user, $dates, $periodo) {
-                $cardData = $this->getCardDataOptimized($user->username, $dates);
-                $chartData = $this->getChartDataOptimized($user->username, $dates, $periodo);
+                $cardData = $this->getCardDataOptimized($user, $dates);
+                $chartData = $this->getChartDataOptimized($user, $dates, $periodo);
                 return [
                     'periodo' => $periodo,
                     'data_inicio' => $dates['inicio']->format('Y-m-d H:i:s'),
@@ -1125,8 +1133,9 @@ class UserController extends Controller
     /**
      * Obter dados dos cards de forma otimizada
      */
-    private function getCardDataOptimized($username, $dates)
+    private function getCardDataOptimized($user, $dates)
     {
+        $username = $user->username ?? $user->user_id;
         // Query otimizada para depósitos
         $depositosData = \App\Models\Solicitacoes::where('user_id', $username)
             ->whereBetween('date', [$dates['inicio'], $dates['fim']])
@@ -1134,8 +1143,10 @@ class UserController extends Controller
             ->selectRaw('COUNT(*) as quantidade, SUM(amount) as total_valor')
             ->first();
 
-        // Query otimizada para saques
-        $saquesData = \App\Models\SolicitacoesCashOut::where('user_id', $username)
+        // Query otimizada para saques (user_id na tabela pode ser user_id ou username conforme origem do saque)
+        $saquesData = \App\Models\SolicitacoesCashOut::where(function ($q) use ($user) {
+            $q->where('user_id', $user->user_id)->orWhere('user_id', $user->username);
+        })
             ->whereBetween('date', [$dates['inicio'], $dates['fim']])
             ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
             ->selectRaw('COUNT(*) as quantidade, SUM(amount) as total_valor')
@@ -1152,8 +1163,9 @@ class UserController extends Controller
     /**
      * Obter dados do gráfico agrupado por hora (otimizado)
      */
-    private function getChartDataOptimized($username, $dates, $periodo)
+    private function getChartDataOptimized($user, $dates, $periodo)
     {
+        $username = $user->username ?? $user->user_id;
         // Determinar intervalo de agrupamento baseado no período
         $groupBy = $this->getGroupByInterval($periodo);
         
@@ -1167,8 +1179,10 @@ class UserController extends Controller
             ->get()
             ->keyBy('periodo');
 
-        // Query otimizada para saques agrupados
-        $saquesChart = \App\Models\SolicitacoesCashOut::where('user_id', $username)
+        // Query otimizada para saques agrupados (user_id na tabela pode ser user_id ou username)
+        $saquesChart = \App\Models\SolicitacoesCashOut::where(function ($q) use ($user) {
+            $q->where('user_id', $user->user_id)->orWhere('user_id', $user->username);
+        })
             ->whereBetween('date', [$dates['inicio'], $dates['fim']])
             ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
             ->selectRaw("DATE_FORMAT(date, '{$groupBy}') as periodo, SUM(amount) as valor")
@@ -1273,7 +1287,9 @@ class UserController extends Controller
                     ->whereBetween('date', [$startOfMonth, $endOfMonth])
                     ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
                     ->sum('amount');
-                $saidasMes = \App\Models\SolicitacoesCashOut::where('user_id', $user->username)
+                $saidasMes = \App\Models\SolicitacoesCashOut::where(function ($q) use ($user) {
+                    $q->where('user_id', $user->user_id)->orWhere('user_id', $user->username);
+                })
                     ->whereBetween('date', [$startOfMonth, $endOfMonth])
                     ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
                     ->sum('amount');
@@ -1351,7 +1367,9 @@ class UserController extends Controller
                     ->whereBetween('date', [$dates['inicio'], $dates['fim']])
                     ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
                     ->count();
-                $quantidadeSaques = \App\Models\SolicitacoesCashOut::where('user_id', $user->username)
+                $quantidadeSaques = \App\Models\SolicitacoesCashOut::where(function ($q) use ($user) {
+                    $q->where('user_id', $user->user_id)->orWhere('user_id', $user->username);
+                })
                     ->whereBetween('date', [$dates['inicio'], $dates['fim']])
                     ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
                     ->count();
@@ -1370,7 +1388,9 @@ class UserController extends Controller
                     ->whereBetween('date', [$dates['inicio'], $dates['fim']])
                     ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
                     ->avg('amount') ?: 0;
-                $ticketMedioSaques = \App\Models\SolicitacoesCashOut::where('user_id', $user->username)
+                $ticketMedioSaques = \App\Models\SolicitacoesCashOut::where(function ($q) use ($user) {
+                    $q->where('user_id', $user->user_id)->orWhere('user_id', $user->username);
+                })
                     ->whereBetween('date', [$dates['inicio'], $dates['fim']])
                     ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
                     ->avg('amount') ?: 0;
@@ -2052,8 +2072,10 @@ class UserController extends Controller
             $totalEntradasLiquidas = $entradasQuery->sum('deposito_liquido');
             $totalTaxasEntradas = $entradasQuery->sum('taxa_cash_in');
 
-            // Buscar dados de saídas (saques) - apenas COMPLETED e PAID_OUT
-            $saidasQuery = \App\Models\SolicitacoesCashOut::where('user_id', $user->username)
+            // Buscar dados de saídas (saques) - apenas COMPLETED e PAID_OUT (user_id na tabela pode ser user_id ou username)
+            $saidasQuery = \App\Models\SolicitacoesCashOut::where(function ($q) use ($user) {
+                $q->where('user_id', $user->user_id)->orWhere('user_id', $user->username);
+            })
                 ->whereBetween('date', [$dates['inicio'], $dates['fim']])
                 ->whereIn('status', ['PAID_OUT', 'COMPLETED']);
 
