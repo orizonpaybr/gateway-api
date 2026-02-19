@@ -178,17 +178,34 @@ class WebhookService
 
     /**
      * Extrai transaction_id do request (suporta formato Treeal e genérico)
+     *
+     * ONZ envolve o payload em { "data": { "webhookType": "TRANSFER"|"PIX", ... } }.
+     * Para TRANSFER (Cash Out) priorizamos endToEndId pois é o campo que gravamos em
+     * solicitacoes_cash_out.end_to_end — o campo "id" é um ID interno da ONZ diferente
+     * do nosso idTransaction.
      */
     private function extractTransactionId(Request $request): ?string
     {
-        $data = $request->all();
+        $data  = $request->all();
+        $inner = isset($data['data']) && is_array($data['data']) ? $data['data'] : null;
+
+        if ($inner) {
+            $type = $inner['webhookType'] ?? null;
+            if ($type === 'TRANSFER') {
+                return $inner['endToEndId']
+                    ?? (isset($inner['id']) ? (string) $inner['id'] : null);
+            }
+            return $inner['txid']
+                ?? $inner['txId']
+                ?? $inner['endToEndId']
+                ?? (isset($inner['id']) ? (string) $inner['id'] : null);
+        }
 
         return $data['txid']
             ?? $data['txId']
             ?? $data['idTransaction']
             ?? $data['transaction_id']
             ?? $data['transactionId']
-            ?? $data['data']['id']
             ?? $data['data_id']
             ?? $data['id']
             ?? $data['requestBody']['external_id']
