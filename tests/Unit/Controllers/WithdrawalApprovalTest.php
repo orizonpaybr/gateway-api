@@ -87,7 +87,8 @@ class WithdrawalApprovalTest extends TestCase
     public function test_should_approve_pending_withdrawal()
     {
         $controller = new \App\Http\Controllers\Api\WithdrawalController(
-            app(\App\Services\WithdrawalStatsService::class)
+            app(\App\Services\WithdrawalStatsService::class),
+            app(\App\Services\FinancialService::class)
         );
         $request = new \Illuminate\Http\Request();
         $request->setUserResolver(function () {
@@ -107,7 +108,7 @@ class WithdrawalApprovalTest extends TestCase
     public function test_should_reject_pending_withdrawal()
     {
         // Verificar se a coluna saldo_bloqueado existe
-        $hasBlockedBalanceColumn = \Schema::hasColumn('users', 'saldo_bloqueado');
+        $hasBlockedBalanceColumn = Schema::hasColumn('users', 'saldo_bloqueado');
         
         if ($hasBlockedBalanceColumn) {
             $withdrawalAmount = $this->pendingWithdrawal->amount;
@@ -119,7 +120,8 @@ class WithdrawalApprovalTest extends TestCase
         $this->targetUser->save();
 
         $controller = new \App\Http\Controllers\Api\WithdrawalController(
-            app(\App\Services\WithdrawalStatsService::class)
+            app(\App\Services\WithdrawalStatsService::class),
+            app(\App\Services\FinancialService::class)
         );
         $request = new \Illuminate\Http\Request();
         $request->setUserResolver(function () {
@@ -152,7 +154,8 @@ class WithdrawalApprovalTest extends TestCase
         $this->pendingWithdrawal->save();
 
         $controller = new \App\Http\Controllers\Api\WithdrawalController(
-            app(\App\Services\WithdrawalStatsService::class)
+            app(\App\Services\WithdrawalStatsService::class),
+            app(\App\Services\FinancialService::class)
         );
         $request = new \Illuminate\Http\Request();
         $request->setUserResolver(function () {
@@ -175,7 +178,8 @@ class WithdrawalApprovalTest extends TestCase
         $this->pendingWithdrawal->save();
 
         $controller = new \App\Http\Controllers\Api\WithdrawalController(
-            app(\App\Services\WithdrawalStatsService::class)
+            app(\App\Services\WithdrawalStatsService::class),
+            app(\App\Services\FinancialService::class)
         );
         $request = new \Illuminate\Http\Request();
         $request->setUserResolver(function () {
@@ -200,7 +204,8 @@ class WithdrawalApprovalTest extends TestCase
         ]);
 
         $controller = new \App\Http\Controllers\Api\WithdrawalController(
-            app(\App\Services\WithdrawalStatsService::class)
+            app(\App\Services\WithdrawalStatsService::class),
+            app(\App\Services\FinancialService::class)
         );
         $request = new \Illuminate\Http\Request();
         $request->setUserResolver(function () use ($nonAdminUser) {
@@ -225,7 +230,8 @@ class WithdrawalApprovalTest extends TestCase
         ]);
 
         $controller = new \App\Http\Controllers\Api\WithdrawalController(
-            app(\App\Services\WithdrawalStatsService::class)
+            app(\App\Services\WithdrawalStatsService::class),
+            app(\App\Services\FinancialService::class)
         );
         $request = new \Illuminate\Http\Request();
         $request->setUserResolver(function () use ($nonAdminUser) {
@@ -244,7 +250,7 @@ class WithdrawalApprovalTest extends TestCase
     public function test_should_update_user_stats_on_reject()
     {
         // Verificar se a coluna saldo_bloqueado existe
-        $hasBlockedBalanceColumn = \Schema::hasColumn('users', 'saldo_bloqueado');
+        $hasBlockedBalanceColumn = Schema::hasColumn('users', 'saldo_bloqueado');
         
         if ($hasBlockedBalanceColumn) {
             $withdrawalAmount = $this->pendingWithdrawal->amount;
@@ -258,7 +264,8 @@ class WithdrawalApprovalTest extends TestCase
         $initialRejected = $this->targetUser->transacoes_recused ?? 0;
 
         $controller = new \App\Http\Controllers\Api\WithdrawalController(
-            app(\App\Services\WithdrawalStatsService::class)
+            app(\App\Services\WithdrawalStatsService::class),
+            app(\App\Services\FinancialService::class)
         );
         $request = new \Illuminate\Http\Request();
         $request->setUserResolver(function () {
@@ -278,7 +285,7 @@ class WithdrawalApprovalTest extends TestCase
     public function test_should_decrement_blocked_balance_on_reject()
     {
         // Verificar se a coluna saldo_bloqueado existe
-        $hasBlockedBalanceColumn = \Schema::hasColumn('users', 'saldo_bloqueado');
+        $hasBlockedBalanceColumn = Schema::hasColumn('users', 'saldo_bloqueado');
         
         if (!$hasBlockedBalanceColumn) {
             $this->markTestSkipped('Coluna saldo_bloqueado não existe na tabela users');
@@ -292,7 +299,8 @@ class WithdrawalApprovalTest extends TestCase
         $initialBlockedBalance = $this->targetUser->saldo_bloqueado ?? 0;
 
         $controller = new \App\Http\Controllers\Api\WithdrawalController(
-            app(\App\Services\WithdrawalStatsService::class)
+            app(\App\Services\WithdrawalStatsService::class),
+            app(\App\Services\FinancialService::class)
         );
         $request = new \Illuminate\Http\Request();
         $request->setUserResolver(function () {
@@ -331,7 +339,8 @@ class WithdrawalApprovalTest extends TestCase
         ]);
 
         $controller = new \App\Http\Controllers\Api\WithdrawalController(
-            app(\App\Services\WithdrawalStatsService::class)
+            app(\App\Services\WithdrawalStatsService::class),
+            app(\App\Services\FinancialService::class)
         );
         $request = new \Illuminate\Http\Request();
         $request->setUserResolver(function () {
