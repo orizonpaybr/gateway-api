@@ -503,29 +503,33 @@ class TreealService
             // Em sandbox SSL desligado; em produção usa config (TREEAL_VERIFY_SSL)
             $verifySSL = $this->config->environment === 'sandbox' ? false : (bool) config('treeal.verify_ssl', true);
 
+            $payload = [
+                'grant_type'    => 'client_credentials',
+                'client_id'     => trim($clientId),
+                'client_secret' => trim($clientSecret),
+                'scope'         => 'pix.write pix.read transactions.read account.read',
+            ];
+
             $response = Http::withOptions([
-                'verify' => $verifySSL,
-                'cert' => $pemFiles['cert'],
+                'verify'  => $verifySSL,
+                'cert'    => $pemFiles['cert'],
                 'ssl_key' => [$pemFiles['key'], $certificatePassword],
-            ])->asForm()->post($this->config->accounts_api_url . '/oauth/token', [
-                'grant_type' => 'client_credentials',
-                'client_id' => $clientId,
-                'client_secret' => $clientSecret,
-                'scope' => 'pix.write pix.read transactions.read account.read',
-            ]);
+            ])->asForm()->post($this->config->accounts_api_url . '/oauth/token', $payload);
 
             if (!$response->successful()) {
                 $errorBody = $response->body();
                 Log::error('TreealService::getAccessToken - Erro ao obter token', [
-                    'status' => $response->status(),
+                    'status'   => $response->status(),
                     'response' => $errorBody,
                 ]);
-                
-                // Tentar parsear erro RFC 7807
-                $errorData = json_decode($errorBody, true);
-                $errorMessage = $errorData['detail'] ?? $errorData['title'] ?? 'Erro ao obter token OAuth2';
-                
-                throw new \Exception("Erro ao obter token OAuth2 ({$response->status()}): {$errorMessage}");
+
+                $errorData    = json_decode($errorBody, true);
+                $errorMessage = (is_array($errorData)
+                    ? ($errorData['detail'] ?? $errorData['title'] ?? $errorData['error_description'] ?? $errorData['message'] ?? json_encode($errorData))
+                    : $errorBody)
+                    ?: 'Erro ao obter token OAuth2';
+
+                throw new \Exception("Erro ao obter token OAuth2 Accounts ({$response->status()}): {$errorMessage}");
             }
 
             $data = $response->json();
@@ -916,38 +920,49 @@ class TreealService
 
         try {
             Log::info('TreealService::createWithdrawalByPixKey - Criando saque', [
-                'amount' => $amount,
-                'pix_key' => $pixKey,
+                'amount'           => $amount,
+                'pix_key'          => $pixKey,
                 'pix_key_normalized' => $normalizedPixKey,
-                'pix_key_type' => $pixKeyType,
-                'idempotency_key' => $idempotencyKey,
+                'pix_key_type'     => $pixKeyType,
+                'idempotency_key'  => $idempotencyKey,
             ]);
 
             $response = $this->getAccountsHttpClient()
                 ->withHeader('x-idempotency-key', $idempotencyKey)
                 ->post($this->config->accounts_api_url . '/pix/payments/dict', $payload);
 
+            // Se 401, limpar cache do token e tentar uma vez mais (token pode ter expirado)
+            if ($response->status() === 401) {
+                Log::warning('TreealService::createWithdrawalByPixKey - Token inválido (401), limpando cache e retentando');
+                Cache::forget("treeal:oauth_token:{$this->config->id}");
+
+                $response = $this->getAccountsHttpClient()
+                    ->withHeader('x-idempotency-key', $idempotencyKey)
+                    ->post($this->config->accounts_api_url . '/pix/payments/dict', $payload);
+            }
+
             if (!$response->successful()) {
                 $errorBody = $response->body();
                 Log::error('TreealService::createWithdrawalByPixKey - Erro na API', [
-                    'status' => $response->status(),
-                    'response' => $errorBody,
-                    'payload' => $payload,
-                    'pix_key_original' => $pixKey,
+                    'status'             => $response->status(),
+                    'response'           => $errorBody,
+                    'payload'            => $payload,
+                    'pix_key_original'   => $pixKey,
                     'pix_key_normalized' => $normalizedPixKey,
-                    'pix_key_type' => $pixKeyType,
-                    'idempotency_key' => $idempotencyKey,
+                    'pix_key_type'       => $pixKeyType,
+                    'idempotency_key'    => $idempotencyKey,
                 ]);
-                
-                // Tentar parsear erro RFC 7807
-                $errorData = json_decode($errorBody, true);
-                $errorMessage = $errorData['detail'] ?? $errorData['title'] ?? $errorData['message'] ?? 'Erro ao criar saque';
-                
-                // Se houver erros específicos, incluí-los
+
+                $errorData    = json_decode($errorBody, true);
+                $errorMessage = (is_array($errorData)
+                    ? ($errorData['detail'] ?? $errorData['title'] ?? $errorData['message'] ?? json_encode($errorData))
+                    : $errorBody)
+                    ?: 'Erro ao criar saque';
+
                 if (isset($errorData['errors']) && is_array($errorData['errors'])) {
                     $errorMessage .= ' - ' . json_encode($errorData['errors']);
                 }
-                
+
                 throw new \Exception("Erro ao criar saque ({$response->status()}): {$errorMessage}");
             }
 
@@ -979,6 +994,111 @@ class TreealService
             Log::error('TreealService::createWithdrawalByPixKey - Exceção', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
+     * Registra webhook de Cash Out (transfer) na Accounts API.
+     *
+     * Deve ser chamado uma vez após as credenciais de produção estarem configuradas.
+     * Documentação: POST /api/v2/webhooks/transfer
+     *
+     * @param string $uri URL do webhook (ex: https://api.orizonpay.com/treeal/webhook)
+     * @param array  $headers Headers opcionais para identificação do webhook
+     * @return array Resposta da API
+     */
+    public function registerCashOutWebhook(string $uri, array $headers = []): array
+    {
+        if (!$this->isActive()) {
+            throw new \Exception("Treeal não está configurado ou ativo");
+        }
+
+        $payload = [
+            'uri'     => $uri,
+            'enabled' => true,
+        ];
+
+        if (!empty($headers)) {
+            $payload['headers'] = $headers;
+        }
+
+        try {
+            Log::info('TreealService::registerCashOutWebhook - Registrando webhook de Cash Out', [
+                'uri' => $uri,
+            ]);
+
+            // Limpar cache do token para forçar token fresco
+            Cache::forget("treeal:oauth_token:{$this->config->id}");
+
+            $response = $this->getAccountsHttpClient()
+                ->post($this->config->accounts_api_url . '/webhooks/transfer', $payload);
+
+            if (!$response->successful()) {
+                $errorBody    = $response->body();
+                $errorData    = json_decode($errorBody, true);
+                $errorMessage = (is_array($errorData)
+                    ? ($errorData['detail'] ?? $errorData['title'] ?? $errorData['message'] ?? json_encode($errorData))
+                    : $errorBody)
+                    ?: 'Erro ao registrar webhook';
+
+                Log::error('TreealService::registerCashOutWebhook - Erro', [
+                    'status'   => $response->status(),
+                    'response' => $errorBody,
+                ]);
+
+                throw new \Exception("Erro ao registrar webhook Cash Out ({$response->status()}): {$errorMessage}");
+            }
+
+            $data = $response->json();
+
+            Log::info('TreealService::registerCashOutWebhook - Webhook registrado com sucesso', [
+                'response' => $data,
+            ]);
+
+            return [
+                'success'  => true,
+                'data'     => $data,
+                'webhook_id' => $data['id'] ?? null,
+            ];
+
+        } catch (\Exception $e) {
+            Log::error('TreealService::registerCashOutWebhook - Exceção', [
+                'error' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
+     * Lista webhooks registrados na Accounts API.
+     *
+     * Endpoint: GET /api/v2/webhooks
+     */
+    public function listCashOutWebhooks(): array
+    {
+        if (!$this->isActive()) {
+            throw new \Exception("Treeal não está configurado ou ativo");
+        }
+
+        try {
+            $response = $this->getAccountsHttpClient()
+                ->get($this->config->accounts_api_url . '/webhooks');
+
+            if (!$response->successful()) {
+                $errorBody = $response->body();
+                throw new \Exception("Erro ao listar webhooks ({$response->status()}): {$errorBody}");
+            }
+
+            return [
+                'success' => true,
+                'data'    => $response->json(),
+            ];
+
+        } catch (\Exception $e) {
+            Log::error('TreealService::listCashOutWebhooks - Exceção', [
+                'error' => $e->getMessage(),
             ]);
             throw $e;
         }

@@ -124,8 +124,9 @@ class PaymentProcessingService
     }
 
     /**
-     * Invalida todos os caches relacionados ao usuário após um pagamento ser creditado.
-     * Chamado fora da DB::transaction para garantir que o commit já ocorreu.
+     * Invalida todos os caches relacionados ao usuário (saldo, dashboard, transações, etc.).
+     * Chamado após depósito creditado, saque processado, criação de saque (débito) ou aprovação/rejeição.
+     * Público para ser usado em SaqueController, PixKeyController e WithdrawalController.
      */
     public function invalidateCachesAfterPayment(string $userId): void
     {

@@ -606,7 +606,9 @@ class PixKeyController extends Controller
                         $keyType
                     );
                     
-                    // Registrar transação no banco
+                    // Registrar transação no banco 
+                    $idTxn = $treealResponse['transaction_id'] ?? $treealResponse['paymentId'] ?? $idempotencyKey;
+                    $endToEnd = $treealResponse['end_to_end_id'] ?? null;
                     $withdrawal = \App\Models\SolicitacoesCashOut::create([
                         'user_id' => $user->user_id ?? $user->username,
                         'externalreference' => $idempotencyKey,
@@ -615,7 +617,8 @@ class PixKeyController extends Controller
                         'beneficiarydocument' => $user->cpf_cnpj ?? '',
                         'pix' => $keyValue,
                         'pixkey' => $keyType,
-                        'idTransaction' => $treealResponse['paymentId'] ?? $idempotencyKey,
+                        'idTransaction' => $idTxn,
+                        'end_to_end' => $endToEnd,
                         'status' => 'PROCESSING',
                         'type' => 'PIX',
                         'date' => now(),
@@ -633,7 +636,8 @@ class PixKeyController extends Controller
 
                     Log::info('Saque PIX automático criado com sucesso via Treeal', [
                         'withdrawal_id' => $withdrawal->id,
-                        'transaction_id' => $treealResponse['paymentId'] ?? $idempotencyKey,
+                        'transaction_id' => $idTxn,
+                        'end_to_end' => $endToEnd,
                         'user_id' => $user->username
                     ]);
                     
@@ -641,7 +645,7 @@ class PixKeyController extends Controller
                         'success' => true,
                         'message' => 'Saque PIX realizado com sucesso',
                         'data' => [
-                            'transaction_id' => $treealResponse['paymentId'] ?? $idempotencyKey,
+                            'transaction_id' => $idTxn,
                             'amount' => $amount,
                             'key_type' => $keyType,
                             'key_value' => $keyValue,
