@@ -147,9 +147,10 @@ class UserController extends Controller
             $busca = $request->get('busca'); // Termo de busca
             $dataInicio = $request->get('data_inicio');
             $dataFim = $request->get('data_fim');
+            $onlyProcessed = $request->boolean('only_processed');
 
             // Cache Redis para transações (TTL: 2 minutos)
-            $cacheKey = sprintf('user_transactions_%s_%s_%s_%s_%s_%s_%s_%s', 
+            $cacheKey = sprintf('user_transactions_%s_%s_%s_%s_%s_%s_%s_%s_%s', 
                 $user->username, 
                 $page, 
                 $limit, 
@@ -157,10 +158,11 @@ class UserController extends Controller
                 $status ?? 'all', 
                 $busca ?? 'none', 
                 $dataInicio ?? 'none', 
-                $dataFim ?? 'none'
+                $dataFim ?? 'none',
+                $onlyProcessed ? '1' : '0'
             );
             
-            $transactionsData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 120, function() use ($user, $page, $limit, $tipo, $status, $busca, $dataInicio, $dataFim) {
+            $transactionsData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 120, function() use ($user, $page, $limit, $tipo, $status, $busca, $dataInicio, $dataFim, $onlyProcessed) {
                 $depositosQuery = \App\Models\Solicitacoes::where('user_id', $user->user_id)
                 ->select([
                     'id',
@@ -219,6 +221,12 @@ class UserController extends Controller
             if ($status) {
                 $depositosQuery->where('status', $status);
                 $saquesQuery->where('status', $status);
+            }
+
+            // Últimas transações: apenas processadas (pendentes/falhas não aparecem aqui)
+            if ($onlyProcessed) {
+                $depositosQuery->whereIn('status', ['PAID_OUT', 'COMPLETED']);
+                $saquesQuery->whereIn('status', ['PAID_OUT', 'COMPLETED']);
             }
 
             // Aplicar filtro de busca se fornecido

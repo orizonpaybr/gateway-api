@@ -533,19 +533,23 @@ class TreealService
             }
 
             $data = $response->json();
-            $token = $data['access_token'] ?? null;
+            $token = $data['accessToken'] ?? $data['access_token'] ?? null;
 
             if (!$token) {
                 throw new \Exception("Token não encontrado na resposta OAuth2. Resposta: " . json_encode($data));
             }
 
-            // Cachear token
-            $expiresIn = $data['expires_in'] ?? self::TOKEN_CACHE_TTL;
+            $expiresIn = $data['expires_in'] ?? null;
+            if ($expiresIn === null && isset($data['expiresAt'])) {
+                $expiresAt = (int) $data['expiresAt'];
+                $expiresIn = $expiresAt > 0 ? max(0, $expiresAt - time()) : self::TOKEN_CACHE_TTL;
+            }
+            $expiresIn = $expiresIn ?? self::TOKEN_CACHE_TTL;
             Cache::put($cacheKey, $token, now()->addSeconds($expiresIn - 60)); // Cache com 1 minuto de margem
 
             Log::info('TreealService::getAccessToken - Token obtido com sucesso', [
                 'expires_in' => $expiresIn,
-                'token_type' => $data['token_type'] ?? 'Bearer',
+                'token_type' => $data['tokenType'] ?? $data['token_type'] ?? 'Bearer',
             ]);
 
             return $token;
