@@ -41,11 +41,9 @@ class CallbackController extends Controller
             $data = $request->all();
             SecureLog::webhook('TREEAL', 'WEBHOOK', $data);
 
-            // A ONZ envolve o payload em { "data": { "webhookType": "TRANSFER"|"PIX", ... } }
             $inner       = isset($data['data']) && is_array($data['data']) ? $data['data'] : null;
             $webhookType = $inner['webhookType'] ?? null;
 
-            // ── Cash Out (saque) — webhookType: TRANSFER ──────────────────────
             if ($inner && $webhookType === 'TRANSFER') {
                 $endToEndId = $inner['endToEndId'] ?? null;
                 $onzId      = isset($inner['id']) ? (string) $inner['id'] : null;
@@ -60,29 +58,31 @@ class CallbackController extends Controller
                 return $this->handleTreealCashOutWebhook((string) $cashOutId, $status, $inner, $webhookLog, $start);
             }
 
-            // ── Cash In (depósito) — webhookType: PIX ou estrutura aninhada ───
             if ($inner && in_array($webhookType, ['PIX', 'RECEIVING', 'CHARGE'])) {
                 $txid   = $inner['txid'] ?? $inner['txId'] ?? null;
                 $status = $inner['status'] ?? null;
                 return $this->handleTreealCashInWebhook($txid, $status, $inner, $webhookLog, $start);
             }
 
-            // ── Fallback: payload plano sem wrapper "data" (legado / QRCodes API) ─
-            $txid       = $data['txid'] ?? $data['txId'] ?? $data['idTransaction'] ?? null;
+            // ── Fallback: payload plano sem wrapper "data" (QRCodes API / legado) ─
+            // O webhook de Cash In da QRCodes API vem plano e inclui txid + endToEndId.
+            // txid SEMPRE indica Cash In — verificar antes de checar endToEndId/transactionId.
+            $txid       = $data['txid'] ?? $data['txId'] ?? null;
             $status     = $data['status'] ?? $data['paymentStatus'] ?? null;
             $endToEndId = $data['endToEndId'] ?? $data['end_to_end_id'] ?? null;
 
+            if (isset($data['txid']) || isset($data['txId'])) {
+                return $this->handleTreealCashInWebhook($txid, $status, $data, $webhookLog, $start);
+            }
+
+            // Sem txid → pode ser Cash Out plano (legado)
             if (isset($data['transactionId']) || isset($data['endToEndId']) || isset($data['end_to_end_id'])) {
-                $cashOutId = $data['transactionId'] ?? $endToEndId ?? $data['id'] ?? $txid ?? null;
+                $cashOutId = $data['transactionId'] ?? $endToEndId ?? $data['id'] ?? null;
                 if ($cashOutId !== null && $cashOutId !== '') {
                     return $this->handleTreealCashOutWebhook((string) $cashOutId, $status, $data, $webhookLog, $start);
                 }
                 Log::warning('[TREEAL] Webhook Cash Out plano sem identificador', ['data' => $data]);
                 return response()->json(['status' => false, 'message' => 'transactionId ou endToEndId não encontrado'], 400);
-            }
-
-            if (isset($data['txid']) || isset($data['txId'])) {
-                return $this->handleTreealCashInWebhook($txid, $status, $data, $webhookLog, $start);
             }
 
             Log::warning('[TREEAL] Webhook com formato desconhecido', ['data' => $data, 'webhookType' => $webhookType]);
