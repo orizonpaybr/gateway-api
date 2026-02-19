@@ -53,6 +53,15 @@ class WithdrawalStatsService
 
         return [$inicio, now()];
     }
+
+    public function invalidateCache(): void
+    {
+        foreach (['hoje', '7d', '30d', 'mes'] as $periodo) {
+            [$inicio, $fim] = $this->resolvePeriod($periodo);
+            $cacheKey = sprintf('withdrawals_stats:%s:%s:%s', $periodo, $inicio->format('Y-m-d'), $fim->format('Y-m-d'));
+            Cache::forget($cacheKey);
+        }
+    }
 }
 
 

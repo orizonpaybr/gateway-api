@@ -871,7 +871,7 @@ class FinancialService
     private function getStatusLabel(string $status): string
     {
         return match ($status) {
-            'WAITING_FOR_APPROVAL' => 'Aguardando',
+            'WAITING_FOR_APPROVAL' => 'Pendente',
             'PAID_OUT' => 'Pago',
             'COMPLETED' => 'Completo',
             'PENDING' => 'Pendente',
