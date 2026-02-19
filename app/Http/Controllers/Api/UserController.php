@@ -252,8 +252,10 @@ class UserController extends Controller
 
             // Formatar dados
             $transactionsFormatted = $transactions->map(function($transaction) {
+                $tipo = $transaction->tipo ?? 'deposito';
                 return [
                     'id' => (int) $transaction->id,
+                    'comprovante_id' => $tipo . '-' . $transaction->id,
                     'transaction_id' => $transaction->idTransaction ?? $transaction->externalreference ?? 'N/A',
                     'externalreference' => $transaction->externalreference ?? null,
                     'tipo' => $transaction->tipo ?? 'deposito',
@@ -324,17 +326,33 @@ class UserController extends Controller
                 ], 401)->header('Access-Control-Allow-Origin', '*');
             }
 
+            // Aceitar chave composta "deposito-123" ou "saque-5" para evitar conflito (mesmo id em tabelas diferentes)
+            $soDeposito = false;
+            $soSaque = false;
+            $idNumerico = $id;
+            if (is_string($id) && str_contains($id, '-')) {
+                $partes = explode('-', $id, 2);
+                if ($partes[0] === 'deposito') {
+                    $soDeposito = true;
+                    $idNumerico = $partes[1];
+                } elseif ($partes[0] === 'saque') {
+                    $soSaque = true;
+                    $idNumerico = $partes[1];
+                }
+            }
+
             // Cache Redis para transação específica (TTL: 5 minutos)
             $cacheKey = "transaction_by_id_{$user->username}_{$id}";
             
-            $transactionData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 300, function() use ($user, $id) {
-                $deposito = \App\Models\Solicitacoes::where('user_id', $user->username)
-                ->where(function($query) use ($id) {
-                    $query->where('id', $id)
-                          ->orWhere('idTransaction', $id)
-                          ->orWhere('externalreference', $id);
-                })
-                ->first();
+            $transactionData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 300, function() use ($user, $idNumerico, $soDeposito, $soSaque) {
+                if (!$soSaque) {
+                    $deposito = \App\Models\Solicitacoes::where('user_id', $user->username)
+                    ->where(function($query) use ($idNumerico) {
+                        $query->where('id', $idNumerico)
+                              ->orWhere('idTransaction', $idNumerico)
+                              ->orWhere('externalreference', $idNumerico);
+                    })
+                    ->first();
 
                 if ($deposito) {
                     Log::info('Transação encontrada em depósitos', [
@@ -373,17 +391,22 @@ class UserController extends Controller
                         'descricao' => $deposito->descricao_transacao ?? 'Pagamento Recebido'
                     ];
                 }
+                }
 
-                // Se não encontrou em depósitos, procurar em saques (saídas) (user_id na tabela pode ser user_id ou username)
-                $saque = \App\Models\SolicitacoesCashOut::where(function ($q) use ($user) {
-                    $q->where('user_id', $user->user_id)->orWhere('user_id', $user->username);
-                })
-                    ->where(function($query) use ($id) {
-                        $query->where('id', $id)
-                              ->orWhere('idTransaction', $id)
-                              ->orWhere('externalreference', $id);
+                // Se não encontrou em depósitos, procurar em saques (saídas) — ou só saques se veio "saque-X"
+                if (!$soDeposito) {
+                    $saque = \App\Models\SolicitacoesCashOut::where(function ($q) use ($user) {
+                        $q->where('user_id', $user->user_id)->orWhere('user_id', $user->username);
                     })
-                    ->first();
+                        ->where(function($query) use ($idNumerico) {
+                            $query->where('id', $idNumerico)
+                                  ->orWhere('idTransaction', $idNumerico)
+                                  ->orWhere('externalreference', $idNumerico);
+                        })
+                        ->first();
+                } else {
+                    $saque = null;
+                }
 
                 if ($saque) {
                     Log::info('Transação encontrada em saques', [
