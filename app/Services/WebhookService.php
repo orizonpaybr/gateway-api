@@ -195,6 +195,9 @@ class WebhookService
                 return $inner['endToEndId']
                     ?? (isset($inner['id']) ? (string) $inner['id'] : null);
             }
+            if ($type === 'INFRACTION') {
+                return isset($inner['id']) ? (string) $inner['id'] : null;
+            }
             return $inner['txid']
                 ?? $inner['txId']
                 ?? $inner['endToEndId']

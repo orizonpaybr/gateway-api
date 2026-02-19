@@ -3,19 +3,17 @@
 namespace App\Http\Controllers\Api;
 
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Http;
 use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Log;
 use App\Models\Solicitacoes;
 use App\Models\User;
 use App\Models\SolicitacoesCashOut;
-use Carbon\Carbon;
 use App\Helpers\Helper;
 use App\Models\App;
-use App\Models\CheckoutOrders;
 use App\Helpers\SecureLog;
 use App\Jobs\ProcessTreealCashInJob;
 use App\Jobs\ProcessTreealCashOutJob;
+use App\Jobs\ProcessTreealInfractionJob;
 use App\Services\PaymentProcessingService;
 
 class CallbackController extends Controller
@@ -56,6 +54,11 @@ class CallbackController extends Controller
                 }
 
                 return $this->handleTreealCashOutWebhook((string) $cashOutId, $status, $inner, $webhookLog, $start);
+            }
+
+            // ── Infração PIX (webhookType: INFRACTION) ─────────────────────────
+            if ($inner && $webhookType === 'INFRACTION') {
+                return $this->handleTreealInfractionWebhook($inner, $webhookLog, $start);
             }
 
             if ($inner && in_array($webhookType, ['PIX', 'RECEIVING', 'CHARGE'])) {
@@ -171,6 +174,24 @@ class CallbackController extends Controller
         Log::info('[TREEAL] Cash Out enfileirado', [
             'transaction_id' => $transactionId,
             'status'         => $status,
+            'duration_ms'    => $durationMs,
+        ]);
+
+        return ['async' => true, 'response' => response()->json(['status' => true, 'message' => 'Webhook aceito'])];
+    }
+
+    /**
+     * Processa webhook de Infração PIX da Treeal — modo assíncrono.
+     *
+     * Despacha ProcessTreealInfractionJob para a fila e responde 200 imediatamente.
+     */
+    private function handleTreealInfractionWebhook(array $data, $webhookLog, float $start)
+    {
+        ProcessTreealInfractionJob::dispatch($data, $webhookLog->id)->onQueue('webhooks');
+
+        $durationMs = round((microtime(true) - $start) * 1000, 2);
+        Log::info('[TREEAL] Infraction enfileirado', [
+            'transaction_id' => $data['transactionId'] ?? null,
             'duration_ms'    => $durationMs,
         ]);
 

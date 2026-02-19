@@ -145,6 +145,12 @@ class PaymentProcessingService
 
             // Dashboard stats — "Entradas do Mês", tickets, conversão, etc.
             $this->forgetCacheByPattern("dash:stats:{$username}:");
+            // Sem Redis, o fallback não invalida a chave real (dash:stats:user:Ym:Ym) — esquecer explicitamente
+            if (config('cache.default') !== 'redis') {
+                $startOfMonth = \Carbon\Carbon::now()->startOfMonth();
+                $endOfMonth = \Carbon\Carbon::now()->endOfMonth();
+                Cache::forget(sprintf('dash:stats:%s:%s:%s', $username, $startOfMonth->format('Ym'), $endOfMonth->format('Ym')));
+            }
 
             // Dashboard summary e gráfico interativo
             $this->forgetCacheByPattern("dash:summary:{$username}:");
@@ -175,6 +181,23 @@ class PaymentProcessingService
             // Nunca deixar falha de cache quebrar o fluxo de pagamento
             Log::warning("Erro ao invalidar caches após pagamento", [
                 'user_id' => $userId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Invalida caches de listagem e detalhe de infrações PIX (após processar webhook de infração).
+     */
+    public function invalidateInfractionCaches(string $username): void
+    {
+        try {
+            $this->forgetCacheByPattern("pix_infracoes:{$username}:");
+            $this->forgetCacheByPattern("pix_infracao_detail:{$username}:");
+            Log::debug("Caches de infrações invalidados", ['username' => $username]);
+        } catch (\Throwable $e) {
+            Log::debug("invalidateInfractionCaches falhou silenciosamente", [
+                'username' => $username,
                 'error' => $e->getMessage(),
             ]);
         }
