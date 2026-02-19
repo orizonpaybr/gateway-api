@@ -975,12 +975,13 @@ class UserController extends Controller
             'COMPLETED' => 'Concluída',
             'PAID_OUT' => 'Pago',
             'PENDING' => 'Pendente',
+            'WAITING_FOR_APPROVAL' => 'Pendente',
             'FAILED' => 'Falhou',
             'CANCELLED' => 'Cancelada',
             'PROCESSING' => 'Processando',
         ];
 
-        return $statusMap[$status] ?? ucfirst(strtolower($status));
+        return $statusMap[$status] ?? ucfirst(strtolower(str_replace('_', ' ', $status)));
     }
     private function detectPixKeyType($pixKey)
     {

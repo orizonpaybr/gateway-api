@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use App\Http\Requests\WithdrawalIndexRequest;
 use App\Http\Requests\WithdrawalStatsRequest;
 use App\Services\WithdrawalStatsService;
+use App\Services\FinancialService;
 use App\Services\TreealService;
 use App\Services\BalanceService;
 use App\Models\App;
@@ -24,8 +25,10 @@ class WithdrawalController extends Controller
     /** Taxa fixa padrão da aplicação para cash out (saque) quando não há customização - R$ 1,00 */
     private const TAXA_APLICACAO_CASH_OUT_PADRAO = 1.00;
 
-    public function __construct(private readonly WithdrawalStatsService $statsService)
-    {
+    public function __construct(
+        private readonly WithdrawalStatsService $statsService,
+        private readonly FinancialService $financialService,
+    ) {
     }
 
     /**
@@ -306,7 +309,13 @@ class WithdrawalController extends Controller
             // Processar aprovação baseado no adquirente
             switch (strtolower($adquirente)) {
                 case 'treeal':
-                    return $this->approveWithTreeal($saque, $userSaque, $taxaEfetiva);
+                    $response = $this->approveWithTreeal($saque, $userSaque, $taxaEfetiva);
+                    if ($response->getStatusCode() === 200) {
+                        $this->statsService->invalidateCache();
+                        $this->financialService->invalidateWalletsCache();
+                        $this->financialService->invalidateStatsCache();
+                    }
+                    return $response;
                 
                 case 'pagarme':
                     // Pagar.me não suporta saques PIX diretamente
@@ -521,6 +530,10 @@ class WithdrawalController extends Controller
                 Log::info("Saque rejeitado sem usuário associado - ID: {$saque->id}");
             }
 
+            $this->statsService->invalidateCache();
+            $this->financialService->invalidateWalletsCache();
+            $this->financialService->invalidateStatsCache();
+
             return response()->json([
                 'success' => true,
                 'message' => 'Saque rejeitado com sucesso.'
@@ -587,6 +600,7 @@ class WithdrawalController extends Controller
     {
         $labels = [
             'PENDING' => 'Pendente',
+            'WAITING_FOR_APPROVAL' => 'Pendente',
             'COMPLETED' => 'Concluído',
             'PAID_OUT' => 'Pago',
             'CANCELLED' => 'Cancelado',

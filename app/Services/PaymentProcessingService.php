@@ -160,6 +160,15 @@ class PaymentProcessingService
             Cache::forget("user_profile_{$username}");
             app(\App\Services\QRCodeService::class)->clearUserCache($username);
 
+            $this->forgetCacheByPattern('admin:dashboard:stats:');
+            $this->forgetCacheByPattern('admin:transactions:recent:');
+            Cache::forget('admin:users:stats');
+            Cache::forget('total:wallets:balance');
+
+            $financialService = app(\App\Services\FinancialService::class);
+            $financialService->invalidateWalletsCache();
+            $financialService->invalidateStatsCache();
+
             Log::debug("Caches invalidados após pagamento", ['user_id' => $userId, 'username' => $username, 'id' => $userNumericId]);
         } catch (\Throwable $e) {
             // Nunca deixar falha de cache quebrar o fluxo de pagamento
