@@ -127,10 +127,10 @@ class PaymentProcessingService
      * Invalida todos os caches relacionados ao usuário após um pagamento ser creditado.
      * Chamado fora da DB::transaction para garantir que o commit já ocorreu.
      */
-    private function invalidateCachesAfterPayment(string $userId): void
+    public function invalidateCachesAfterPayment(string $userId): void
     {
         try {
-            $user = User::where('user_id', $userId)->first();
+            $user = User::where('user_id', $userId)->orWhere('username', $userId)->first();
             if (!$user) {
                 Log::debug("Usuário não encontrado para invalidar cache", ['user_id' => $userId]);
                 return;

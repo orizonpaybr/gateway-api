@@ -545,7 +545,9 @@ class PixKeyController extends Controller
                 $balanceService = app(\App\Services\BalanceService::class);
                 $balanceService->decrementCombinedBalance($user, $valorTotalDescontar);
                 \App\Helpers\Helper::calculaSaldoLiquido($user->user_id ?? $user->username);
-                
+
+                app(\App\Services\PaymentProcessingService::class)->invalidateCachesAfterPayment($withdrawal->user_id);
+
                 Log::info('Saque PIX manual criado - pendente de aprovação (valor + taxa debitados)', [
                     'withdrawal_id' => $withdrawal->id,
                     'user_id' => $user->username,
@@ -626,7 +628,9 @@ class PixKeyController extends Controller
                     // Debitar saldo do usuário
                     $user->saldo -= $valorTotalDescontar;
                     $user->save();
-                    
+
+                    app(\App\Services\PaymentProcessingService::class)->invalidateCachesAfterPayment($withdrawal->user_id);
+
                     Log::info('Saque PIX automático criado com sucesso via Treeal', [
                         'withdrawal_id' => $withdrawal->id,
                         'transaction_id' => $treealResponse['paymentId'] ?? $idempotencyKey,
