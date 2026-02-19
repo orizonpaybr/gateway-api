@@ -65,7 +65,7 @@ class ProcessTreealCashOutJob implements ShouldQueue
 
         $statusUpper = strtoupper($this->status ?? '');
 
-        $statusConfirmado = ['LIQUIDATED', 'COMPLETED', 'PAID', 'CONCLUIDO'];
+        $statusConfirmado = ['LIQUIDATED', 'COMPLETED', 'PAID', 'CONCLUIDO', 'PROCESSED'];
         $statusCancelado  = ['CANCELED', 'CANCELLED', 'FAILED'];
         $statusEstornado  = ['REFUNDED', 'PARTIALLY_REFUNDED'];
 
@@ -212,6 +212,7 @@ class ProcessTreealCashOutJob implements ShouldQueue
 
         $map = [
             'PROCESSING'         => 'PROCESSING',
+            'PROCESSED'          => 'PAID_OUT',
             'LIQUIDATED'         => 'PAID_OUT',
             'COMPLETED'          => 'PAID_OUT',
             'PAID'               => 'PAID_OUT',
