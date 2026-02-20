@@ -152,7 +152,7 @@ class CacheKeyService
                 $periodos = [$periodo];
             } else {
                 // Limpar apenas períodos relevantes
-                $periodos = ['hoje', 'ontem', '7dias', '30dias', 'mes_atual', 'mes_anterior', 'tudo'];
+                $periodos = ['hoje', 'ontem', '7dias', '30dias', 'tudo'];
             }
             
             // Limpar usando tags se suportado pelo driver
