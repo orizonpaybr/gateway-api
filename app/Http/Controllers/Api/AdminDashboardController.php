@@ -26,8 +26,8 @@ use Carbon\Carbon;
  */
 class AdminDashboardController extends Controller
 {
-    // Constantes para TTL de cache
-    private const CACHE_TTL_DASHBOARD = 30;
+    // Constantes para TTL de cache (alinhado ao dashboard do usuário: atualização rápida)
+    private const CACHE_TTL_DASHBOARD = 15;
     private const CACHE_TTL_USERS = 300; // 5 minutos
     private const CACHE_TTL_RECENT_TRANSACTIONS = 15;
     
@@ -64,18 +64,22 @@ class AdminDashboardController extends Controller
 
             // Cache key baseado no período usando CacheKeyService
             $cacheKey = CacheKeyService::adminDashboardStats($periodo, $dataInicio, $dataFim);
-            
+
+            // Saldo em carteiras
+            $saldoCarteirasFresco = (float) User::sum('saldo');
+
             // Usar Cache facade (padronizado - usa Redis se configurado)
             try {
                 $stats = Cache::remember($cacheKey, self::CACHE_TTL_DASHBOARD, function () use ($dataInicio, $dataFim) {
                     return $this->calculateDashboardStats($dataInicio, $dataFim);
                 });
-                
+                $stats['financeiro']['saldo_carteiras'] = $saldoCarteirasFresco;
                 return $this->successResponse($stats);
             } catch (\Exception $e) {
                 Log::warning('Erro ao usar cache, calculando diretamente', ['error' => $e->getMessage()]);
                 // Fallback: calcular sem cache
                 $stats = $this->calculateDashboardStats($dataInicio, $dataFim);
+                $stats['financeiro']['saldo_carteiras'] = $saldoCarteirasFresco;
                 return $this->successResponse($stats);
             }
 
