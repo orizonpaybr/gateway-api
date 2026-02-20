@@ -21,9 +21,14 @@ use Carbon\Carbon;
 class FinancialService
 {
     // Constantes para TTL de cache
-    private const CACHE_TTL_TRANSACTIONS = 60; // 1 minuto
-    private const CACHE_TTL_STATS = 120; // 2 minutos
+    private const CACHE_TTL_TRANSACTIONS = 60; // 1 minuto (listagens gerais)
+    private const CACHE_TTL_STATS = 120; // 2 minutos (stats gerais)
     private const CACHE_TTL_WALLETS = 300; // 5 minutos
+    /** TTL curto para telas Financeiro (alinhado ao dashboard admin / extrato) */
+    private const CACHE_TTL_TRANSACTIONS_VIEW = 15;
+    private const CACHE_TTL_WALLETS_VIEW = 15;
+    private const CACHE_TTL_DEPOSITS_VIEW = 15;
+    private const CACHE_TTL_WITHDRAWALS_VIEW = 15;
 
     // Status aprovados para cálculos
     private const APPROVED_STATUSES = ['PAID_OUT', 'COMPLETED'];
@@ -41,10 +46,10 @@ class FinancialService
         $dataInicio = $filters['data_inicio'] ?? null;
         $dataFim = $filters['data_fim'] ?? null;
 
-        // Cache key baseado nos filtros
+        // Cache key baseado nos filtros (TTL curto para atualização rápida na tela Transações Financeiras)
         $cacheKey = $this->getTransactionsCacheKey($filters);
 
-        return Cache::remember($cacheKey, self::CACHE_TTL_TRANSACTIONS, function () use (
+        return Cache::remember($cacheKey, self::CACHE_TTL_TRANSACTIONS_VIEW, function () use (
             $page, $limit, $status, $tipo, $busca, $dataInicio, $dataFim
         ) {
             $deposits = $this->getDepositsQuery($status, $busca, $dataInicio, $dataFim, $tipo);
@@ -76,7 +81,7 @@ class FinancialService
     {
         $cacheKey = "financial:transactions:stats:{$periodo}:" . Carbon::now()->format('Ymd');
 
-        return Cache::remember($cacheKey, self::CACHE_TTL_STATS, function () use ($periodo) {
+        return Cache::remember($cacheKey, self::CACHE_TTL_TRANSACTIONS_VIEW, function () use ($periodo) {
             $dateRange = $this->getDateRange($periodo);
 
             // Usar uma única query agregada para melhor performance
@@ -119,7 +124,7 @@ class FinancialService
 
         $cacheKey = $this->getWalletsCacheKey($filters);
 
-        return Cache::remember($cacheKey, self::CACHE_TTL_WALLETS, function () use (
+        return Cache::remember($cacheKey, self::CACHE_TTL_WALLETS_VIEW, function () use (
             $page, $limit, $busca, $tipoUsuario, $ordenar
         ) {
             // Select apenas campos necessários para reduzir memória e I/O
@@ -160,7 +165,7 @@ class FinancialService
     {
         $cacheKey = 'financial:wallets:stats';
 
-        return Cache::remember($cacheKey, self::CACHE_TTL_STATS, function () {
+        return Cache::remember($cacheKey, self::CACHE_TTL_WALLETS_VIEW, function () {
             // Usar agregados para melhor performance (uma única query)
             $stats = User::selectRaw('
                 COUNT(*) as total_carteiras,
@@ -217,7 +222,7 @@ class FinancialService
         // Cache key baseado nos filtros
         $cacheKey = $this->getDepositsCacheKey($filters);
 
-        return Cache::remember($cacheKey, self::CACHE_TTL_TRANSACTIONS, function () use (
+        return Cache::remember($cacheKey, self::CACHE_TTL_DEPOSITS_VIEW, function () use (
             $page, $limit, $status, $busca, $dataInicio, $dataFim
         ) {
             // Select apenas campos necessários para reduzir memória e I/O
@@ -255,7 +260,7 @@ class FinancialService
     {
         $cacheKey = "financial:deposits:stats:{$periodo}:" . Carbon::now()->format('Ymd');
 
-        return Cache::remember($cacheKey, self::CACHE_TTL_STATS, function () {
+        return Cache::remember($cacheKey, self::CACHE_TTL_DEPOSITS_VIEW, function () {
             $now = Carbon::now();
             $hojeInicio = $now->copy()->startOfDay();
             $hojeFim = $now->copy()->endOfDay();
@@ -320,7 +325,7 @@ class FinancialService
         // Cache key baseado nos filtros
         $cacheKey = $this->getWithdrawalsCacheKey($filters);
 
-        return Cache::remember($cacheKey, self::CACHE_TTL_TRANSACTIONS, function () use (
+        return Cache::remember($cacheKey, self::CACHE_TTL_WITHDRAWALS_VIEW, function () use (
             $page, $limit, $status, $busca, $dataInicio, $dataFim
         ) {
             // Select apenas campos necessários para reduzir memória e I/O
@@ -369,7 +374,7 @@ class FinancialService
     {
         $cacheKey = "financial:withdrawals:stats:{$periodo}:" . Carbon::now()->format('Ymd');
 
-        return Cache::remember($cacheKey, self::CACHE_TTL_STATS, function () {
+        return Cache::remember($cacheKey, self::CACHE_TTL_WITHDRAWALS_VIEW, function () {
             $now = Carbon::now();
             $hojeInicio = $now->copy()->startOfDay();
             $hojeFim = $now->copy()->endOfDay();
