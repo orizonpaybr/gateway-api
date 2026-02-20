@@ -1311,9 +1311,10 @@ class UserController extends Controller
             $startOfMonth = \Carbon\Carbon::now()->startOfMonth();
             $endOfMonth = \Carbon\Carbon::now()->endOfMonth();
 
+            $saldoFresco = (float) (\App\Models\User::where('id', $user->id)->value('saldo') ?? 0);
+
             $cacheKey = sprintf('dash:stats:%s:%s:%s', $user->username, $startOfMonth->format('Ym'), $endOfMonth->format('Ym'));
-            $payload = cache()->remember($cacheKey, 60, function () use ($user, $startOfMonth, $endOfMonth) {
-                $saldoDisponivel = $user->saldo ?? 0;
+            $payload = cache()->remember($cacheKey, 10, function () use ($user, $startOfMonth, $endOfMonth) {
                 $entradasMes = \App\Models\Solicitacoes::where('user_id', $user->username)
                     ->whereBetween('date', [$startOfMonth, $endOfMonth])
                     ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
@@ -1329,7 +1330,6 @@ class UserController extends Controller
                     ->where('status', 'processado')
                     ->sum('valor_split');
                 return [
-                    'saldo_disponivel' => (float) $saldoDisponivel,
                     'entradas_mes' => (float) $entradasMes,
                     'saidas_mes' => (float) $saidasMes,
                     'splits_mes' => (float) $splitsMes,
@@ -1339,6 +1339,9 @@ class UserController extends Controller
                     ],
                 ];
             });
+
+
+            $payload['saldo_disponivel'] = $saldoFresco;
 
             Log::info('Dashboard Stats (com cache)', [
                 'user_id' => $user->username,

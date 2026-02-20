@@ -27,9 +27,9 @@ use Carbon\Carbon;
 class AdminDashboardController extends Controller
 {
     // Constantes para TTL de cache
-    private const CACHE_TTL_DASHBOARD = 120; // 2 minutos
+    private const CACHE_TTL_DASHBOARD = 30;
     private const CACHE_TTL_USERS = 300; // 5 minutos
-    private const CACHE_TTL_RECENT_TRANSACTIONS = 30; // 30 segundos
+    private const CACHE_TTL_RECENT_TRANSACTIONS = 15;
     
     // Constantes para validação
     private const MAX_TRANSACTIONS_LIMIT = 100;
