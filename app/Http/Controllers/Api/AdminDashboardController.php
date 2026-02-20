@@ -60,6 +60,7 @@ class AdminDashboardController extends Controller
             // Verificação de admin feita pelo middleware 'ensure.admin'
             // Obter período do request (hoje, ontem, 7dias, 30dias, tudo)
             $periodo = $request->input('periodo', 'hoje');
+            $periodo = $periodo === 'total' ? 'tudo' : $periodo;
             [$dataInicio, $dataFim] = $this->getPeriodoDate($periodo);
 
             // Cache key baseado no período usando CacheKeyService
@@ -724,16 +725,6 @@ class AdminDashboardController extends Controller
             case '30dias':
                 $dataInicio = Carbon::today()->subDays(29)->startOfDay();
                 $dataFim = Carbon::today()->endOfDay();
-                break;
-
-            case 'mes_atual':
-                $dataInicio = Carbon::now()->startOfMonth();
-                $dataFim = Carbon::now()->endOfMonth();
-                break;
-
-            case 'mes_anterior':
-                $dataInicio = Carbon::now()->subMonth()->startOfMonth();
-                $dataFim = Carbon::now()->subMonth()->endOfMonth();
                 break;
 
             case 'tudo':

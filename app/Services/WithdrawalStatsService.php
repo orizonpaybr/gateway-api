@@ -14,7 +14,7 @@ class WithdrawalStatsService
 
         $cacheKey = sprintf('withdrawals_stats:%s:%s:%s', $periodo, $inicio->format('Y-m-d'), $fim->format('Y-m-d'));
 
-        return Cache::remember($cacheKey, 60, function () use ($inicio, $fim) {
+        return Cache::remember($cacheKey, 15, function () use ($inicio, $fim) {
             // CORRIGIDO: Incluir todos os tipos de saques (WEB, MANUAL, AUTOMATICO) nas estatísticas
             $base = SolicitacoesCashOut::whereIn('descricao_transacao', ['WEB', 'MANUAL', 'AUTOMATICO'])
                 ->whereBetween('date', [$inicio, $fim]);

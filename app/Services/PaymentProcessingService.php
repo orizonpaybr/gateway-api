@@ -175,13 +175,11 @@ class PaymentProcessingService
             if (config('cache.default') !== 'redis') {
                 $now = \Carbon\Carbon::now();
                 $adminPeriods = [
-                    'hoje'         => [$now->copy()->startOfDay(),                  $now->copy()->endOfDay()],
-                    'ontem'        => [$now->copy()->subDay()->startOfDay(),         $now->copy()->subDay()->endOfDay()],
-                    '7dias'        => [$now->copy()->subDays(6)->startOfDay(),       $now->copy()->endOfDay()],
-                    '30dias'       => [$now->copy()->subDays(29)->startOfDay(),      $now->copy()->endOfDay()],
-                    'mes_atual'    => [$now->copy()->startOfMonth(),                 $now->copy()->endOfMonth()],
-                    'mes_anterior' => [$now->copy()->subMonth()->startOfMonth(),     $now->copy()->subMonth()->endOfMonth()],
-                    'tudo'         => [$now->copy()->subYears(100)->startOfDay(),    $now->copy()->endOfDay()],
+                    'hoje'   => [$now->copy()->startOfDay(), $now->copy()->endOfDay()],
+                    'ontem'  => [$now->copy()->subDay()->startOfDay(), $now->copy()->subDay()->endOfDay()],
+                    '7dias'  => [$now->copy()->subDays(6)->startOfDay(), $now->copy()->endOfDay()],
+                    '30dias' => [$now->copy()->subDays(29)->startOfDay(), $now->copy()->endOfDay()],
+                    'tudo'   => [$now->copy()->subYears(100)->startOfDay(), $now->copy()->endOfDay()],
                 ];
                 foreach ($adminPeriods as $p => [$inicio, $fim]) {
                     Cache::forget(\App\Services\CacheKeyService::adminDashboardStats($p, $inicio, $fim));
@@ -192,6 +190,8 @@ class PaymentProcessingService
             $financialService = app(\App\Services\FinancialService::class);
             $financialService->invalidateWalletsCache();
             $financialService->invalidateStatsCache();
+
+            app(\App\Services\WithdrawalStatsService::class)->invalidateCache();
 
             Log::debug("Caches invalidados após pagamento", ['user_id' => $userId, 'username' => $username, 'id' => $userNumericId]);
         } catch (\Throwable $e) {
