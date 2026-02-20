@@ -263,51 +263,11 @@ class PaymentProcessingService
                 throw new \Exception("Usuário não encontrado: {$cashout->user_id}");
             }
             
-            // Calcular valor total a debitar
-            // NOTA: A taxa_cash_out já inclui a comissão do afiliado (calculada no TaxaSaqueHelper)
-            $valorTotalDebitar = $cashout->amount + ($cashout->taxa_cash_out ?? 0);
-            
-            // Verificar se o saldo já foi debitado (saque automático)
-            // Se o saldo atual for menor que o necessário, provavelmente já foi debitado
-            $saldoAtual = $user->saldo;
-            $saldoEsperadoAposDebito = $saldoAtual - $valorTotalDebitar;
-            
-            // Verificar saldo suficiente
-            if ($saldoAtual < $valorTotalDebitar) {
-                // Pode ser que já tenha sido debitado (saque automático)
-                // Verificar se a diferença é exatamente o valor que deveria ser debitado
-                Log::warning("Saldo insuficiente no processWithdrawal - pode já ter sido debitado", [
-                    'saldo_atual' => $saldoAtual,
-                    'valor_necessario' => $valorTotalDebitar,
-                    'transaction_id' => $cashout->idTransaction
-                ]);
-                
-                // Se o saldo é exatamente o esperado após débito, não debitar novamente
-                // Caso contrário, lançar exceção
-                if ($saldoAtual < 0 || abs($saldoAtual - ($saldoEsperadoAposDebito + $valorTotalDebitar)) > 0.01) {
-                    throw new \Exception("Saldo insuficiente. Disponível: {$saldoAtual}, Necessário: {$valorTotalDebitar}");
-                }
-            }
-            
+            $balanceBefore = $user->saldo;
+
             // 1. Atualizar status
             $cashout->update(['status' => 'COMPLETED']);
-            
-            // 2. Debitar saldo apenas se ainda não foi debitado (saque manual)
-            // Para saques automáticos, o saldo já foi debitado no SaqueController
-            $balanceBefore = $user->saldo;
-            if ($saldoAtual >= $valorTotalDebitar) {
-                $this->balanceService->decrementBalance(
-                    $user,
-                    $valorTotalDebitar,
-                    'saldo'
-                );
-            } else {
-                Log::info("Saldo já foi debitado anteriormente (saque automático)", [
-                    'transaction_id' => $cashout->idTransaction,
-                    'saldo_atual' => $saldoAtual,
-                    'valor_total' => $valorTotalDebitar
-                ]);
-            }
+
             $balanceAfter = $user->fresh()->saldo;
             
             // 3. Registrar evento
@@ -336,7 +296,7 @@ class PaymentProcessingService
                 'transaction_id' => $cashout->idTransaction,
                 'user_id' => $user->user_id,
                 'amount' => $cashout->amount,
-                'amount_debited' => $valorTotalDebitar,
+                'taxa' => $cashout->taxa_cash_out,
                 'balance_before' => $balanceBefore,
                 'balance_after' => $balanceAfter,
             ]);
