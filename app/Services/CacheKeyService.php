@@ -105,7 +105,104 @@ class CacheKeyService
     {
         return 'admin:acquirers:stats';
     }
-    
+
+    // --- Gamificação (Jornada Orizon) - padrão namespace:entity:identifier ---
+
+    /** TTL em segundos: lista de níveis (muda raramente) */
+    public const TTL_GAMIFICATION_NIVEIS = 3600;
+
+    /** TTL em segundos: página Jornada por usuário (igual à sidebar, invalidado ao processar depósito) */
+    public const TTL_GAMIFICATION_JOURNEY = 180;
+
+    /** TTL em segundos: sidebar por usuário (invalidado ao processar depósito) */
+    public const TTL_GAMIFICATION_SIDEBAR = 180;
+
+    /**
+     * Cache key para lista de níveis de gamificação (compartilhada)
+     */
+    public static function gamificationNiveis(): string
+    {
+        return 'gamification:niveis:all';
+    }
+
+    /**
+     * Cache key para dados da página Jornada por usuário
+     */
+    public static function gamificationJourney(int $userId): string
+    {
+        return "gamification_data_user_{$userId}";
+    }
+
+    /**
+     * Cache key para dados de gamificação da sidebar por usuário
+     */
+    public static function gamificationSidebar(int $userId): string
+    {
+        return "sidebar_gamification_user_{$userId}";
+    }
+
+    /**
+     * Limpar cache de níveis de gamificação (ex.: após atualizar níveis no admin)
+     */
+    public static function forgetGamificationNiveis(): void
+    {
+        try {
+            Cache::forget(self::gamificationNiveis());
+            Log::debug('Cache de níveis de gamificação invalidado');
+        } catch (\Exception $e) {
+            Log::warning('Erro ao limpar cache de níveis de gamificação', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Limpar cache de gamificação de um usuário
+     * Chamado quando o usuário tem novo depósito processado.
+     */
+    public static function forgetGamificationUser(int $userId): void
+    {
+        try {
+            Cache::forget(self::gamificationJourney($userId));
+            Cache::forget(self::gamificationSidebar($userId));
+            Log::debug('Cache de gamificação do usuário invalidado', ['user_id' => $userId]);
+        } catch (\Exception $e) {
+            Log::warning('Erro ao limpar cache de gamificação do usuário', [
+                'user_id' => $userId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Limpar cache de gamificação (níveis + todos os usuários, ex.: ao atualizar nível no admin)
+     * Com Redis, limpa por padrão; sem Redis, limpa apenas níveis
+     */
+    public static function forgetGamificationAll(): void
+    {
+        try {
+            Cache::forget(self::gamificationNiveis());
+            if (config('cache.default') === 'redis') {
+                $cacheConnection = config('cache.stores.redis.connection', 'cache');
+                $redis = Redis::connection($cacheConnection);
+                $prefix = config('cache.prefix', '');
+                $pattern = (!empty($prefix) ? $prefix . ':' : '') . 'gamification_data_user_*';
+                $keys = $redis->keys($pattern);
+                if (!empty($keys) && is_array($keys)) {
+                    $redis->del($keys);
+                }
+                $pattern = (!empty($prefix) ? $prefix . ':' : '') . 'sidebar_gamification_user_*';
+                $keys = $redis->keys($pattern);
+                if (!empty($keys) && is_array($keys)) {
+                    $redis->del($keys);
+                }
+            }
+            Log::info('Cache de gamificação (niveis e usuários) invalidado');
+        } catch (\Exception $e) {
+            Log::warning('Erro ao limpar cache de gamificação', ['error' => $e->getMessage()]);
+        }
+    }
+
     /**
      * Limpar cache de usuário específico
      * Usa Cache facade (padronizado - usa Redis se configurado)

@@ -9,7 +9,7 @@ use App\Models\{App, Nivel};
 use App\Events\LevelUpdated;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\{Cache, DB, Log, Validator};
+use Illuminate\Support\Facades\{DB, Log, Validator};
 
 /**
  * Controller para gerenciar níveis de gamificação (Admin)
@@ -239,12 +239,8 @@ class AdminLevelsController extends Controller
         try {
             Log::info('Iniciando limpeza do cache de gamificação');
 
-            // Invalida cache de níveis no Service
-            app(\App\Services\GamificationService::class)->invalidateCacheNiveis();
-            
-            // Flush geral para limpar cache de dados de usuários
-            // (gamification_data_user_*, sidebar_gamification_user_*, etc)
-            Cache::flush();
+            // Limpa apenas cache de gamificação
+            \App\Services\CacheKeyService::forgetGamificationAll();
 
             Log::info('Cache de gamificação limpo com sucesso');
             
