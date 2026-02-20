@@ -161,8 +161,7 @@ class PaymentProcessingService
             $this->forgetCacheByPattern("extrato:{$username}:");
 
             // Gamificação / jornada
-            Cache::forget("gamification_data_user_{$userNumericId}");
-            $this->forgetCacheByPattern("sidebar_gamification_user_{$userNumericId}");
+            \App\Services\CacheKeyService::forgetGamificationUser((int) $userNumericId);
 
             Cache::forget("user_profile_{$username}");
             app(\App\Services\QRCodeService::class)->clearUserCache($username);

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\{Nivel, Solicitacoes, User};
+use App\Services\CacheKeyService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -19,24 +20,47 @@ use Illuminate\Support\Facades\Log;
  */
 class GamificationService
 {
-    private const NIVEIS_CACHE_TTL = 3600;
-    
-    private const NIVEIS_CACHE_KEY = 'gamification:niveis:all';
-    
     /**
-     * Obt\u00e9m todos os níveis ordenados (com cache)
-     * 
+     * Obtém todos os níveis ordenados (com cache). TTL e chave centralizados em CacheKeyService.
+     *
      * @return Collection
      */
     public function getNiveis(): Collection
     {
-        return Cache::remember(self::NIVEIS_CACHE_KEY, self::NIVEIS_CACHE_TTL, function () {
+        $cacheKey = CacheKeyService::gamificationNiveis();
+        $ttl = CacheKeyService::TTL_GAMIFICATION_NIVEIS;
+
+        return Cache::remember($cacheKey, $ttl, function () {
             Log::debug('Cache miss: carregando níveis do banco de dados');
-            
-            return Nivel::query()
+
+            $niveis = Nivel::query()
                 ->orderBy('minimo', 'asc')
                 ->get();
+
+            if ($niveis->isEmpty()) {
+                Log::warning('Tabela niveis vazia; usando níveis padrão da Jornada Orizon');
+                return $this->getDefaultNiveis();
+            }
+
+            return $niveis;
         });
+    }
+
+    /**
+     * Níveis padrão quando a tabela está vazia (evita trilha/nível null).
+     *
+     * @return Collection
+     */
+    private function getDefaultNiveis(): Collection
+    {
+        $defaults = [
+            (object)['id' => 1, 'nome' => 'Bronze', 'minimo' => 0.0, 'maximo' => 100000.0, 'cor' => '#CD7F32', 'icone' => null],
+            (object)['id' => 2, 'nome' => 'Prata', 'minimo' => 100000.01, 'maximo' => 500000.0, 'cor' => '#C0C0C0', 'icone' => null],
+            (object)['id' => 3, 'nome' => 'Ouro', 'minimo' => 500000.01, 'maximo' => 1000000.0, 'cor' => '#FFD700', 'icone' => null],
+            (object)['id' => 4, 'nome' => 'Safira', 'minimo' => 1000000.01, 'maximo' => 5000000.0, 'cor' => '#0F52BA', 'icone' => null],
+            (object)['id' => 5, 'nome' => 'Diamante', 'minimo' => 5000000.01, 'maximo' => 10000000.0, 'cor' => '#B9F2FF', 'icone' => null],
+        ];
+        return collect($defaults);
     }
     
     /**
@@ -47,7 +71,7 @@ class GamificationService
      */
     public function invalidateCacheNiveis(): void
     {
-        Cache::forget(self::NIVEIS_CACHE_KEY);
+        CacheKeyService::forgetGamificationNiveis();
         Log::info('Cache de níveis invalidado');
     }
     

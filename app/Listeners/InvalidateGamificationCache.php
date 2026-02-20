@@ -3,22 +3,18 @@
 namespace App\Listeners;
 
 use App\Events\LevelUpdated;
-use Illuminate\Support\Facades\{Cache, Log};
+use App\Services\CacheKeyService;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Listener para invalidar cache de gamificação
- * 
- * Escuta eventos de níveis e limpa o cache automaticamente
- * 
- * @package App\Listeners
+ *
+ * Escuta eventos de níveis e limpa apenas o cache de gamificação
  */
 class InvalidateGamificationCache
 {
     /**
      * Handle LevelUpdated event
-     *
-     * @param LevelUpdated $event
-     * @return void
      */
     public function handleLevelUpdated(LevelUpdated $event): void
     {
@@ -26,22 +22,17 @@ class InvalidateGamificationCache
     }
 
     /**
-     * Clear gamification cache
-     *
-     * @param string $action
-     * @param int $nivelId
-     * @return void
+     * Limpa apenas cache de gamificação (níveis + dados por usuário)
      */
     private function clearCache(string $action, int $nivelId): void
     {
         try {
-            Cache::flush();
+            CacheKeyService::forgetGamificationAll();
 
             Log::info('Cache de gamificação limpo após evento', [
                 'action' => $action,
                 'nivel_id' => $nivelId,
             ]);
-
         } catch (\Exception $e) {
             Log::error('Erro ao limpar cache de gamificação após evento', [
                 'action' => $action,

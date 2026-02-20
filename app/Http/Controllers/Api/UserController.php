@@ -1576,11 +1576,9 @@ class UserController extends Controller
                 ], 401)->header('Access-Control-Allow-Origin', '*');
             }
 
-            // Cache key específica para Sidebar (TTL: 3 minutos - mais frequente)
+            // Cache key específica para Sidebar
             $cacheKey = "sidebar_gamification_user_{$user->id}";
-            
-            // Tentar obter dados do cache Redis primeiro
-            $cachedData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 180, function() use ($user) {
+            $cachedData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 180, function () use ($user) {
                 $gamificationData = \App\Helpers\Helper::meuNivel($user);
                 
                 // Calcular dados específicos para Sidebar
@@ -1632,11 +1630,10 @@ class UserController extends Controller
                 ], 401)->header('Access-Control-Allow-Origin', '*');
             }
 
-            // Cache key única para o usuário (TTL: 5 minutos)
-            $cacheKey = "gamification_data_user_{$user->id}";
-            
-            // Tentar obter dados do cache Redis primeiro
-            $cachedData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 300, function() use ($user) {
+            $cacheKey = \App\Services\CacheKeyService::gamificationJourney($user->id);
+            $ttl = \App\Services\CacheKeyService::TTL_GAMIFICATION_JOURNEY;
+
+            $cachedData = \Illuminate\Support\Facades\Cache::remember($cacheKey, $ttl, function () use ($user) {
                 return [
                     'gamification' => \App\Helpers\Helper::meuNivel($user),
                     'levels' => \App\Helpers\Helper::getNiveis()->sortBy('minimo')->values()
