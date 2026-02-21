@@ -2413,6 +2413,7 @@ class UserController extends Controller
                 
                 $user->affiliate_code = $codigoCompleto;
                 $user->affiliate_link = config('app.affiliado_url') . '/cadastro?ref=' . $user->affiliate_code;
+                $user->is_affiliate = true;
                 $user->save();
                 
                 Log::info('[AFFILIATE LINK] Código gerado para usuário existente', [
