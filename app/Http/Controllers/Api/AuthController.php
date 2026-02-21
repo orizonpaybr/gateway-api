@@ -523,6 +523,7 @@ class AuthController extends Controller
                 'selfie_rg' => $selfieRg,
                 'affiliate_code' => $affiliateCode,
                 'affiliate_link' => $affiliateLink,
+                'is_affiliate' => true,
                 'taxa_fixa_deposito' => $taxaFixaDeposito,
                 'taxa_fixa_pix' => $taxaFixaPix,
             ]);
