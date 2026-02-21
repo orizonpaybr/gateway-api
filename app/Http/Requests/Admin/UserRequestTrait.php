@@ -113,6 +113,8 @@ trait UserRequestTrait
             'taxa_fixa_pix' => 'nullable|numeric|min:0',
             'limite_mensal_pf' => 'nullable|numeric|min:0',
             'observacoes_taxas' => 'nullable|string|max:1000',
+            'taxa_comissao_afiliado' => 'nullable|numeric|min:0',
+            'comissao_afiliado_personalizada' => 'nullable|boolean',
         ];
     }
 }

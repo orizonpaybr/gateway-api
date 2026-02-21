@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\AffiliateCommission;
+use App\Models\App;
 use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
@@ -11,17 +12,22 @@ use Illuminate\Support\Facades\Log;
 
 /**
  * Service para processamento de comissões de afiliados
- * 
- * Processa comissões fixas de R$0,50 por transação (cash-in e cash-out)
- * para o pai afiliado quando o filho realiza uma transação.
  */
 class AffiliateCommissionService
 {
-    private const COMMISSION_VALUE = 0.50; // Valor fixo de R$0,50
-
     public function __construct(
         private BalanceService $balanceService
     ) {}
+
+    private function resolveCommissionValue(User $affiliate): float
+    {
+        if ($affiliate->comissao_afiliado_personalizada && $affiliate->taxa_comissao_afiliado !== null) {
+            return (float) $affiliate->taxa_comissao_afiliado;
+        }
+
+        $setting = App::first();
+        return (float) ($setting->taxa_comissao_afiliado_padrao ?? 0.50);
+    }
 
     /**
      * Processa comissão de cash-in
@@ -73,6 +79,8 @@ class AffiliateCommissionService
                 ->lockForUpdate()
                 ->first();
 
+            $commissionValue = $this->resolveCommissionValue($affiliate);
+
             // Criar registro de comissão
             $commission = AffiliateCommission::create([
                 'user_id' => $user->user_id,
@@ -80,20 +88,19 @@ class AffiliateCommissionService
                 'transaction_type' => 'cash_in',
                 'solicitacao_id' => $cashin->id,
                 'solicitacao_cash_out_id' => null,
-                'commission_value' => self::COMMISSION_VALUE,
+                'commission_value' => $commissionValue,
                 'transaction_amount' => $cashin->amount,
                 'status' => 'pending',
             ]);
 
             // NOTA IMPORTANTE: A comissão já foi descontada do filho no cálculo do deposito_liquido (TaxaFlexivelHelper)
-            // O deposito_liquido já foi calculado como: amount - taxa_aplicacao - comissão_afiliado (R$0,50)
             // Não precisamos descontar novamente aqui, apenas creditar no pai
             $balanceBeforeChild = $user->saldo; // Para log apenas
             $balanceAfterChild = $user->saldo; // Não alteramos o saldo do filho aqui
 
-            // Creditar R$0,50 no saldo_afiliado do pai (separado do saldo principal)
+            // Creditar comissão no saldo_afiliado do pai (separado do saldo principal)
             $balanceBeforeAffiliate = $affiliate->saldo_afiliado;
-            $this->balanceService->incrementBalance($affiliate, self::COMMISSION_VALUE, 'saldo_afiliado');
+            $this->balanceService->incrementBalance($affiliate, $commissionValue, 'saldo_afiliado');
             $balanceAfterAffiliate = $affiliate->fresh()->saldo_afiliado;
 
             // Atualizar status da comissão para paga
@@ -104,12 +111,13 @@ class AffiliateCommissionService
                 'solicitacao_id' => $cashin->id,
                 'user_id' => $user->user_id,
                 'affiliate_id' => $affiliate->id,
-                'commission_value' => self::COMMISSION_VALUE,
+                'commission_value' => $commissionValue,
+                'personalizada' => $affiliate->comissao_afiliado_personalizada,
                 'transaction_amount' => $cashin->amount,
                 'deposito_liquido' => $cashin->deposito_liquido,
                 'taxa_cash_in' => $cashin->taxa_cash_in,
                 'nota' => 'Comissão já foi descontada do filho no cálculo do deposito_liquido (TaxaFlexivelHelper)',
-                'child_balance' => $balanceBeforeChild, // Saldo do filho não muda aqui
+                'child_balance' => $balanceBeforeChild,
                 'affiliate_balance_before' => $balanceBeforeAffiliate,
                 'affiliate_balance_after' => $balanceAfterAffiliate,
             ]);
@@ -166,12 +174,14 @@ class AffiliateCommissionService
                 ->lockForUpdate()
                 ->first();
 
+            $commissionValue = $this->resolveCommissionValue($affiliate);
+
             // Verificar saldo suficiente do filho
-            if ($user->saldo < self::COMMISSION_VALUE) {
+            if ($user->saldo < $commissionValue) {
                 Log::warning("Saldo insuficiente para comissão de afiliado (cash-out)", [
                     'user_id' => $user->user_id,
                     'saldo_disponivel' => $user->saldo,
-                    'comissao_necessaria' => self::COMMISSION_VALUE,
+                    'comissao_necessaria' => $commissionValue,
                 ]);
                 // Não lançar exceção - apenas logar e não processar comissão
                 return;
@@ -184,20 +194,20 @@ class AffiliateCommissionService
                 'transaction_type' => 'cash_out',
                 'solicitacao_id' => null,
                 'solicitacao_cash_out_id' => $cashout->id,
-                'commission_value' => self::COMMISSION_VALUE,
+                'commission_value' => $commissionValue,
                 'transaction_amount' => $cashout->amount,
                 'status' => 'pending',
             ]);
 
             // NOTA IMPORTANTE: A comissão já foi descontada do filho no cálculo da taxa (TaxaSaqueHelper)
-            // O valor_total_descontar já inclui: amount + taxa_aplicacao + comissão_afiliado (R$0,50)
+            // O valor_total_descontar já inclui: amount + taxa_aplicacao + comissão_afiliado
             // Não precisamos descontar novamente aqui, apenas creditar no pai
             $balanceBeforeChild = $user->saldo; // Para log apenas
             $balanceAfterChild = $user->saldo; // Não alteramos o saldo do filho aqui
 
-            // Creditar R$0,50 no saldo_afiliado do pai (separado do saldo principal)
+            // Creditar comissão no saldo_afiliado do pai (separado do saldo principal)
             $balanceBeforeAffiliate = $affiliate->saldo_afiliado;
-            $this->balanceService->incrementBalance($affiliate, self::COMMISSION_VALUE, 'saldo_afiliado');
+            $this->balanceService->incrementBalance($affiliate, $commissionValue, 'saldo_afiliado');
             $balanceAfterAffiliate = $affiliate->fresh()->saldo_afiliado;
 
             // Atualizar status da comissão para paga
@@ -208,7 +218,8 @@ class AffiliateCommissionService
                 'solicitacao_cash_out_id' => $cashout->id,
                 'user_id' => $user->user_id,
                 'affiliate_id' => $affiliate->id,
-                'commission_value' => self::COMMISSION_VALUE,
+                'commission_value' => $commissionValue,
+                'personalizada' => $affiliate->comissao_afiliado_personalizada,
                 'transaction_amount' => $cashout->amount,
                 'taxa_cash_out' => $cashout->taxa_cash_out,
                 'nota' => 'Comissão já foi descontada do filho no cálculo da taxa (TaxaSaqueHelper)',

@@ -194,6 +194,8 @@ class AdminUserService
                 // Taxas fixas (em centavos)
                 'taxas_personalizadas_ativas', 'taxa_fixa_deposito', 'taxa_fixa_pix',
                 'limite_mensal_pf',
+                // Comissão de afiliado personalizada
+                'taxa_comissao_afiliado', 'comissao_afiliado_personalizada',
                 // Observações
                 'observacoes_taxas',
                 // Adquirentes / overrides
@@ -203,7 +205,7 @@ class AdminUserService
             
             $updateData = [];
             // Campos que devem ser convertidos de string vazia para null
-            $nullableFields = ['telefone', 'cpf', 'cep', 'rua', 'estado', 'cidade', 'bairro', 'numero_residencia', 'complemento', 'observacoes_taxas'];
+            $nullableFields = ['telefone', 'cpf', 'cep', 'rua', 'estado', 'cidade', 'bairro', 'numero_residencia', 'complemento', 'observacoes_taxas', 'taxa_comissao_afiliado'];
             
             foreach ($allowedFields as $field) {
                 if (array_key_exists($field, $data)) {

@@ -43,6 +43,7 @@ class TaxValidationService
             // Taxas fixas (em centavos)
             'taxa_fixa_deposito' => 'nullable|numeric|min:0',
             'taxa_fixa_pix' => 'nullable|numeric|min:0',
+            'taxa_comissao_afiliado_padrao' => 'nullable|numeric|min:0',
         ];
     }
 
@@ -60,6 +61,10 @@ class TaxValidationService
             'taxa_fixa_deposito' => 'nullable|numeric|min:0',
             'taxa_fixa_pix' => 'nullable|numeric|min:0',
             'valor_minimo_saque' => 'nullable|numeric|min:0',
+
+            // Comissão de afiliado personalizada
+            'taxa_comissao_afiliado' => 'nullable|numeric|min:0',
+            'comissao_afiliado_personalizada' => 'nullable|boolean',
 
             // Observações
             'observacoes_taxas' => 'nullable|string|max:1000',
@@ -103,10 +108,13 @@ class TaxValidationService
         $numericFields = [
             'taxa_fixa_deposito',
             'taxa_fixa_pix',
+            'taxa_comissao_afiliado_padrao',
+            'taxa_comissao_afiliado',
         ];
 
         $booleanFields = [
             'taxas_personalizadas_ativas',
+            'comissao_afiliado_personalizada',
         ];
 
         foreach ($numericFields as $field) {

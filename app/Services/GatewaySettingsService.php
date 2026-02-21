@@ -96,6 +96,9 @@ class GatewaySettingsService
             // Taxa fixa cash-out (saque PIX), em reais
             'taxa_fixa_pix' => (float) ($settings->taxa_fixa_pix ?? 1.00),
 
+            // Taxa global de comissão de afiliado por transação, em reais
+            'taxa_comissao_afiliado_padrao' => (float) ($settings->taxa_comissao_afiliado_padrao ?? 0.50),
+
             // Personalização de Relatórios - Entradas
             'relatorio_entradas_mostrar_meio' => (bool) ($settings->relatorio_entradas_mostrar_meio ?? true),
             'relatorio_entradas_mostrar_transacao_id' => (bool) ($settings->relatorio_entradas_mostrar_transacao_id ?? true),
@@ -138,6 +141,7 @@ class GatewaySettingsService
         return [
             'taxa_fixa_deposito' => 'taxa_fixa_padrao',
             'taxa_fixa_pix' => 'taxa_fixa_pix',
+            'taxa_comissao_afiliado_padrao' => 'taxa_comissao_afiliado_padrao',
         ];
     }
 
@@ -177,6 +181,7 @@ class GatewaySettingsService
             // Taxas (fixas em centavos)
             'taxa_fixa_deposito' => 'nullable|numeric|min:0',
             'taxa_fixa_pix' => 'nullable|numeric|min:0',
+            'taxa_comissao_afiliado_padrao' => 'nullable|numeric|min:0',
 
             // Personalização de Relatórios
             'relatorio_entradas_mostrar_meio' => 'nullable|boolean',
