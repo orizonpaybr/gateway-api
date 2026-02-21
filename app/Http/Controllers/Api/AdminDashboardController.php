@@ -1102,6 +1102,11 @@ class AdminDashboardController extends Controller
                 'affiliate_link' => $user->affiliate_code
                     ? (config('app.affiliado_url') . '/cadastro?ref=' . $user->affiliate_code)
                     : ($user->affiliate_link ?? ''),
+                // Comissão de afiliado personalizada
+                'comissao_afiliado_personalizada' => (bool) ($user->comissao_afiliado_personalizada ?? false),
+                'taxa_comissao_afiliado' => $user->taxa_comissao_afiliado !== null
+                    ? (float) $user->taxa_comissao_afiliado
+                    : (float) ($setting->taxa_comissao_afiliado_padrao ?? 0.50),
                 // Observações
                 'observacoes_taxas' => $user->observacoes_taxas ?? null,
             ];
@@ -1153,6 +1158,8 @@ class AdminDashboardController extends Controller
                 'valor_minimo_flexivel' => (float) ($setting->taxa_flexivel_valor_minimo ?? 15.00),
                 'taxa_fixa_baixos' => (float) ($setting->taxa_flexivel_fixa_baixo ?? 1.00),
                 'taxa_percentual_altos' => (float) ($setting->taxa_flexivel_percentual_alto ?? 4.00),
+                // Comissão de afiliado global
+                'taxa_comissao_afiliado_padrao' => (float) ($setting->taxa_comissao_afiliado_padrao ?? 0.50),
             ];
             
             return $this->successResponse(['fees' => $defaultFees]);

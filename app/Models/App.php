@@ -21,6 +21,7 @@ class App extends Model
         'baseline',
         'taxa_fixa_pix',
         'taxa_fixa_padrao',
+        'taxa_comissao_afiliado_padrao',
         'taxa_fixa_padrao_cash_out',
         'sms_url_cadastro_pendente',
         'sms_url_cadastro_ativo',
@@ -84,6 +85,7 @@ class App extends Model
         'taxa_fixa_padrao' => 'decimal:2',
         'taxa_fixa_padrao_cash_out' => 'decimal:2',
         'taxa_fixa_pix' => 'decimal:2',
+        'taxa_comissao_afiliado_padrao' => 'decimal:2',
         'limite_saque_mensal' => 'decimal:2',
     ];
 

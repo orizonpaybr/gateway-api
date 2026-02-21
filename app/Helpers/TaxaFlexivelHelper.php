@@ -104,13 +104,19 @@ class TaxaFlexivelHelper
         // Ela sai da taxa fixa, reduzindo o lucro da Orizon
         $comissaoAfiliado = 0.00;
         if ($user && $user->affiliate_id) {
-            $comissaoAfiliado = 0.50; // Valor fixo de R$0,50 por transação
+            $affiliate = \App\Models\User::where('id', $user->affiliate_id)->first();
+            if ($affiliate && $affiliate->comissao_afiliado_personalizada && $affiliate->taxa_comissao_afiliado !== null) {
+                $comissaoAfiliado = (float) $affiliate->taxa_comissao_afiliado;
+            } else {
+                $comissaoAfiliado = (float) ($setting->taxa_comissao_afiliado_padrao ?? 0.50);
+            }
             
             \Illuminate\Support\Facades\Log::info('TaxaFlexivelHelper: Comissão de afiliado (sai da taxa fixa)', [
                 'user_id' => $user->user_id,
                 'affiliate_id' => $user->affiliate_id,
                 'comissao_afiliado' => $comissaoAfiliado,
                 'taxa_fixa_usuario' => $taxaTotal,
+                'personalizada' => $affiliate && $affiliate->comissao_afiliado_personalizada,
                 'nota' => 'A comissão sai da taxa fixa, não é adicionada'
             ]);
         }
