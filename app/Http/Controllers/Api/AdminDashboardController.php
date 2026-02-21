@@ -297,8 +297,10 @@ class AdminDashboardController extends Controller
                     // Pendentes (status PENDING usando constant)
                     $pendingRegistrations = User::where('status', UserStatus::PENDING)->count();
                     
-                    // Banidos (apenas banido = true, excluídos não contam como banidos)
-                    $bannedUsers = User::where('banido', true)->count();
+                    // Bloqueados ou inativos
+                    $bannedUsers = User::where('banido', true)
+                        ->orWhere('status', UserStatus::INACTIVE)
+                        ->count();
 
                     return [
                         'total_registrations' => $totalRegistrations,
@@ -317,7 +319,9 @@ class AdminDashboardController extends Controller
                     ->whereYear('created_at', now()->year)
                     ->count();
                 $pendingRegistrations = User::where('status', UserStatus::PENDING)->count();
-                $bannedUsers = User::where('banido', true)->count();
+                $bannedUsers = User::where('banido', true)
+                    ->orWhere('status', UserStatus::INACTIVE)
+                    ->count();
                 
                 $stats = [
                     'total_registrations' => $totalRegistrations,
