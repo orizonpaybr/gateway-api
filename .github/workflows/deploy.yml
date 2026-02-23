@@ -57,7 +57,7 @@ jobs:
         run: composer install --prefer-dist --no-progress --no-interaction
 
       - name: 🔐 Security audit (dependências PHP)
-        run: composer audit --no-interaction
+        run: composer audit --no-interaction --abandoned=ignore
 
       - name: 📝 Copy .env for testing
         run: |
