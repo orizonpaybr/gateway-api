@@ -22,7 +22,7 @@ jobs:
         image: mysql:8.0
         env:
           MYSQL_ROOT_PASSWORD: root
-          MYSQL_DATABASE: gateway_orizon_test
+          MYSQL_DATABASE: gateway_api_test
           MYSQL_USER: gateway
           MYSQL_PASSWORD: 123456
         ports:
@@ -56,6 +56,9 @@ jobs:
       - name: 📦 Install Composer dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
 
+      - name: 🔐 Security audit (dependências PHP)
+        run: composer audit --no-interaction
+
       - name: 📝 Copy .env for testing
         run: |
           cp .env.example .env || cp env_example.txt .env || true
@@ -66,7 +69,7 @@ jobs:
           DB_CONNECTION: mysql
           DB_HOST: 127.0.0.1
           DB_PORT: 3306
-          DB_DATABASE: gateway_orizon_test
+          DB_DATABASE: gateway_api_test
           DB_USERNAME: gateway
           DB_PASSWORD: 123456
           APP_KEY: base64:iVoKOkyma32te1Ai0lq7UmR8RCCv3R9OsYAiAH8ZFMY=
