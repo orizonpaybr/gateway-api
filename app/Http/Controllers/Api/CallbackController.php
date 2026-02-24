@@ -12,6 +12,7 @@ use App\Helpers\Helper;
 use App\Models\App;
 use App\Helpers\SecureLog;
 use App\Jobs\ProcessTreealCashInJob;
+use App\Jobs\ProcessTreealCashInRefundJob;
 use App\Jobs\ProcessTreealCashOutJob;
 use App\Jobs\ProcessTreealInfractionJob;
 use App\Services\PaymentProcessingService;
@@ -54,6 +55,27 @@ class CallbackController extends Controller
                 }
 
                 return $this->handleTreealCashOutWebhook((string) $cashOutId, $status, $inner, $webhookLog, $start);
+            }
+
+            // ── Estorno (webhookType: REFUND) — Treeal: mesmo webhook para cash-in e cash-out; txid preenchido = cash-in
+            if ($inner && $webhookType === 'REFUND') {
+                $txid = $inner['txid'] ?? $inner['txId'] ?? null;
+                $txid = $txid !== null && $txid !== '' ? (string) $txid : null;
+
+                if ($txid !== null) {
+                    ProcessTreealCashInRefundJob::dispatch($txid, $webhookLog->id)->onQueue('webhooks');
+                    $durationMs = round((microtime(true) - $start) * 1000, 2);
+                    Log::info('[TREEAL] Cash In Refund enfileirado', ['txid' => $txid, 'duration_ms' => $durationMs]);
+                    return ['async' => true, 'response' => response()->json(['status' => true, 'message' => 'Webhook aceito'])];
+                }
+
+                $cashOutId = $inner['transactionId'] ?? $inner['endToEndId'] ?? $inner['id'] ?? null;
+                if ($cashOutId !== null && $cashOutId !== '') {
+                    return $this->handleTreealCashOutWebhook((string) $cashOutId, 'REFUNDED', $inner, $webhookLog, $start);
+                }
+
+                Log::warning('[TREEAL] Webhook REFUND sem txid nem transactionId', ['data' => $data]);
+                return response()->json(['status' => false, 'message' => 'REFUND sem identificador'], 400);
             }
 
             // ── Infração PIX (webhookType: INFRACTION) ─────────────────────────
@@ -110,6 +132,14 @@ class CallbackController extends Controller
         // Treeal pode enviar webhook sem campo "status" → considerar CONCLUIDA
         $statusNormalized   = $status !== null && $status !== '' ? strtoupper((string) $status) : 'CONCLUIDA';
         $isPaymentConfirmed = in_array($statusNormalized, ['CONCLUIDA', 'ATIVA', 'PAID', 'COMPLETED']);
+        $isRefund = in_array($statusNormalized, ['REFUNDED', 'PARTIALLY_REFUNDED']);
+
+        if ($isRefund) {
+            ProcessTreealCashInRefundJob::dispatch($txid, $webhookLog->id)->onQueue('webhooks');
+            $durationMs = round((microtime(true) - $start) * 1000, 2);
+            Log::info('[TREEAL] Cash In Refund (status no payload) enfileirado', ['txid' => $txid, 'duration_ms' => $durationMs]);
+            return ['async' => true, 'response' => response()->json(['status' => true, 'message' => 'Webhook aceito'])];
+        }
 
         if ($isPaymentConfirmed) {
             // Enfileirar processamento assíncrono
