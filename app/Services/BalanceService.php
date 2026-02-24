@@ -94,7 +94,42 @@ class BalanceService
             return $user->fresh();
         });
     }
-    
+
+    /**
+     * Decrementa saldo para estorno (permite saldo negativo).
+     * Usado quando um depósito já creditado é estornado pela adquirente.
+     *
+     * @param User $user
+     * @param float $amount
+     * @param string $field Campo a decrementar (ex.: saldo)
+     * @return User Usuário atualizado
+     */
+    public function decrementBalanceForRefund(User $user, float $amount, string $field = 'saldo'): User
+    {
+        $userId = $user->id;
+        return DB::transaction(function () use ($userId, $amount, $field) {
+            $user = User::where('id', $userId)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$user) {
+                throw new \Exception("Usuário não encontrado: {$userId}");
+            }
+
+            User::where('id', $user->id)->decrement($field, $amount);
+            $user = $user->fresh();
+
+            Log::info('Saldo debitado por estorno de depósito', [
+                'user_id'        => $user->user_id,
+                'field'          => $field,
+                'amount'         => $amount,
+                'balance_after'  => $user->$field,
+            ]);
+
+            return $user;
+        });
+    }
+
     /**
      * Atualiza saldo de forma thread-safe (set absoluto)
      * 
