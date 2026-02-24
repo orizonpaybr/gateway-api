@@ -7,6 +7,7 @@ use App\Models\App;
 use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
+use App\Services\CacheKeyService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -105,6 +106,8 @@ class AffiliateCommissionService
 
             // Atualizar status da comissão para paga
             $commission->update(['status' => 'paid']);
+
+            CacheKeyService::forgetAffiliateUser($affiliate->id);
 
             Log::info("Comissão de afiliado processada com sucesso (cash-in)", [
                 'commission_id' => $commission->id,
@@ -212,6 +215,8 @@ class AffiliateCommissionService
 
             // Atualizar status da comissão para paga
             $commission->update(['status' => 'paid']);
+
+            CacheKeyService::forgetAffiliateUser($affiliate->id);
 
             Log::info("Comissão de afiliado processada com sucesso (cash-out)", [
                 'commission_id' => $commission->id,

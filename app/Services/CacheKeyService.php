@@ -106,6 +106,34 @@ class CacheKeyService
         return 'admin:acquirers:stats';
     }
 
+
+    /** TTL em segundos: dados do programa Partners por usuário (link, saldo, indicados, ganhos) */
+    public const TTL_AFFILIATE_DATA = 15;
+
+    /**
+     * Cache key para dados do programa Partners por usuário
+     */
+    public static function affiliateData(int $userId): string
+    {
+        return "affiliate:data:{$userId}";
+    }
+
+    /**
+     * Limpar cache do programa Partners de um usuário
+     */
+    public static function forgetAffiliateUser(int $userId): void
+    {
+        try {
+            Cache::forget(self::affiliateData($userId));
+            Log::debug('Cache do programa Partners invalidado', ['user_id' => $userId]);
+        } catch (\Exception $e) {
+            Log::warning('Erro ao limpar cache do programa Partners', [
+                'user_id' => $userId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
     // --- Gamificação (Jornada Orizon) - padrão namespace:entity:identifier ---
 
     /** TTL em segundos: lista de níveis (muda raramente) */

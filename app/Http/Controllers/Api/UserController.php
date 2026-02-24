@@ -2389,7 +2389,7 @@ class UserController extends Controller
     {
         try {
             $user = $request->user();
-            
+
             if (!$user) {
                 return response()->json([
                     'success' => false,
@@ -2397,68 +2397,66 @@ class UserController extends Controller
                 ], 401);
             }
 
-            // Gerar código único se não existe
-            if (!$user->affiliate_code) {
-                // Remover espaços e caracteres especiais para código limpo
-                $userIdClean = preg_replace('/[^a-zA-Z0-9]/', '', $user->user_id);
-                $codigoBase = strtoupper(substr($userIdClean, 0, 4));
-                $numeroAleatorio = rand(1000, 9999);
-                $codigoCompleto = $codigoBase . $numeroAleatorio;
-                
-                // Verificar unicidade
-                while (User::where('affiliate_code', $codigoCompleto)->where('id', '!=', $user->id)->exists()) {
+            $cacheKey = \App\Services\CacheKeyService::affiliateData($user->id);
+            $ttl = \App\Services\CacheKeyService::TTL_AFFILIATE_DATA;
+
+            $data = \Illuminate\Support\Facades\Cache::remember($cacheKey, $ttl, function () use ($user) {
+                $user = $user->fresh();
+                if (!$user->affiliate_code) {
+                    $userIdClean = preg_replace('/[^a-zA-Z0-9]/', '', $user->user_id);
+                    $codigoBase = strtoupper(substr($userIdClean, 0, 4));
                     $numeroAleatorio = rand(1000, 9999);
                     $codigoCompleto = $codigoBase . $numeroAleatorio;
+
+                    while (User::where('affiliate_code', $codigoCompleto)->where('id', '!=', $user->id)->exists()) {
+                        $numeroAleatorio = rand(1000, 9999);
+                        $codigoCompleto = $codigoBase . $numeroAleatorio;
+                    }
+
+                    $user->affiliate_code = $codigoCompleto;
+                    $user->affiliate_link = config('app.affiliado_url') . '/cadastro?ref=' . $user->affiliate_code;
+                    $user->is_affiliate = true;
+                    $user->save();
+
+                    Log::info('[AFFILIATE LINK] Código gerado para usuário existente', [
+                        'user_id' => $user->user_id,
+                        'affiliate_code' => $codigoCompleto,
+                    ]);
                 }
-                
-                $user->affiliate_code = $codigoCompleto;
-                $user->affiliate_link = config('app.affiliado_url') . '/cadastro?ref=' . $user->affiliate_code;
-                $user->is_affiliate = true;
-                $user->save();
-                
-                Log::info('[AFFILIATE LINK] Código gerado para usuário existente', [
-                    'user_id' => $user->user_id,
-                    'affiliate_code' => $codigoCompleto,
-                ]);
-            }
 
-            $affiliatesCount = $user->clientesAffiliate()->count();
+                $affiliatesCount = $user->clientesAffiliate()->count();
+                $totalEarned = (float) \App\Models\AffiliateCommission::where('affiliate_id', $user->id)
+                    ->where('status', 'paid')
+                    ->sum('commission_value');
+                $monthlyEarned = (float) \App\Models\AffiliateCommission::where('affiliate_id', $user->id)
+                    ->where('status', 'paid')
+                    ->whereMonth('created_at', now()->month)
+                    ->whereYear('created_at', now()->year)
+                    ->sum('commission_value');
+                $currentBalance = (float) $user->fresh()->saldo_afiliado;
 
-            // Total histórico de comissões pagas (todas as comissões registradas)
-            $totalEarned = (float) \App\Models\AffiliateCommission::where('affiliate_id', $user->id)
-                ->where('status', 'paid')
-                ->sum('commission_value');
+                $baseUrl = config('app.affiliado_url');
+                $affiliateLink = $user->affiliate_code
+                    ? ($baseUrl . '/cadastro?ref=' . $user->affiliate_code)
+                    : ($user->affiliate_link ?? '');
 
-            // Comissões do mês atual
-            $monthlyEarned = (float) \App\Models\AffiliateCommission::where('affiliate_id', $user->id)
-                ->where('status', 'paid')
-                ->whereMonth('created_at', now()->month)
-                ->whereYear('created_at', now()->year)
-                ->sum('commission_value');
+                if ($user->affiliate_code && $user->affiliate_link !== $affiliateLink) {
+                    $user->update(['affiliate_link' => $affiliateLink]);
+                }
 
-            // Saldo disponível de afiliados (pode ser menor que total_earned se já sacou)
-            $currentBalance = (float) $user->saldo_afiliado;
-
-            // Sempre montar o link a partir do config (valor correto em prod, evita antigo no banco)
-            $baseUrl = config('app.affiliado_url');
-            $affiliateLink = $user->affiliate_code
-                ? ($baseUrl . '/cadastro?ref=' . $user->affiliate_code)
-                : ($user->affiliate_link ?? '');
-
-            if ($user->affiliate_code && $user->affiliate_link !== $affiliateLink) {
-                $user->update(['affiliate_link' => $affiliateLink]);
-            }
-            
-            return response()->json([
-                'success' => true,
-                'data' => [
+                return [
                     'affiliate_code' => $user->affiliate_code,
                     'affiliate_link' => $affiliateLink,
                     'affiliates_count' => $affiliatesCount,
                     'total_earned' => $totalEarned,
                     'monthly_earned' => $monthlyEarned,
                     'current_balance' => $currentBalance,
-                ]
+                ];
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $data,
             ]);
         } catch (\Exception $e) {
             Log::error('Erro ao gerar link de afiliado', [
