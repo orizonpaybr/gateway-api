@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-
 /**
  * Service para operações de saldo thread-safe
  * 
@@ -190,7 +189,7 @@ class BalanceService
             }
             
             $user = $user->fresh();
-            
+
             Log::info("Saldo combinado debitado com sucesso", [
                 'user_id' => $user->user_id,
                 'amount_total' => $amount,
@@ -201,7 +200,9 @@ class BalanceService
                 'total_before' => $saldoAfiliadoAntes + $saldoAntes,
                 'total_after' => $user->saldo_afiliado + $user->saldo,
             ]);
-            
+
+            CacheKeyService::forgetAffiliateUser($user->id);
+
             return $user;
         });
     }
