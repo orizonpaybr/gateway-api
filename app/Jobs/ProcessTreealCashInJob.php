@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\Solicitacoes;
 use App\Models\WebhookLog;
 use App\Services\PaymentProcessingService;
+use App\Jobs\ClientWebhookDispatchJob;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -60,6 +61,17 @@ class ProcessTreealCashInJob implements ShouldQueue
                 'amount'      => $cashin->amount,
                 'duration_ms' => round((microtime(true) - $jobStart) * 1000, 2),
             ]);
+
+            if (!empty($cashin->callback) && $cashin->callback !== 'web') {
+                ClientWebhookDispatchJob::dispatch(
+                    $cashin->callback,
+                    $cashin->idTransaction,
+                    'PAID_OUT',
+                    (float) $cashin->amount,
+                    now()->toIso8601String(),
+                )->onQueue('webhooks');
+            }
+
             $this->markWebhookProcessed();
         } catch (\Throwable $e) {
             Log::error('[TREEAL CashIn Job] Erro ao processar', [

@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Helpers\Helper;
+use App\Jobs\ClientWebhookDispatchJob;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
 use App\Models\WebhookLog;
@@ -101,6 +102,16 @@ class ProcessTreealCashOutJob implements ShouldQueue
                     'duration_ms'    => round((microtime(true) - $jobStart) * 1000, 2),
                 ]);
 
+                if (!empty($cashOut->callback) && $cashOut->callback !== 'web') {
+                    ClientWebhookDispatchJob::dispatch(
+                        $cashOut->callback,
+                        $cashOut->idTransaction,
+                        'PAID_OUT',
+                        (float) $cashOut->amount,
+                        now()->toIso8601String(),
+                    )->onQueue('webhooks');
+                }
+
                 $this->markWebhookProcessed();
                 return;
             }
@@ -120,6 +131,16 @@ class ProcessTreealCashOutJob implements ShouldQueue
                     'status'     => 'CANCELLED',
                     'end_to_end' => $endToEndId ?? $cashOut->end_to_end,
                 ]);
+
+                if (!empty($cashOut->callback) && $cashOut->callback !== 'web') {
+                    ClientWebhookDispatchJob::dispatch(
+                        $cashOut->callback,
+                        $cashOut->idTransaction,
+                        'CANCELLED',
+                        (float) $cashOut->amount,
+                        now()->toIso8601String(),
+                    )->onQueue('webhooks');
+                }
 
                 $this->markWebhookProcessed();
                 return;
@@ -145,6 +166,16 @@ class ProcessTreealCashOutJob implements ShouldQueue
                     'status'     => $internalStatus,
                     'end_to_end' => $endToEndId ?? $cashOut->end_to_end,
                 ]);
+
+                if (!empty($cashOut->callback) && $cashOut->callback !== 'web') {
+                    ClientWebhookDispatchJob::dispatch(
+                        $cashOut->callback,
+                        $cashOut->idTransaction,
+                        $internalStatus,
+                        (float) $cashOut->amount,
+                        now()->toIso8601String(),
+                    )->onQueue('webhooks');
+                }
 
                 $this->markWebhookProcessed();
                 return;

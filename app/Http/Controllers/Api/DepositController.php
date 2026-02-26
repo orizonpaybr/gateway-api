@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
 use App\Traits\PagarMeTrait;
 use App\Models\Solicitacoes;
+use App\Models\SolicitacoesCashOut;
 use App\Models\App;
 use App\Models\Pagarme;
 use App\Helpers\Helper;
@@ -130,10 +131,20 @@ class DepositController extends Controller
         $deposit = Solicitacoes::where('idTransaction', $request->idTransaction)
             ->orWhere('externalreference', $request->idTransaction)
             ->first();
-        if (!$deposit) {
-            return response()->json(['status' => 'NOT_FOUND']);
+
+        if ($deposit) {
+            return response()->json(['status' => $deposit->status]);
         }
-        return response()->json(['status' => $deposit->status]);
+
+        $cashOut = SolicitacoesCashOut::where('idTransaction', $request->idTransaction)
+            ->orWhere('externalreference', $request->idTransaction)
+            ->first();
+
+        if ($cashOut) {
+            return response()->json(['status' => $cashOut->status]);
+        }
+
+        return response()->json(['status' => 'NOT_FOUND']);
     }
 
     /**
