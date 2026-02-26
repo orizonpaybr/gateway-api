@@ -288,6 +288,10 @@ class SaqueController extends Controller
                 $status = $withdrawalResult['status'] ?? 'PROCESSING';
 
                 // Criar registro na tabela SolicitacoesCashOut
+                $callbackUrl = ($request->baasPostbackUrl && $request->baasPostbackUrl !== 'web')
+                    ? $request->baasPostbackUrl
+                    : null;
+
                 $cashOut = SolicitacoesCashOut::create([
                     'user_id' => $user->username,
                     'externalreference' => $transactionId,
@@ -304,6 +308,7 @@ class SaqueController extends Controller
                     'cash_out_liquido' => $cashOutLiquido,
                     'descricao_transacao' => 'AUTOMATICO',
                     'executor_ordem' => 'Treeal',
+                    'callback' => $callbackUrl,
                 ]);
 
                 // Debitar do saldo combinado (saldo_afiliado primeiro, depois saldo)
@@ -340,6 +345,10 @@ class SaqueController extends Controller
                 // Saque automático é processado no bloco anterior (Treeal + débito na hora).
                 $transactionId = str()->uuid()->toString();
 
+                $callbackUrl = ($request->baasPostbackUrl && $request->baasPostbackUrl !== 'web')
+                    ? $request->baasPostbackUrl
+                    : null;
+
                 $cashOut = SolicitacoesCashOut::create([
                     'user_id' => $user->username,
                     'externalreference' => $transactionId,
@@ -356,6 +365,7 @@ class SaqueController extends Controller
                     'cash_out_liquido' => $cashOutLiquido,
                     'descricao_transacao' => 'MANUAL',
                     'executor_ordem' => null, // Manual = sem executor automático
+                    'callback' => $callbackUrl,
                 ]);
 
                 // Debitar do saldo combinado (saldo_afiliado primeiro, depois saldo)
