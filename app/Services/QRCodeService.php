@@ -221,15 +221,10 @@ class QRCodeService
     {
         try {
             if (config('cache.default') === 'redis') {
-                $redis = \Illuminate\Support\Facades\Redis::connection(
-                    config('cache.stores.redis.connection', 'cache')
-                );
+                $connection = config('cache.stores.redis.connection', 'cache');
                 $cachePrefix = config('cache.prefix', '');
                 $pattern = ($cachePrefix ? $cachePrefix . ':' : '') . "qrcodes:dynamic:{$username}:*";
-                $keys = $redis->keys($pattern);
-                if (!empty($keys)) {
-                    $redis->del($keys);
-                }
+                \App\Helpers\RedisScanner::scanAndDelete($connection, $pattern);
             } else {
                 // Fallback: limpar combinações de página 1 com os filtros mais comuns
                 foreach (['all', null] as $status) {

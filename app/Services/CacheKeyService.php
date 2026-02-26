@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Helpers\RedisScanner;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\{Cache, Log, Redis};
 
@@ -212,18 +213,11 @@ class CacheKeyService
             Cache::forget(self::gamificationNiveis());
             if (config('cache.default') === 'redis') {
                 $cacheConnection = config('cache.stores.redis.connection', 'cache');
-                $redis = Redis::connection($cacheConnection);
                 $prefix = config('cache.prefix', '');
-                $pattern = (!empty($prefix) ? $prefix . ':' : '') . 'gamification_data_user_*';
-                $keys = $redis->keys($pattern);
-                if (!empty($keys) && is_array($keys)) {
-                    $redis->del($keys);
-                }
-                $pattern = (!empty($prefix) ? $prefix . ':' : '') . 'sidebar_gamification_user_*';
-                $keys = $redis->keys($pattern);
-                if (!empty($keys) && is_array($keys)) {
-                    $redis->del($keys);
-                }
+                $pattern1 = (!empty($prefix) ? $prefix . ':' : '') . 'gamification_data_user_*';
+                RedisScanner::scanAndDelete($cacheConnection, $pattern1);
+                $pattern2 = (!empty($prefix) ? $prefix . ':' : '') . 'sidebar_gamification_user_*';
+                RedisScanner::scanAndDelete($cacheConnection, $pattern2);
             }
             Log::info('Cache de gamificação (niveis e usuários) invalidado');
         } catch (\Exception $e) {
@@ -345,26 +339,16 @@ class CacheKeyService
             // Limpar cache de estatísticas
             Cache::forget(self::managersStats());
             
-            // Limpar cache de listas de gerentes usando Redis diretamente
+            // Limpar cache de listas de gerentes usando Redis (SCAN para não bloquear)
             if (config('cache.default') === 'redis') {
                 try {
-                    // Obter a conexão Redis usada pelo cache (mesmo padrão do CacheMetricsService)
                     $cacheConnection = config('cache.stores.redis.connection', 'cache');
-                    $redis = Redis::connection($cacheConnection);
-                    
-                    // Aplicar prefixo do cache se existir
                     $prefix = config('cache.prefix', '');
                     $pattern = !empty($prefix) ? $prefix . 'admin:managers:list:*' : 'admin:managers:list:*';
-                    
-                    $keys = $redis->keys($pattern);
-                    if (!empty($keys) && is_array($keys)) {
-                        // Usar array_chunk para evitar problemas com muitas chaves
-                        $chunks = array_chunk($keys, 100);
-                        foreach ($chunks as $chunk) {
-                            $redis->del($chunk);
-                        }
+                    $removed = RedisScanner::scanAndDelete($cacheConnection, $pattern);
+                    if ($removed > 0) {
                         Log::info('Cache de listas de gerentes limpo via Redis', [
-                            'keys_removed' => count($keys)
+                            'keys_removed' => $removed
                         ]);
                     }
                 } catch (\Exception $e) {

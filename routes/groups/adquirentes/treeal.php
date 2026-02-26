@@ -11,4 +11,4 @@ use Illuminate\Support\Facades\Route;
 
 // Webhook para receber notificações da Treeal/ONZ
 Route::post('treeal/webhook', [CallbackController::class, 'webhookTreeal'])
-    ->middleware(['validate.webhook', 'throttle:30,1']);
+    ->middleware(['validate.webhook', 'throttle:500,1']);

@@ -2,7 +2,7 @@
 
 namespace App\Services;
 
-use Illuminate\Support\Facades\Cache;
+use App\Helpers\RedisScanner;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Log;
 
@@ -160,23 +160,12 @@ class CacheMetricsService
     private function countKeysByPattern(\Illuminate\Redis\Connections\Connection $redis, string $pattern): int
     {
         try {
-            // Usar KEYS diretamente - mais simples e confiável
-            // Em produção com muitas chaves, considere desabilitar esta funcionalidade
-            // ou usar um contador incremental mantido pelo sistema
-            $keys = $redis->keys($pattern);
-            
-            if (is_array($keys)) {
-                return count($keys);
-            }
-            
-            return 0;
+            return RedisScanner::scanCount($redis, $pattern);
         } catch (\Exception $e) {
             Log::warning('Erro ao contar chaves Redis', [
                 'pattern' => $pattern,
                 'error' => $e->getMessage(),
             ]);
-            
-            // Retornar 0 em caso de erro para não quebrar a aplicação
             return 0;
         }
     }
@@ -244,23 +233,12 @@ class CacheMetricsService
     public function clearFinancialCache(): bool
     {
         try {
-            // Usar a mesma conexão Redis que o cache utiliza
             $redis = $this->getCacheRedisConnection();
-            
-            // Aplicar prefixo do cache
             $pattern = $this->applyCachePrefix('financial:*');
-            $keys = $redis->keys($pattern);
-            
-            if (!empty($keys) && is_array($keys)) {
-                // Usar array_chunk para evitar problemas com muitas chaves
-                $chunks = array_chunk($keys, 100);
-                foreach ($chunks as $chunk) {
-                    $redis->del($chunk);
-                }
-            }
-            
+            $keysCount = RedisScanner::scanAndDelete($redis, $pattern);
+
             Log::info('Cache financeiro limpo manualmente', [
-                'keys_count' => is_array($keys) ? count($keys) : 0,
+                'keys_count' => $keysCount,
                 'pattern' => $pattern,
             ]);
             return true;

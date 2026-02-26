@@ -226,15 +226,10 @@ class PaymentProcessingService
     {
         try {
             if (config('cache.default') === 'redis') {
-                $redis = \Illuminate\Support\Facades\Redis::connection(
-                    config('cache.stores.redis.connection', 'cache')
-                );
+                $connection = config('cache.stores.redis.connection', 'cache');
                 $cachePrefix = config('cache.prefix', '');
                 $pattern = ($cachePrefix ? $cachePrefix . ':' : '') . $prefix . '*';
-                $keys = $redis->keys($pattern);
-                if (!empty($keys)) {
-                    $redis->del($keys);
-                }
+                \App\Helpers\RedisScanner::scanAndDelete($connection, $pattern);
             } else {
                 // Fallback para drivers sem suporte a padrão: limpar combinações conhecidas de período
                 foreach (['hoje', 'ontem', '7dias', '30dias'] as $periodo) {

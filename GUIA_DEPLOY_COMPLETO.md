@@ -173,11 +173,18 @@ DB_USERNAME=gateway_user
 DB_PASSWORD=sua_senha_aqui
 
 CACHE_DRIVER=redis
+CACHE_STORE=redis
 REDIS_HOST=127.0.0.1
 REDIS_PASSWORD=null
 REDIS_PORT=6379
 
+# Fila: database (padrão) ou redis (melhor performance em alto volume)
 QUEUE_CONNECTION=database
+# Se usar redis para fila, descomente e reinicie os workers (Passo 7):
+# QUEUE_CONNECTION=redis
+# REDIS_QUEUE_CONNECTION=queue
+# REDIS_QUEUE_DB=2
+
 SESSION_DRIVER=redis
 ```
 
@@ -255,10 +262,14 @@ cd /var/www/gateway-api
 sudo ./scripts/setup-supervisor.sh
 ```
 
+O script configura **4 workers** para a fila `webhooks` (PIX) e `default`. Confirme que os 4 processos estão ativos.
+
 **Verificar:**
 ```bash
 sudo supervisorctl status gateway-api-queue:*
 ```
+
+**Fila com Redis (opcional, mais performance):** Se quiser usar Redis em vez de database para a fila (recomendado em alto volume), no `.env` defina `QUEUE_CONNECTION=redis` e `REDIS_QUEUE_CONNECTION=queue`. A aplicação usa o Redis DB 2 para a fila (cache em DB 1, sessão em DB 0). Depois **reinicie os workers**: `sudo supervisorctl restart gateway-api-queue:*`.
 
 **Comandos úteis:**
 ```bash
