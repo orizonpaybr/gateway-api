@@ -286,6 +286,7 @@ class SaqueController extends Controller
 
                 $transactionId = $withdrawalResult['transaction_id'] ?? $withdrawalResult['id'] ?? null;
                 $status = $withdrawalResult['status'] ?? 'PROCESSING';
+                $endToEndId = $withdrawalResult['end_to_end_id'] ?? null;
 
                 // Criar registro na tabela SolicitacoesCashOut
                 $callbackUrl = ($request->baasPostbackUrl && $request->baasPostbackUrl !== 'web')
@@ -306,6 +307,7 @@ class SaqueController extends Controller
                     'idTransaction' => $transactionId,
                     'taxa_cash_out' => $taxaTotal,
                     'cash_out_liquido' => $cashOutLiquido,
+                    'end_to_end' => $endToEndId,
                     'descricao_transacao' => 'AUTOMATICO',
                     'executor_ordem' => 'Treeal',
                     'callback' => $callbackUrl,
