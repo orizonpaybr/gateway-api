@@ -49,8 +49,10 @@ BROADCAST_CONNECTION=log
 # Configurações de Arquivos
 FILESYSTEM_DISK=local
 
-# Configurações de Queue
+# Configurações de Queue (database ou redis para melhor performance)
 QUEUE_CONNECTION=database
+# REDIS_QUEUE_CONNECTION=queue
+# REDIS_QUEUE_DB=2
 
 # Configurações de Cache
 CACHE_STORE=database
@@ -58,7 +60,7 @@ CACHE_STORE=database
 # Configurações do Memcached
 MEMCACHED_HOST=127.0.0.1
 
-# Configurações do Redis
+# Configurações do Redis (cache, sessão e opcionalmente fila)
 REDIS_CLIENT=phpredis
 REDIS_HOST=127.0.0.1
 REDIS_PASSWORD=null

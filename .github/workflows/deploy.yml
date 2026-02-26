@@ -1,174 +1,102 @@
-name: 🚀 Deploy to Production
+# Deploy: em push para main/master roda testes (uma vez) e depois deploy para produção.
+# Testes em PR são feitos pelo workflow tests.yml.
+name: Deploy to Production
 
 on:
   push:
     branches:
       - main
       - master
-  workflow_dispatch: # Permite execução manual
-
-env:
-  PHP_VERSION: '8.2'
-  NODE_VERSION: '18'
+  workflow_dispatch:
 
 jobs:
-  # Job 1: Executar testes
   test:
-    name: 🧪 Run Tests
-    runs-on: ubuntu-latest
-    
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: root
-          MYSQL_DATABASE: gateway_api_test
-          MYSQL_USER: gateway
-          MYSQL_PASSWORD: 123456
-        ports:
-          - 3306:3306
-        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+    name: Run Tests
+    uses: ./.github/workflows/run-tests.yml
 
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: --health-cmd="redis-cli ping" --health-interval=10s --health-timeout=5s --health-retries=3
-
-    steps:
-      - name: 📥 Checkout code
-        uses: actions/checkout@v4
-
-      - name: 📦 Cache Composer dependencies
-        uses: actions/cache@v4
-        with:
-          path: vendor
-          key: php-${{ hashFiles('**/composer.lock') }}
-          restore-keys: php-
-
-      - name: 🐘 Setup PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: ${{ env.PHP_VERSION }}
-          extensions: mbstring, xml, bcmath, pdo_mysql, redis, gd, fileinfo, openssl, tokenizer, ctype, json
-          coverage: none
-
-      - name: 📦 Install Composer dependencies
-        run: composer install --prefer-dist --no-progress --no-interaction
-
-      - name: 🔐 Security audit (dependências PHP)
-        run: composer audit --no-interaction --abandoned=ignore
-
-      - name: 📝 Copy .env for testing
-        run: |
-          cp .env.example .env || cp env_example.txt .env || true
-          php artisan key:generate
-
-      - name: 🧪 Run PHPUnit tests (suite Pipeline – testes essenciais do back-end)
-        env:
-          DB_CONNECTION: mysql
-          DB_HOST: 127.0.0.1
-          DB_PORT: 3306
-          DB_DATABASE: gateway_api_test
-          DB_USERNAME: gateway
-          DB_PASSWORD: 123456
-          APP_KEY: base64:iVoKOkyma32te1Ai0lq7UmR8RCCv3R9OsYAiAH8ZFMY=
-          JWT_SECRET: test_jwt_secret_key_for_automated_tests_only_do_not_use_in_production
-          CACHE_STORE: redis
-          REDIS_HOST: 127.0.0.1
-          REDIS_PORT: 6379
-        run: |
-          php artisan migrate --env=testing --force || true
-          php artisan test --testsuite=Pipeline --colors=always
-
-  # Job 2: Deploy para produção
   deploy:
-    name: 🚀 Deploy to Production
+    name: Deploy to Production
     needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-    
+
     steps:
-      - name: 📥 Checkout code
+      - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: 🔐 Setup SSH
+      - name: Setup SSH
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
-      - name: 🔍 Add server to known hosts
+      - name: Add server to known hosts
         run: |
           mkdir -p ~/.ssh
           ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
 
-      - name: 🚀 Deploy to server
+      - name: Deploy to server
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
           APP_DIR: ${{ secrets.APP_DIR }}
         run: |
-          echo "🚀 Iniciando deploy..."
-          
+          echo "Iniciando deploy..."
           ssh $SERVER_USER@$SERVER_HOST bash << EOF
             set -e
             cd $APP_DIR || exit 1
-            
-            echo "📥 Fazendo pull do código..."
+
+            echo "Fazendo pull do código..."
             git fetch origin
             git reset --hard HEAD
             git clean -fd
             git checkout main
             git reset --hard origin/main
-            
-            echo "📦 Instalando dependências..."
+
+            echo "Instalando dependências..."
             composer install --no-interaction --prefer-dist --optimize-autoloader --no-dev
-            
-            echo "🔐 Configurando permissões..."
+
+            echo "Configurando permissões..."
             sudo chown -R gateway:www-data $APP_DIR
             sudo chmod -R 775 storage bootstrap/cache
-            
-            echo "🗄️ Executando migrations..."
+
+            echo "Executando migrations..."
             sudo -u gateway php artisan migrate --force
-            
-            echo "🧹 Limpando cache..."
+
+            echo "Limpando cache..."
             sudo -u gateway php artisan config:clear
             sudo -u gateway php artisan route:clear
             sudo -u gateway php artisan cache:clear
-            
-            echo "⚡ Otimizando para produção..."
+
+            echo "Otimizando para produção..."
             sudo -u gateway php artisan config:cache
             sudo -u gateway php artisan route:cache
             sudo -u gateway php artisan optimize
-            
-            echo "🔄 Reiniciando PHP-FPM..."
+
+            echo "Reiniciando PHP-FPM..."
             sudo systemctl restart php8.2-fpm
-            
-            echo "✅ Deploy concluído com sucesso!"
+
+            echo "Deploy concluído com sucesso!"
           EOF
 
-      # Após trocar domínio/certificado: atualizar no GitHub (Settings → Secrets):
-      # - SERVER_HOST = novo domínio (ex: api.seudominio.com.br) ou IP
-      # - HEALTH_CHECK_URL = URL completa do health check (ex: https://api.seudominio.com.br/up)
-      - name: ✅ Health Check
+      - name: Health Check
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           HEALTH_CHECK_URL: ${{ secrets.HEALTH_CHECK_URL }}
         run: |
-          echo "🔍 Verificando saúde da aplicação..."
+          echo "Verificando saúde da aplicação..."
           sleep 5
           URL="${HEALTH_CHECK_URL:-https://$SERVER_HOST/up}"
           echo "URL do health check: $URL"
           curl -f --connect-timeout 15 --max-time 20 "$URL" || exit 1
-          echo "✅ Aplicação está respondendo!"
+          echo "Aplicação está respondendo!"
 
-      - name: 📢 Notify deployment
+      - name: Notify deployment
         if: always()
         run: |
           if [ "${{ job.status }}" == "success" ]; then
-            echo "✅ Deploy concluído com sucesso!"
+            echo "Deploy concluído com sucesso!"
           else
-            echo "❌ Deploy falhou!"
+            echo "Deploy falhou!"
           fi
