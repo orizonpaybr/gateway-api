@@ -139,11 +139,11 @@ class User extends Authenticatable
             'twofa_enabled_at' => 'datetime',
             "webhook_endpoint" => 'array',
             'taxas_personalizadas_ativas' => 'boolean',
-            // Taxas em centavos
-            'taxa_fixa_deposito' => 'decimal:2',
-            'taxa_fixa_pix' => 'decimal:2',
+            // Taxas em reais (até 3 decimais, ex.: 0,015)
+            'taxa_fixa_deposito' => 'decimal:3',
+            'taxa_fixa_pix' => 'decimal:3',
             'limite_mensal_pf' => 'decimal:2',
-            'taxa_comissao_afiliado' => 'decimal:2',
+            'taxa_comissao_afiliado' => 'decimal:3',
             'comissao_afiliado_personalizada' => 'boolean',
         ];
     }
