@@ -15,8 +15,10 @@ use Symfony\Component\HttpFoundation\Response;
  * 
  * Configuração (.env):
  * FRONTEND_URL=http://localhost:3000 (desenvolvimento)
- * FRONTEND_URL=https://app.orizon.com (produção)
- * 
+ * FRONTEND_URL=https://finance.orizonpay.com (produção)
+ * CORS_ALLOWED_ORIGINS (opcional): lista separada por vírgula para múltiplas origens em produção.
+ *   Ex.: https://finance.orizonpay.com,https://www.finance.orizonpay.com
+ *
  * IMPORTANTE: Em produção, NUNCA usar Access-Control-Allow-Origin: *
  */
 class SecureCors
@@ -48,15 +50,20 @@ class SecureCors
     private function getAllowedOrigins(): array
     {
         $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
-        
-        // Em produção, usar apenas a URL configurada
+
+        // Em produção: CORS_ALLOWED_ORIGINS (vírgula) ou apenas FRONTEND_URL
         if (app()->environment('production')) {
+            $allowed = env('CORS_ALLOWED_ORIGINS');
+            if ($allowed !== null && $allowed !== '') {
+                $origins = array_map('trim', explode(',', $allowed));
+                return array_values(array_unique(array_filter($origins)));
+            }
             return array_filter([$frontendUrl]);
         }
 
         // Em desenvolvimento, permitir localhost em várias portas
         $origins = [$frontendUrl];
-        
+
         // Adicionar variações comuns de localhost apenas em dev
         $origins[] = 'http://localhost:3000';
         $origins[] = 'http://localhost:3001';

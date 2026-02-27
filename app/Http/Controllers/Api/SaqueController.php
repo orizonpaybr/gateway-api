@@ -79,8 +79,8 @@ class SaqueController extends Controller
         
         // Nota: A verificação de IP é feita pelo middleware CheckAllowedIP
 
-        // Verificar saldo disponível (considerando valores em mediação)
-        $saldoDisponivel = (float) $user->saldo;
+        // Verificar saldo disponível = saldo principal + saldo de afiliados (considerando valores em mediação)
+        $saldoDisponivel = (float) ($user->saldo ?? 0) + (float) ($user->saldo_afiliado ?? 0);
         
         // Calcular valores bloqueados em mediação
         $valoresEmMediacao = \App\Models\Solicitacoes::where('user_id', $user->id)
