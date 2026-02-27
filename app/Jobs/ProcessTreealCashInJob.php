@@ -63,12 +63,25 @@ class ProcessTreealCashInJob implements ShouldQueue
             ]);
 
             if (!empty($cashin->callback) && $cashin->callback !== 'web') {
+                $extra = [
+                    'typeTransaction' => 'PIX_IN',
+                    'payer' => [
+                        'name'     => $cashin->client_name ?? null,
+                        'document' => $cashin->client_document ?? null,
+                        'email'    => $cashin->client_email ?? null,
+                        'phone'    => $cashin->client_telefone ?? null,
+                    ],
+                    'receiver' => [
+                        'user_id' => $cashin->user_id ?? null,
+                    ],
+                ];
                 ClientWebhookDispatchJob::dispatch(
                     $cashin->callback,
-                    $cashin->idTransaction,
+                    $cashin->idTransaction ?? (string) $cashin->id,
                     'PAID_OUT',
                     (float) $cashin->amount,
                     now()->toIso8601String(),
+                    $extra
                 )->onQueue('webhooks');
             }
 

@@ -26,12 +26,16 @@ class ClientWebhookDispatchJob implements ShouldQueue
 
     public int $backoff = 5;
 
+    /**
+     * @param array<string, mixed> $extraPayload Campos adicionais (ex.: typeTransaction, payer, beneficiary, receiver, sender). Apenas chaves com valor não vazio são enviadas.
+     */
     public function __construct(
         private string $callbackUrl,
         private string $idTransaction,
         private string $status,
         private float $amount,
         private ?string $paidAt = null,
+        private array $extraPayload = [],
     ) {}
 
     public function handle(): void
@@ -40,12 +44,15 @@ class ClientWebhookDispatchJob implements ShouldQueue
             return;
         }
 
-        $payload = [
-            'idTransaction' => $this->idTransaction,
-            'status'        => $this->status,
-            'amount'        => $this->amount,
-            'paidAt'        => $this->paidAt ?? now()->toIso8601String(),
-        ];
+        $payload = array_merge(
+            [
+                'idTransaction' => $this->idTransaction,
+                'status'        => $this->status,
+                'amount'        => $this->amount,
+                'paidAt'        => $this->paidAt ?? now()->toIso8601String(),
+            ],
+            $this->filterEmpty($this->extraPayload)
+        );
 
         try {
             $response = Http::timeout(10)
@@ -77,5 +84,27 @@ class ClientWebhookDispatchJob implements ShouldQueue
             ]);
             // Não relança: falha no webhook do cliente não deve interromper a fila interna.
         }
+    }
+
+    /**
+     * Remove chaves com valor null ou string vazia; recursivo para arrays aninhados (ex.: payer, beneficiary).
+     *
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    private function filterEmpty(array $data): array
+    {
+        $out = [];
+        foreach ($data as $key => $value) {
+            if (is_array($value)) {
+                $filtered = $this->filterEmpty($value);
+                if ($filtered !== []) {
+                    $out[$key] = $filtered;
+                }
+            } elseif ($value !== null && $value !== '') {
+                $out[$key] = $value;
+            }
+        }
+        return $out;
     }
 }
