@@ -18,8 +18,11 @@ class SaqueInterfaceHelper
     {
         $setting = App::first();
         
+        // Saldo disponível = saldo principal + saldo de afiliados (pode sacar pelo PIX normalmente)
+        $saldoTotal = (float) ($user->saldo ?? 0) + (float) ($user->saldo_afiliado ?? 0);
+        
         // Calcular valor máximo que pode ser sacado
-        $valorMaximo = TaxaSaqueHelper::calcularValorMaximoSaque($user->saldo, $setting, $user, true);
+        $valorMaximo = TaxaSaqueHelper::calcularValorMaximoSaque($saldoTotal, $setting, $user, true);
         
         // Se valor foi solicitado, calcular taxas para esse valor
         $taxasSolicitadas = null;
@@ -28,13 +31,13 @@ class SaqueInterfaceHelper
         }
         
         return [
-            'saldo_disponivel' => $user->saldo,
+            'saldo_disponivel' => $saldoTotal,
             'valor_maximo_saque' => $valorMaximo['valor_maximo'],
             'taxa_total_maxima' => $valorMaximo['taxa_total'],
             'saldo_restante_maximo' => $valorMaximo['saldo_restante'],
             'taxas_solicitadas' => $taxasSolicitadas,
-            'pode_sacar' => $valorSolicitado !== null ? $user->saldo >= $taxasSolicitadas['valor_total_descontar'] : false,
-            'valor_restante' => $valorSolicitado !== null ? $user->saldo - $taxasSolicitadas['valor_total_descontar'] : null
+            'pode_sacar' => $valorSolicitado !== null ? $saldoTotal >= $taxasSolicitadas['valor_total_descontar'] : false,
+            'valor_restante' => $valorSolicitado !== null ? $saldoTotal - $taxasSolicitadas['valor_total_descontar'] : null
         ];
     }
 
@@ -53,7 +56,7 @@ class SaqueInterfaceHelper
             return [
                 'valido' => false,
                 'erro' => "Saldo insuficiente. Necessário: R$ " . number_format($informacoes['taxas_solicitadas']['valor_total_descontar'], 2, ',', '.') . 
-                         ", Disponível: R$ " . number_format($user->saldo, 2, ',', '.') . 
+                         ", Disponível: R$ " . number_format($informacoes['saldo_disponivel'], 2, ',', '.') . 
                          ". Valor máximo para saque: R$ " . number_format($informacoes['valor_maximo_saque'], 2, ',', '.'),
                 'informacoes' => $informacoes
             ];

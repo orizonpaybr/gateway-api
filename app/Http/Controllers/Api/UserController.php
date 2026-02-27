@@ -76,8 +76,8 @@ class UserController extends Controller
             $totalInflows = $balanceData['totalInflows'];
             $totalOutflows = $balanceData['totalOutflows'];
 
-            // Arredondar todos os valores monetários para 2 casas decimais (evita problemas de precisão de ponto flutuante)
-            $currentBalance = round((float) ($user->saldo ?? 0), 2);
+            // Saldo disponível = saldo principal + saldo de afiliados (para exibição e saque)
+            $currentBalance = round((float) ($user->saldo ?? 0) + (float) ($user->saldo_afiliado ?? 0), 2);
             $totalInflowsRounded = round((float) $totalInflows, 2);
             $totalOutflowsRounded = round((float) $totalOutflows, 2);
 
@@ -1311,7 +1311,8 @@ class UserController extends Controller
             $startOfMonth = \Carbon\Carbon::now()->startOfMonth();
             $endOfMonth = \Carbon\Carbon::now()->endOfMonth();
 
-            $saldoFresco = (float) (\App\Models\User::where('id', $user->id)->value('saldo') ?? 0);
+            $userSaldo = \App\Models\User::where('id', $user->id)->first(['saldo', 'saldo_afiliado']);
+            $saldoFresco = $userSaldo ? ((float) ($userSaldo->saldo ?? 0) + (float) ($userSaldo->saldo_afiliado ?? 0)) : 0;
 
             $cacheKey = sprintf('dash:stats:%s:%s:%s', $user->username, $startOfMonth->format('Ym'), $endOfMonth->format('Ym'));
             $payload = cache()->remember($cacheKey, 10, function () use ($user, $startOfMonth, $endOfMonth) {

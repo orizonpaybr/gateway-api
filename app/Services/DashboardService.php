@@ -77,10 +77,11 @@ class DashboardService
             $depositos = $results[0] ?? (object)['total_pago' => 0, 'total_taxa' => 0];
             $saques = $results[1] ?? (object)['total_pago' => 0, 'total_taxa' => 0];
 
-            // Buscar saldo disponível (otimizado)
-            $saldoDisponivel = DB::table('users')
+            // Buscar saldo disponível = saldo principal + saldo de afiliados (otimizado)
+            $row = DB::table('users')
                 ->where('username', $username)
-                ->value('saldo') ?? 0;
+                ->first(['saldo', 'saldo_afiliado']);
+            $saldoDisponivel = $row ? ((float) ($row->saldo ?? 0) + (float) ($row->saldo_afiliado ?? 0)) : 0;
 
             // Buscar splits do mês (se tabela existir)
             $splitsMes = 0;
