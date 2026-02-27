@@ -105,10 +105,11 @@ class ProcessTreealCashOutJob implements ShouldQueue
                 if (!empty($cashOut->callback) && $cashOut->callback !== 'web') {
                     ClientWebhookDispatchJob::dispatch(
                         $cashOut->callback,
-                        $cashOut->idTransaction,
+                        $cashOut->idTransaction ?? (string) $cashOut->id,
                         'PAID_OUT',
                         (float) $cashOut->amount,
                         now()->toIso8601String(),
+                        $this->buildCashOutWebhookExtra($cashOut)
                     )->onQueue('webhooks');
                 }
 
@@ -135,10 +136,11 @@ class ProcessTreealCashOutJob implements ShouldQueue
                 if (!empty($cashOut->callback) && $cashOut->callback !== 'web') {
                     ClientWebhookDispatchJob::dispatch(
                         $cashOut->callback,
-                        $cashOut->idTransaction,
+                        $cashOut->idTransaction ?? (string) $cashOut->id,
                         'CANCELLED',
                         (float) $cashOut->amount,
                         now()->toIso8601String(),
+                        $this->buildCashOutWebhookExtra($cashOut)
                     )->onQueue('webhooks');
                 }
 
@@ -170,10 +172,11 @@ class ProcessTreealCashOutJob implements ShouldQueue
                 if (!empty($cashOut->callback) && $cashOut->callback !== 'web') {
                     ClientWebhookDispatchJob::dispatch(
                         $cashOut->callback,
-                        $cashOut->idTransaction,
+                        $cashOut->idTransaction ?? (string) $cashOut->id,
                         $internalStatus,
                         (float) $cashOut->amount,
                         now()->toIso8601String(),
+                        $this->buildCashOutWebhookExtra($cashOut)
                     )->onQueue('webhooks');
                 }
 
@@ -268,5 +271,27 @@ class ProcessTreealCashOutJob implements ShouldQueue
             'status' => 'FAILED',
             'error'  => $error,
         ]);
+    }
+
+    /**
+     * Monta payload extra do webhook para o cliente (Cash Out): tipo, beneficiário e conta que solicitou.
+     *
+     * @return array<string, mixed>
+     */
+    private function buildCashOutWebhookExtra(SolicitacoesCashOut $cashOut): array
+    {
+        $pixKey = $cashOut->pix ?? $cashOut->pixkey ?? null;
+
+        return [
+            'typeTransaction' => 'PIX_OUT',
+            'beneficiary' => [
+                'name'     => $cashOut->beneficiaryname ?? null,
+                'document' => $cashOut->beneficiarydocument ?? null,
+                'pixKey'   => $pixKey,
+            ],
+            'sender' => [
+                'user_id' => $cashOut->user_id ?? null,
+            ],
+        ];
     }
 }
