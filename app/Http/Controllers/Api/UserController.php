@@ -229,6 +229,21 @@ class UserController extends Controller
                 $saquesQuery->whereIn('status', ['PAID_OUT', 'COMPLETED']);
             }
 
+            // Extrato/Depósitos: só mostrar status finais (pago, falha, cancelado, estorno, contestação)
+            if ($tipo === 'deposito') {
+                $depositosQuery->whereIn('status', [
+                    'PAID_OUT',
+                    'COMPLETED',
+                    'FAILED',
+                    'CANCELLED',
+                    'REFUNDED',
+                    'PARTIALLY_REFUNDED',
+                    'CHARGEBACK',
+                    'MEDIATION',
+                    'DISPUTE',
+                ]);
+            }
+
             // Aplicar filtro de busca se fornecido
             if ($busca && trim($busca) !== '') {
                 $this->applyTransactionsSearchFilter($depositosQuery, $saquesQuery, trim($busca));
@@ -1018,6 +1033,11 @@ class UserController extends Controller
             'FAILED' => 'Falhou',
             'CANCELLED' => 'Cancelada',
             'PROCESSING' => 'Processando',
+            'REFUNDED' => 'Estornado',
+            'PARTIALLY_REFUNDED' => 'Estornado (parcial)',
+            'CHARGEBACK' => 'Chargeback',
+            'MEDIATION' => 'Mediação',
+            'DISPUTE' => 'Disputa',
         ];
 
         return $statusMap[$status] ?? ucfirst(strtolower(str_replace('_', ' ', $status)));
