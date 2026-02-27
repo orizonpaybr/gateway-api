@@ -81,11 +81,11 @@ class App extends Model
         'relatorio_saidas_mostrar_status' => 'boolean',
         'relatorio_saidas_mostrar_data' => 'boolean',
         'relatorio_saidas_mostrar_taxa' => 'boolean',
-        // Casts de valores numéricos (taxas em centavos)
-        'taxa_fixa_padrao' => 'decimal:2',
+        // Casts de valores numéricos (taxas em reais, até 3 decimais ex.: 0,015)
+        'taxa_fixa_padrao' => 'decimal:3',
         'taxa_fixa_padrao_cash_out' => 'decimal:2',
-        'taxa_fixa_pix' => 'decimal:2',
-        'taxa_comissao_afiliado_padrao' => 'decimal:2',
+        'taxa_fixa_pix' => 'decimal:3',
+        'taxa_comissao_afiliado_padrao' => 'decimal:3',
         'limite_saque_mensal' => 'decimal:2',
     ];
 
