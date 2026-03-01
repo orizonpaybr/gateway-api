@@ -2,10 +2,11 @@
 
 namespace App\Jobs;
 
+use App\Helpers\WebhookClientMessages;
+use App\Jobs\ClientWebhookDispatchJob;
 use App\Models\Solicitacoes;
 use App\Models\WebhookLog;
 use App\Services\PaymentProcessingService;
-use App\Jobs\ClientWebhookDispatchJob;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -79,9 +80,20 @@ class ProcessTreealCashInJob implements ShouldQueue
                 'duration_ms' => round((microtime(true) - $jobStart) * 1000, 2),
             ]);
 
+            $endToEndId = $payload['endToEndId'] ?? $payload['end_to_end_id'] ?? null;
+            if ($endToEndId === null && isset($payload['data']) && is_array($payload['data'])) {
+                $endToEndId = $payload['data']['endToEndId'] ?? $payload['data']['end_to_end_id'] ?? null;
+            }
+            $endToEndId = (is_string($endToEndId) && $endToEndId !== '') ? $endToEndId : null;
+            if ($endToEndId !== null && empty($cashin->end_to_end)) {
+                $cashin->update(['end_to_end' => $endToEndId]);
+            }
+
             if (!empty($cashin->callback) && $cashin->callback !== 'web') {
                 $extra = [
                     'typeTransaction' => 'PIX_IN',
+                    'txid'            => $this->txid,
+                    'endToEndId'      => $endToEndId,
                     'payer' => [
                         'name'     => $cashin->client_name ?? null,
                         'document' => $cashin->client_document ?? null,
@@ -92,13 +104,15 @@ class ProcessTreealCashInJob implements ShouldQueue
                         'user_id' => $cashin->user_id ?? null,
                     ],
                 ];
+                $message = WebhookClientMessages::getMessageForStatus('PAID_OUT', 'PIX_IN', null);
                 ClientWebhookDispatchJob::dispatch(
                     $cashin->callback,
                     $cashin->idTransaction ?? (string) $cashin->id,
                     'PAID_OUT',
                     (float) $cashin->amount,
                     now()->toIso8601String(),
-                    $extra
+                    $extra,
+                    $message
                 )->onQueue('webhooks');
             }
 
