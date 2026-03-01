@@ -49,6 +49,12 @@ class WebhookClientMessages
                 ? 'Depósito PIX recebido com sucesso.'
                 : 'Saque PIX liquidado com sucesso.';
         }
+        if ($statusUpper === 'REFUNDED' && $typeTransaction === 'PIX_IN') {
+            return 'Depósito PIX estornado.';
+        }
+        if ($statusUpper === 'PARTIALLY_REFUNDED' && $typeTransaction === 'PIX_IN') {
+            return 'Depósito PIX estornado parcialmente.';
+        }
         if (isset(self::STATUS_MESSAGES[$statusUpper])) {
             return self::STATUS_MESSAGES[$statusUpper];
         }

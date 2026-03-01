@@ -570,7 +570,7 @@ class TreealService
                 'grant_type'    => 'client_credentials',
                 'client_id'     => trim($clientId),
                 'client_secret' => trim($clientSecret),
-                'scope'         => 'pix.write pix.read transactions.read account.read webhook.read webhook.write',
+                'scope'         => 'pix.write pix.read transactions.read account.read webhook.read webhook.write infractions.read infractions.write',
             ];
 
             $response = Http::withOptions([

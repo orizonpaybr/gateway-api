@@ -190,7 +190,7 @@ class WebhookService
         $inner = isset($data['data']) && is_array($data['data']) ? $data['data'] : null;
 
         if ($inner) {
-            $type = $inner['webhookType'] ?? null;
+            $type = $inner['webhookType'] ?? $data['type'] ?? null;
             if ($type === 'TRANSFER') {
                 return $inner['endToEndId']
                     ?? (isset($inner['id']) ? (string) $inner['id'] : null);

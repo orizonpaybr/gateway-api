@@ -2,6 +2,8 @@
 
 namespace App\Jobs;
 
+use App\Helpers\WebhookClientMessages;
+use App\Jobs\ClientWebhookDispatchJob;
 use App\Models\Solicitacoes;
 use App\Models\WebhookLog;
 use App\Services\BalanceService;
@@ -65,6 +67,7 @@ class ProcessTreealCashInRefundJob implements ShouldQueue
                 'txid'   => $this->txid,
                 'status' => $cashin->status,
             ]);
+            $this->notifyClientRefund($cashin);
             $this->markWebhookProcessed();
             return;
         }
@@ -92,6 +95,7 @@ class ProcessTreealCashInRefundJob implements ShouldQueue
                 'user_id'        => $cashin->user_id,
                 'valor_debitado' => $valorReverter,
             ]);
+            $this->notifyClientRefund($cashin);
             $this->markWebhookProcessed();
         } catch (\Throwable $e) {
             Log::error('[TREEAL CashIn Refund] Erro ao processar', [
@@ -114,5 +118,40 @@ class ProcessTreealCashInRefundJob implements ShouldQueue
             'status' => 'FAILED',
             'error'  => $error,
         ]);
+    }
+
+    /**
+     * Repassa o estorno de depósito para a URL de callback do cliente (orquestrador → cliente final).
+     */
+    private function notifyClientRefund(Solicitacoes $cashin): void
+    {
+        if (empty($cashin->callback) || $cashin->callback === 'web') {
+            return;
+        }
+
+        $extra = [
+            'typeTransaction' => 'PIX_IN',
+            'txid'            => $this->txid,
+            'endToEndId'      => $cashin->end_to_end ?? null,
+            'payer'           => [
+                'name'     => $cashin->client_name ?? null,
+                'document' => $cashin->client_document ?? null,
+                'email'    => $cashin->client_email ?? null,
+                'phone'    => $cashin->client_telefone ?? null,
+            ],
+            'receiver' => [
+                'user_id' => $cashin->user_id ?? null,
+            ],
+        ];
+        $message = WebhookClientMessages::getMessageForStatus('REFUNDED', 'PIX_IN', null);
+        ClientWebhookDispatchJob::dispatch(
+            $cashin->callback,
+            $cashin->idTransaction ?? (string) $cashin->id,
+            'REFUNDED',
+            (float) $cashin->amount,
+            now()->toIso8601String(),
+            $extra,
+            $message
+        )->onQueue('webhooks');
     }
 }
