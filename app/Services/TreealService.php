@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Helpers\PixApiErrorTypes;
 use App\Helpers\PixErrorCodes;
 use App\Models\Treeal;
 use Illuminate\Contracts\Cache\LockTimeoutException;
@@ -715,13 +716,14 @@ class TreealService
         }
 
         if (!empty($infoAdicionais)) {
+            $limited = array_slice($infoAdicionais, 0, 50);
             $payload['infoAdicionais'] = array_values(array_filter(array_map(
                 function (array $item): array {
                     $nome = isset($item['nome']) ? substr((string) $item['nome'], 0, 50) : '';
                     $valor = isset($item['valor']) ? substr((string) $item['valor'], 0, 200) : '';
                     return ['nome' => $nome, 'valor' => $valor];
                 },
-                $infoAdicionais
+                $limited
             ), fn(array $row): bool => $row['nome'] !== '' || $row['valor'] !== ''));
         }
 
@@ -755,13 +757,10 @@ class TreealService
                     'url' => $requestUrl,
                 ]);
                 $errorData = json_decode($errorBody, true);
-                $errorMessage = 'Erro ao gerar QR Code';
-                if (is_array($errorData)) {
-                    $errorMessage = $errorData['detail'] ?? $errorData['title'] ?? $errorData['message']
-                        ?? $errorData['error'] ?? json_encode($errorData);
-                } elseif (!empty($errorBody)) {
-                    $errorMessage = $errorBody;
-                }
+                $errorMessage = PixApiErrorTypes::getMessageFromResponse(
+                    is_array($errorData) ? $errorData : null,
+                    'Erro ao gerar QR Code'
+                );
                 throw new \Exception("Erro ao gerar QR Code ({$response->status()}): {$errorMessage}");
             }
 
@@ -815,6 +814,7 @@ class TreealService
 
     /**
      * Monta o payload do devedor para cobrança PIX (API QRCodes).
+     * Conforme doc: cpf e cnpj não podem estar preenchidos ao mesmo tempo; se nome estiver preenchido, deve existir cpf ou cnpj.
      * Campos com limite de tamanho são truncados; cpf, cnpj e cep são enviados só com dígitos.
      *
      * @param array<string, mixed> $devedor
@@ -843,6 +843,13 @@ class TreealService
             } else {
                 $out[$key] = substr((string) $value, 0, $config['max']);
             }
+        }
+
+        if (isset($out['cpf']) && isset($out['cnpj'])) {
+            unset($out['cnpj']);
+        }
+        if (isset($out['nome']) && !isset($out['cpf']) && !isset($out['cnpj'])) {
+            unset($out['nome']);
         }
 
         return $out;
@@ -891,10 +898,16 @@ class TreealService
                 ];
             }
 
+            $errorBody = $response->body();
+            $errorData = json_decode($errorBody, true);
+            $errorMessage = PixApiErrorTypes::getMessageFromResponse(
+                is_array($errorData) ? $errorData : null,
+                'Erro ao registrar webhook'
+            );
             return [
                 'success' => false,
-                'message' => 'Erro ao registrar webhook: ' . $response->body(),
-                'data'    => $response->json() ?? [],
+                'message' => 'Erro ao registrar webhook: ' . $errorMessage,
+                'data'    => is_array($errorData) ? $errorData : [],
             ];
 
         } catch (\Exception $e) {
@@ -938,7 +951,13 @@ class TreealService
             }
 
             if (!$response->successful()) {
-                throw new \Exception("Erro ao consultar webhook: " . $response->body());
+                $errorBody = $response->body();
+                $errorData = json_decode($errorBody, true);
+                $errorMessage = PixApiErrorTypes::getMessageFromResponse(
+                    is_array($errorData) ? $errorData : null,
+                    'Erro ao consultar webhook'
+                );
+                throw new \Exception("Erro ao consultar webhook ({$response->status()}): {$errorMessage}");
             }
 
             $data        = $response->json() ?? [];
@@ -960,19 +979,24 @@ class TreealService
     }
 
     /**
-     * Consulta status de uma cobrança (Cash In)
-     * 
-     * Endpoint: GET /cob/{txid}
+     * Consulta status de uma cobrança imediata (GET /cob/{txid}).
+     *
+     * @param string $txid Identificador da cobrança
+     * @param int|null $revisao Opcional: número da revisão da cobrança
      */
-    public function getCobStatus(string $txid): array
+    public function getCobStatus(string $txid, ?int $revisao = null): array
     {
         if (!$this->isActive()) {
             throw new \Exception("Treeal não está configurado ou ativo");
         }
 
+        $url = $this->config->qrcodes_api_url . '/cob/' . $txid;
+        if ($revisao !== null) {
+            $url .= '?revisao=' . $revisao;
+        }
+
         try {
-            $response = $this->getQRCodesHttpClient()
-                ->get($this->config->qrcodes_api_url . '/cob/' . $txid);
+            $response = $this->getQRCodesHttpClient()->get($url);
 
             if ($response->status() === 404) {
                 return [
@@ -982,7 +1006,13 @@ class TreealService
             }
 
             if (!$response->successful()) {
-                throw new \Exception("Erro ao consultar cobrança: " . $response->body());
+                $errorBody = $response->body();
+                $errorData = json_decode($errorBody, true);
+                $errorMessage = PixApiErrorTypes::getMessageFromResponse(
+                    is_array($errorData) ? $errorData : null,
+                    'Erro ao consultar cobrança'
+                );
+                throw new \Exception("Erro ao consultar cobrança ({$response->status()}): {$errorMessage}");
             }
 
             $data = $response->json();
@@ -998,6 +1028,137 @@ class TreealService
             Log::error('TreealService::getCobStatus - Exceção', [
                 'error' => $e->getMessage(),
                 'txid' => $txid,
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
+     * Revisa uma cobrança imediata (PATCH /cob/{txid}).
+     * Permite alterar loc, devedor, valor, solicitacaoPagador ou status (ex.: REMOVIDA_PELO_USUARIO_RECEBEDOR).
+     *
+     * @param string $txid Identificador da cobrança
+     * @param array<string, mixed> $data Campos a alterar (ex.: ['status' => 'REMOVIDA_PELO_USUARIO_RECEBEDOR'])
+     * @return array{success: bool, data?: array}
+     */
+    public function reviseCob(string $txid, array $data): array
+    {
+        if (!$this->isActive()) {
+            throw new \Exception("Treeal não está configurado ou ativo");
+        }
+
+        $url = $this->config->qrcodes_api_url . '/cob/' . $txid;
+        $client = $this->getQRCodesHttpClient();
+
+        try {
+            $response = $client->patch($url, $data);
+
+            if (!$response->successful()) {
+                $errorBody = $response->body();
+                $errorData = json_decode($errorBody, true);
+                $errorMessage = PixApiErrorTypes::getMessageFromResponse(
+                    is_array($errorData) ? $errorData : null,
+                    'Erro ao revisar cobrança'
+                );
+                throw new \Exception("Erro ao revisar cobrança ({$response->status()}): {$errorMessage}");
+            }
+
+            return [
+                'success' => true,
+                'data' => $response->json(),
+            ];
+        } catch (\Exception $e) {
+            Log::error('TreealService::reviseCob - Exceção', [
+                'error' => $e->getMessage(),
+                'txid' => $txid,
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
+     * Cancela uma cobrança imediata (PATCH /cob/{txid} com status REMOVIDA_PELO_USUARIO_RECEBEDOR).
+     *
+     * @param string $txid Identificador da cobrança
+     * @return array{success: bool, data?: array}
+     */
+    public function cancelCob(string $txid): array
+    {
+        return $this->reviseCob($txid, ['status' => 'REMOVIDA_PELO_USUARIO_RECEBEDOR']);
+    }
+
+    /**
+     * Lista cobranças imediatas (GET /cob).
+     * Período obrigatório: inicio e fim em RFC 3339 (date-time).
+     *
+     * @param string $inicio Data/hora inicial (RFC 3339)
+     * @param string $fim Data/hora final (RFC 3339)
+     * @param array{cpf?: string, cnpj?: string, status?: string, paginacao?: array{paginaAtual?: int, itensPorPagina?: int}} $filters Filtros opcionais
+     * @return array{success: bool, parametros?: array, cobs?: array, data?: array}
+     */
+    public function listCobs(string $inicio, string $fim, array $filters = []): array
+    {
+        if (!$this->isActive()) {
+            throw new \Exception("Treeal não está configurado ou ativo");
+        }
+
+        $query = [
+            'inicio' => $inicio,
+            'fim' => $fim,
+        ];
+        if (!empty($filters['cpf'])) {
+            $query['cpf'] = preg_replace('/\D/', '', (string) $filters['cpf']);
+        }
+        if (!empty($filters['cnpj'])) {
+            $query['cnpj'] = preg_replace('/\D/', '', (string) $filters['cnpj']);
+        }
+        if (!empty($filters['status'])) {
+            $query['status'] = (string) $filters['status'];
+        }
+        if (isset($filters['paginacao']) && is_array($filters['paginacao'])) {
+            $query['paginacao'] = [];
+            if (isset($filters['paginacao']['paginaAtual'])) {
+                $query['paginacao']['paginaAtual'] = (int) $filters['paginacao']['paginaAtual'];
+            }
+            if (isset($filters['paginacao']['itensPorPagina'])) {
+                $query['paginacao']['itensPorPagina'] = (int) $filters['paginacao']['itensPorPagina'];
+            }
+            if (empty($query['paginacao'])) {
+                unset($query['paginacao']);
+            }
+        }
+
+        $url = $this->config->qrcodes_api_url . '/cob?' . http_build_query($query);
+        $client = $this->getQRCodesHttpClient();
+
+        try {
+            $response = $client->get($url);
+
+            if (!$response->successful()) {
+                $errorBody = $response->body();
+                $errorData = json_decode($errorBody, true);
+                $errorMessage = PixApiErrorTypes::getMessageFromResponse(
+                    is_array($errorData) ? $errorData : null,
+                    'Erro ao listar cobranças'
+                );
+                throw new \Exception("Erro ao listar cobranças ({$response->status()}): {$errorMessage}");
+            }
+
+            $data = $response->json();
+            $parametros = $data['parametros'] ?? null;
+            $cobs = $data['cobs'] ?? [];
+
+            return [
+                'success' => true,
+                'parametros' => $parametros,
+                'cobs' => $cobs,
+                'data' => $data,
+            ];
+        } catch (\Exception $e) {
+            Log::error('TreealService::listCobs - Exceção', [
+                'error' => $e->getMessage(),
+                'inicio' => $inicio,
+                'fim' => $fim,
             ]);
             throw $e;
         }
