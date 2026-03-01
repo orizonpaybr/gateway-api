@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Helpers\Helper;
 use App\Helpers\PixErrorCodes;
+use App\Helpers\WebhookClientMessages;
 use App\Jobs\ClientWebhookDispatchJob;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
@@ -119,13 +120,15 @@ class ProcessTreealCashOutJob implements ShouldQueue
                 ]);
 
                 if (!empty($cashOut->callback) && $cashOut->callback !== 'web') {
+                    $message = WebhookClientMessages::getMessageForStatus('PAID_OUT', 'PIX_OUT', null);
                     ClientWebhookDispatchJob::dispatch(
                         $cashOut->callback,
                         $cashOut->idTransaction ?? (string) $cashOut->id,
                         'PAID_OUT',
                         (float) $cashOut->amount,
                         now()->toIso8601String(),
-                        $this->buildCashOutWebhookExtra($cashOut)
+                        $this->buildCashOutWebhookExtra($cashOut),
+                        $message
                     )->onQueue('webhooks');
                 }
 
@@ -150,13 +153,15 @@ class ProcessTreealCashOutJob implements ShouldQueue
                 ]);
 
                 if (!empty($cashOut->callback) && $cashOut->callback !== 'web') {
+                    $message = WebhookClientMessages::getMessageForStatus('CANCELLED', 'PIX_OUT', $this->data);
                     ClientWebhookDispatchJob::dispatch(
                         $cashOut->callback,
                         $cashOut->idTransaction ?? (string) $cashOut->id,
                         'CANCELLED',
                         (float) $cashOut->amount,
                         now()->toIso8601String(),
-                        $this->buildCashOutWebhookExtra($cashOut)
+                        $this->buildCashOutWebhookExtra($cashOut),
+                        $message
                     )->onQueue('webhooks');
                 }
 
@@ -186,13 +191,15 @@ class ProcessTreealCashOutJob implements ShouldQueue
                 ]);
 
                 if (!empty($cashOut->callback) && $cashOut->callback !== 'web') {
+                    $message = WebhookClientMessages::getMessageForStatus($internalStatus, 'PIX_OUT', null);
                     ClientWebhookDispatchJob::dispatch(
                         $cashOut->callback,
                         $cashOut->idTransaction ?? (string) $cashOut->id,
                         $internalStatus,
                         (float) $cashOut->amount,
                         now()->toIso8601String(),
-                        $this->buildCashOutWebhookExtra($cashOut)
+                        $this->buildCashOutWebhookExtra($cashOut),
+                        $message
                     )->onQueue('webhooks');
                 }
 
