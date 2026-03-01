@@ -28,6 +28,7 @@ class ClientWebhookDispatchJob implements ShouldQueue
 
     /**
      * @param array<string, mixed> $extraPayload Campos adicionais (ex.: typeTransaction, payer, beneficiary, receiver, sender). Apenas chaves com valor não vazio são enviadas.
+     * @param string|null $message Mensagem amigável do status para o cliente (ex.: "Depósito PIX recebido com sucesso.").
      */
     public function __construct(
         private string $callbackUrl,
@@ -36,6 +37,7 @@ class ClientWebhookDispatchJob implements ShouldQueue
         private float $amount,
         private ?string $paidAt = null,
         private array $extraPayload = [],
+        private ?string $message = null,
     ) {}
 
     public function handle(): void
@@ -53,6 +55,9 @@ class ClientWebhookDispatchJob implements ShouldQueue
             ],
             $this->filterEmpty($this->extraPayload)
         );
+        if ($this->message !== null && $this->message !== '') {
+            $payload['message'] = $this->message;
+        }
 
         try {
             $response = Http::timeout(10)
