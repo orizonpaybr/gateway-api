@@ -42,7 +42,8 @@ class TaxaFlexivelHelperTest extends TestCase
         $this->assertEquals(99.00, $result['deposito_liquido']);
         $this->assertEquals('GLOBAL_FIXA', $result['descricao']);
         $this->assertEquals(0.04, $result['taxa_adquirente']);
-        $this->assertEquals(0.98, $result['taxa_aplicacao']);
+        // taxa_aplicacao = taxa fixa - custo Treeal - comissão afiliado = 1.00 - 0.04 - 0 = 0.96
+        $this->assertEquals(0.96, $result['taxa_aplicacao']);
         $this->assertEquals(0.00, $result['comissao_afiliado']);
     }
 
