@@ -111,11 +111,11 @@ return [
     | Este valor é descontado do lucro líquido da aplicação.
     |
     | Exemplo: Se a taxa configurada para o cliente é R$ 0,50 (50 centavos)
-    | e o custo da TREEAL é R$ 0,02 (2 centavos), o lucro líquido será
-    | R$ 0,48 (48 centavos).
+    | e o custo da TREEAL é R$ 0,04 (4 centavos), o lucro líquido será
+    | R$ 0,46 (46 centavos).
     |
     */
-    'custo_fixo_por_transacao' => env('TREEAL_CUSTO_FIXO_POR_TRANSACAO', 0.02),
+    'custo_fixo_por_transacao' => env('TREEAL_CUSTO_FIXO_POR_TRANSACAO', 0.04),
 
     /*
     |--------------------------------------------------------------------------
@@ -184,7 +184,20 @@ return [
     |
     */
     'status' => env('TREEAL_STATUS', false),
-    
+
+    /*
+    |--------------------------------------------------------------------------
+    | Validação estrita de valor no webhook
+    |--------------------------------------------------------------------------
+    |
+    | Conformidade: "O valor do pagamento está sendo validado?"
+    | Se true: quando o valor do payload do webhook divergir do valor armazenado
+    | na transação, o processamento não será realizado (evita crédito/débito errado).
+    | Se false (padrão): apenas registra log de warning e processa normalmente.
+    |
+    */
+    'strict_amount_validation' => env('TREEAL_STRICT_AMOUNT_VALIDATION', false),
+
     /*
     |--------------------------------------------------------------------------
     | Mapeamento de Status

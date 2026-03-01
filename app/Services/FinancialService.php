@@ -561,7 +561,7 @@ class FinancialService
         $totalSaques = (int) ($stats->aprovadas ?? 0);
         $taxaTotal = (float) ($stats->taxa_total ?? 0);
         // TODOS os saques são processados pela TREEAL, incluindo os manuais
-        // Portanto, TODOS os saques têm custo de 2 centavos por transação
+        // Portanto, TODOS os saques têm custo de 4 centavos por transação
         $custoTreeal = $totalSaques * $custoTreealPorTransacao;
         $lucro = $taxaTotal - $custoTreeal;
 
@@ -595,7 +595,7 @@ class FinancialService
 
         // Lucro líquido de saques: taxa_cash_out - (número total de saques * custo TREEAL)
         // IMPORTANTE: TODOS os saques são processados pela TREEAL, incluindo os manuais
-        // Portanto, TODOS os saques têm custo de 2 centavos por transação
+        // Portanto, TODOS os saques têm custo de 4 centavos por transação
         $totalSaques = SolicitacoesCashOut::whereIn('status', self::APPROVED_STATUSES)
             ->whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
             ->count();
@@ -604,7 +604,7 @@ class FinancialService
             ->whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
             ->sum('taxa_cash_out');
         
-        // TODOS os saques são processados pela TREEAL, então todos têm custo de 2 centavos por transação
+        // TODOS os saques são processados pela TREEAL, então todos têm custo de 4 centavos por transação
         $custoTreealSaques = $totalSaques * $custoTreealPorTransacao;
         $lucroSaques = $taxaTotalSaques - $custoTreealSaques;
 

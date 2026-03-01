@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Helpers\Helper;
+use App\Helpers\PixErrorCodes;
 use App\Jobs\ClientWebhookDispatchJob;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
@@ -88,6 +89,21 @@ class ProcessTreealCashOutJob implements ShouldQueue
                     return;
                 }
 
+                // Conformidade: validar valor do webhook vs valor armazenado
+                $webhookAmount = $this->extractAmountFromPayload($this->data);
+                $storedAmount = (float) $cashOut->amount;
+                if ($webhookAmount !== null && !$this->amountsMatch($webhookAmount, $storedAmount)) {
+                    Log::warning('[TREEAL CashOut Job] Divergência de valor (webhook vs banco)', [
+                        'transaction_id'  => $this->transactionId,
+                        'webhook_amount'  => $webhookAmount,
+                        'stored_amount'   => $storedAmount,
+                    ]);
+                    if (config('treeal.strict_amount_validation', false)) {
+                        $this->failWebhookLog('Divergência de valor: webhook ' . $webhookAmount . ' != banco ' . $storedAmount);
+                        return;
+                    }
+                }
+
                 $paymentService->processWithdrawal($cashOut);
 
                 $cashOut->update([
@@ -120,7 +136,7 @@ class ProcessTreealCashOutJob implements ShouldQueue
             if (in_array($statusUpper, $statusCancelado)) {
                 Log::warning('[TREEAL CashOut Job] Saque cancelado', [
                     'transaction_id' => $this->transactionId,
-                    'reason'         => $this->data['message'] ?? $this->data['errorCode'] ?? 'Não informado',
+                    'reason'         => PixErrorCodes::getMessageFromPayload($this->data, 'Não informado'),
                     'current_status' => $cashOut->status,
                 ]);
 
@@ -293,5 +309,27 @@ class ProcessTreealCashOutJob implements ShouldQueue
                 'user_id' => $cashOut->user_id ?? null,
             ],
         ];
+    }
+
+    /** Extrai valor monetário do payload do webhook Treeal (Cash Out). */
+    private function extractAmountFromPayload(array $data): ?float
+    {
+        $valor = $data['amount'] ?? $data['valor'] ?? null;
+        if ($valor === null && isset($data['data']) && is_array($data['data'])) {
+            $valor = $data['data']['amount'] ?? $data['data']['valor'] ?? null;
+        }
+        if ($valor === null && isset($data['componentesValor']['original']['valor'])) {
+            $valor = $data['componentesValor']['original']['valor'];
+        }
+        if ($valor === null) {
+            return null;
+        }
+        return (float) $valor;
+    }
+
+    /** Compara dois valores com tolerância para arredondamento (2 casas). */
+    private function amountsMatch(float $a, float $b): bool
+    {
+        return abs(round($a, 2) - round($b, 2)) < 0.005;
     }
 }

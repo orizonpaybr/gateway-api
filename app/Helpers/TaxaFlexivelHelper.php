@@ -12,21 +12,21 @@ use App\Models\App;
  * 1. Taxa global padrão: R$ 1,00 (taxa_fixa_padrao) para todos os usuários
  * 2. Taxa personalizada: pode ser definida por usuário (taxa_fixa_deposito)
  * 3. A taxa NÃO muda se houver afiliado - a comissão sai da taxa fixa
- * 4. Split da taxa: Treeal (R$ 0,02) → Afiliado (R$ 0,50 se houver) → Orizon (resto)
+ * 4. Split da taxa: Treeal (R$ 0,04) → Afiliado (R$ 0,50 se houver) → Orizon (resto)
  *
  * EXEMPLOS:
  * 
  * Caso 1: Taxa global R$ 1,00, sem afiliado, depósito R$ 5,00
  * - Usuário recebe: R$ 4,00
- * - Taxa: R$ 1,00 → Treeal R$ 0,02 + Orizon R$ 0,98
+ * - Taxa: R$ 1,00 → Treeal R$ 0,04 + Orizon R$ 0,96
  *
  * Caso 2: Taxa personalizada R$ 0,90, sem afiliado, depósito R$ 5,00
  * - Usuário recebe: R$ 4,10
- * - Taxa: R$ 0,90 → Treeal R$ 0,02 + Orizon R$ 0,88
+ * - Taxa: R$ 0,90 → Treeal R$ 0,04 + Orizon R$ 0,86
  *
  * Caso 3: Taxa personalizada R$ 0,90, COM afiliado, depósito R$ 5,00
  * - Usuário recebe: R$ 4,10 (taxa NÃO muda com afiliado)
- * - Taxa: R$ 0,90 → Treeal R$ 0,02 + Afiliado R$ 0,50 + Orizon R$ 0,38
+ * - Taxa: R$ 0,90 → Treeal R$ 0,04 + Afiliado R$ 0,50 + Orizon R$ 0,36
  */
 class TaxaFlexivelHelper
 {
@@ -133,14 +133,14 @@ class TaxaFlexivelHelper
         $depositoLiquido = max(0, $amount - $taxaTotal);
         
         // Valor que a TREEAL envia para nossa conta (já descontado o custo dela)
-        // Exemplo: R$ 100,00 - R$ 0,02 = R$ 99,98
+        // Exemplo: R$ 100,00 - R$ 0,04 = R$ 99,96
         // NOTA: Este valor é apenas informativo. A TREEAL já desconta automaticamente.
         $valorRecebidoTreeal = max(0, $amount - $custoTreeal);
         
         return [
             'taxa_cash_in' => $taxaTotal,              // Taxa fixa cobrada do cliente (NÃO muda com afiliado)
             'taxa_aplicacao' => $lucroAplicacao,       // Lucro Orizon (taxa - Treeal - afiliado)
-            'taxa_adquirente' => $custoTreeal,         // Custo da TREEAL (R$ 0,02)
+            'taxa_adquirente' => $custoTreeal,         // Custo da TREEAL (R$ 0,04)
             'comissao_afiliado' => $comissaoAfiliado,  // Comissão do pai afiliado (R$ 0,50 se houver)
             'deposito_liquido' => $depositoLiquido,    // Valor que o cliente recebe (amount - taxa fixa)
             'valor_recebido_treeal' => $valorRecebidoTreeal, // Valor que a TREEAL envia (informativo)

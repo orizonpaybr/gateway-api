@@ -37,7 +37,7 @@ class DashboardService
             
             // Query única otimizada usando UNION ALL
             // IMPORTANTE: Calcular lucro líquido (taxa - custo TREEAL)
-            // TODAS as transações TREEAL (depósitos E saques) têm custo de 2 centavos por transação
+            // TODAS as transações TREEAL (depósitos E saques) têm custo de 4 centavos por transação
             // Para depósitos TREEAL sem taxa_pix_cash_in_adquirente ou com valor 0, usar custo fixo
             // Para saques TREEAL, identificar pelo campo executor_ordem = 'Treeal'
             $statsQuery = "

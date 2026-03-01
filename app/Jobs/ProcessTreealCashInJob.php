@@ -54,6 +54,23 @@ class ProcessTreealCashInJob implements ShouldQueue
             return;
         }
 
+        // Conformidade: validar valor do webhook vs valor armazenado
+        $webhookLog = WebhookLog::find($this->webhookLogId);
+        $payload = $webhookLog?->payload ?? [];
+        $webhookAmount = $this->extractAmountFromPayload($payload);
+        $storedAmount = (float) $cashin->amount;
+        if ($webhookAmount !== null && !$this->amountsMatch($webhookAmount, $storedAmount)) {
+            Log::warning('[TREEAL CashIn Job] Divergência de valor (webhook vs banco)', [
+                'txid'          => $this->txid,
+                'webhook_amount' => $webhookAmount,
+                'stored_amount'  => $storedAmount,
+            ]);
+            if (config('treeal.strict_amount_validation', false)) {
+                $this->failWebhookLog('Divergência de valor: webhook ' . $webhookAmount . ' != banco ' . $storedAmount);
+                return;
+            }
+        }
+
         try {
             $paymentService->processPaymentReceived($cashin);
             Log::info('[TREEAL CashIn Job] Pagamento processado com sucesso', [
@@ -108,5 +125,24 @@ class ProcessTreealCashInJob implements ShouldQueue
             'status' => 'FAILED',
             'error' => $error,
         ]);
+    }
+
+    /** Extrai valor monetário do payload do webhook Treeal (Cash In). */
+    private function extractAmountFromPayload(array $payload): ?float
+    {
+        $valor = $payload['valor'] ?? $payload['amount'] ?? null;
+        if ($valor === null && isset($payload['data']) && is_array($payload['data'])) {
+            $valor = $payload['data']['valor'] ?? $payload['data']['amount'] ?? null;
+        }
+        if ($valor === null) {
+            return null;
+        }
+        return (float) $valor;
+    }
+
+    /** Compara dois valores com tolerância para arredondamento (2 casas). */
+    private function amountsMatch(float $a, float $b): bool
+    {
+        return abs(round($a, 2) - round($b, 2)) < 0.005;
     }
 }

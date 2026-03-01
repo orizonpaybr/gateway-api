@@ -33,6 +33,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'check.auth' => \App\Http\Middleware\AuthMiddleware::class,
             'security' => \App\Http\Middleware\SecurityMiddleware::class,
             'validate.webhook' => \App\Http\Middleware\ValidateWebhook::class,
+            'ensure.webhook.https' => \App\Http\Middleware\EnsureWebhookHttps::class,
             'check.allowed.ip' => \App\Http\Middleware\CheckAllowedIP::class,
             'check.pin' => \App\Http\Middleware\CheckPin::class,
             'secure.cors' => \App\Http\Middleware\SecureCors::class,

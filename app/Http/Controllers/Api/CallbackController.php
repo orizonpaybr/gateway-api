@@ -9,6 +9,7 @@ use App\Models\Solicitacoes;
 use App\Models\User;
 use App\Models\SolicitacoesCashOut;
 use App\Helpers\Helper;
+use App\Helpers\PixErrorCodes;
 use App\Models\App;
 use App\Helpers\SecureLog;
 use App\Jobs\ProcessTreealCashInJob;
@@ -350,8 +351,8 @@ class CallbackController extends Controller
         if (in_array($statusUpper, $statusCancelado)) {
             Log::warning('[TREEAL] Saque cancelado', [
                 'transaction_id' => $transactionId,
-                'reason' => $data['message'] ?? $data['errorCode'] ?? 'Não informado',
-                'current_status' => $cashOut->status
+                'reason'         => PixErrorCodes::getMessageFromPayload($data, 'Não informado'),
+                'current_status' => $cashOut->status,
             ]);
             
             // Se o saque estava em processamento ou já foi debitado, reverter o saldo
@@ -478,7 +479,8 @@ class CallbackController extends Controller
      * Status TREEAL (Cash In - API QRCodes):
      * - ATIVA: Cobrança ativa aguardando pagamento
      * - CONCLUIDA: Cobrança paga
-     * - REMOVIDA_PELO_USUARIO_RECEBEDOR: Cobrança removida/cancelada
+     * - REMOVIDA_PELO_USUARIO_RECEBEDOR: Cobrança removida/cancelada pelo recebedor
+     * - REMOVIDA_PELO_PSP: Cobrança removida/cancelada pela Onz (ex.: expirada)
      * - EM_PROCESSAMENTO: Em processamento
      * - NAO_REALIZADO: Não realizado/falhou
      * 
@@ -501,6 +503,7 @@ class CallbackController extends Controller
             'ATIVA' => 'WAITING_FOR_APPROVAL',
             'CONCLUIDA' => 'PAID_OUT',
             'REMOVIDA_PELO_USUARIO_RECEBEDOR' => 'CANCELLED',
+            'REMOVIDA_PELO_PSP' => 'CANCELLED',
             'EM_PROCESSAMENTO' => 'PROCESSING',
             'NAO_REALIZADO' => 'FAILED',
             
