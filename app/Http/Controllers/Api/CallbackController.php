@@ -42,7 +42,7 @@ class CallbackController extends Controller
             SecureLog::webhook('TREEAL', 'WEBHOOK', $data);
 
             $inner       = isset($data['data']) && is_array($data['data']) ? $data['data'] : null;
-            $webhookType = $inner['webhookType'] ?? null;
+            $webhookType = $inner['webhookType'] ?? $data['type'] ?? null;
 
             if ($inner && $webhookType === 'TRANSFER') {
                 $endToEndId = $inner['endToEndId'] ?? null;
@@ -84,7 +84,7 @@ class CallbackController extends Controller
                 return $this->handleTreealInfractionWebhook($inner, $webhookLog, $start);
             }
 
-            if ($inner && in_array($webhookType, ['PIX', 'RECEIVING', 'CHARGE'])) {
+            if ($inner && in_array($webhookType, ['PIX', 'RECEIVING', 'CHARGE', 'RECEIVE'])) {
                 $txid   = $inner['txid'] ?? $inner['txId'] ?? null;
                 $status = $inner['status'] ?? null;
                 return $this->handleTreealCashInWebhook($txid, $status, $inner, $webhookLog, $start);
