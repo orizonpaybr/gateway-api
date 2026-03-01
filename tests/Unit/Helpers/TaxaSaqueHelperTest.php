@@ -47,7 +47,8 @@ class TaxaSaqueHelperTest extends TestCase
         $this->assertEquals(50.00, $result['saque_liquido']);
         $this->assertEquals(51.00, $result['valor_total_descontar']);
         $this->assertEquals('GLOBAL_API_FIXA', $result['descricao']);
-        $this->assertEquals(0.98, round($result['taxa_aplicacao'], 2));
+        // taxa_aplicacao = taxa fixa - custo Treeal - comissão afiliado = 1.00 - 0.04 - 0 = 0.96
+        $this->assertEquals(0.96, round($result['taxa_aplicacao'], 2));
         $this->assertEquals(0.00, $result['comissao_afiliado']);
     }
 
@@ -89,7 +90,8 @@ class TaxaSaqueHelperTest extends TestCase
 
         $this->assertEquals(1.00, $result['taxa_cash_out']);
         $this->assertEquals(0.50, $result['comissao_afiliado']);
-        $this->assertEquals(0.48, round($result['taxa_aplicacao'], 2));
+        // taxa_aplicacao = 1.00 - 0.04 (Treeal) - 0.50 (afiliado) = 0.46
+        $this->assertEquals(0.46, round($result['taxa_aplicacao'], 2));
     }
 
     /** @test */
