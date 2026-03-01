@@ -2,7 +2,9 @@
 
 namespace App\Services;
 
+use App\Helpers\PixErrorCodes;
 use App\Models\Treeal;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Cache;
@@ -247,15 +249,14 @@ class TreealService
 
     /**
      * Obtém token OAuth2 para QR Codes API
-     * 
-     * A QR Codes API também requer OAuth2 além do certificado digital
+     *
+     * Usa lock na renovação para evitar corrida entre workers quando o cache está vazio.
      */
     private function getQRCodesAccessToken(): string
     {
-        // Verificar cache primeiro
         $cacheKey = "treeal:oauth_token_qrcodes:{$this->config->id}";
         $cachedToken = Cache::get($cacheKey);
-        
+
         if ($cachedToken) {
             Log::debug('TreealService::getQRCodesAccessToken - Token obtido do cache');
             return $cachedToken;
@@ -263,8 +264,7 @@ class TreealService
 
         $certificatePath = $this->config->getQrcodesCertificateFullPath();
         $certificatePassword = $this->qrcodesCertificatePassword;
-        
-        // Usar credenciais específicas da QR Codes API se disponíveis, senão usar as genéricas
+
         $clientId = $this->qrcodesClientId ?? $this->accountsClientId;
         $clientSecret = $this->qrcodesClientSecret ?? $this->accountsClientSecret;
 
@@ -280,23 +280,53 @@ class TreealService
             throw new \Exception("Credenciais OAuth2 para QR Codes API não configuradas (qrcodes_client_id/qrcodes_client_secret ou client_id/client_secret)");
         }
 
+        $lockKey = "treeal:oauth_lock_qrcodes:{$this->config->id}";
+        $lock = Cache::lock($lockKey, 15);
+
+        try {
+            return $lock->block(10, function () use ($cacheKey) {
+                $cachedToken = Cache::get($cacheKey);
+                if ($cachedToken) {
+                    return $cachedToken;
+                }
+                return $this->fetchNewQRCodesAccessToken();
+            });
+        } catch (LockTimeoutException $e) {
+            Log::warning('TreealService::getQRCodesAccessToken - Lock timeout ao renovar token, tentando sem lock');
+            $cachedToken = Cache::get($cacheKey);
+            if ($cachedToken) {
+                return $cachedToken;
+            }
+            return $this->fetchNewQRCodesAccessToken();
+        }
+    }
+
+    /**
+     * Requisição HTTP para obter novo token OAuth2 QR Codes e gravar no cache.
+     *
+     * @return string Access token
+     * @throws \Exception Se falhar autenticação
+     */
+    private function fetchNewQRCodesAccessToken(): string
+    {
+        $cacheKey = "treeal:oauth_token_qrcodes:{$this->config->id}";
+        $certificatePath = $this->config->getQrcodesCertificateFullPath();
+        $certificatePassword = $this->qrcodesCertificatePassword;
+        $clientId = $this->qrcodesClientId ?? $this->accountsClientId;
+        $clientSecret = $this->qrcodesClientSecret ?? $this->accountsClientSecret;
+
         try {
             Log::info('TreealService::getQRCodesAccessToken - Obtendo novo token OAuth2 para QR Codes API', [
                 'qrcodes_api_url' => $this->config->qrcodes_api_url,
-                'client_id' => substr($clientId, 0, 15) . '...', // Log parcial por segurança
+                'client_id' => substr($clientId, 0, 15) . '...',
                 'client_id_length' => strlen($clientId),
                 'client_secret_length' => strlen($clientSecret),
                 'has_qrcodes_credentials' => !empty($this->qrcodesClientId),
             ]);
 
-            // Converter .PFX para PEM (certificado Cash In / QR Codes)
             $pemFiles = $this->convertPfxToPem($certificatePath, $certificatePassword);
-
-            // Em sandbox SSL desligado; em produção usa config (TREEAL_VERIFY_SSL)
             $verifySSL = $this->config->environment === 'sandbox' ? false : (bool) config('treeal.verify_ssl', true);
 
-            // Preparar payload - garantir que não há espaços ou caracteres especiais
-            // Tentar primeiro sem scope, já que pode ser opcional
             $payload = [
                 'grant_type' => 'client_credentials',
                 'client_id' => trim($clientId),
@@ -305,8 +335,7 @@ class TreealService
 
             Log::debug('TreealService::getQRCodesAccessToken - Payload da requisição (sem scope)', [
                 'grant_type' => $payload['grant_type'],
-                'client_id' => substr($payload['client_id'], 0, 15) . '...',
-                'client_id_full' => $payload['client_id'], // Log completo para debug
+                'client_id_prefix' => substr($payload['client_id'], 0, 15) . '...',
                 'client_secret_length' => strlen($payload['client_secret']),
             ]);
 
@@ -315,12 +344,11 @@ class TreealService
                 'cert' => $pemFiles['cert'],
                 'ssl_key' => [$pemFiles['key'], $certificatePassword],
             ])->asForm()->post($this->config->qrcodes_api_url . '/oauth/token', $payload);
-            
-            // Se falhar sem scope, tentar com scope
+
             if (!$response->successful() && $response->status() === 401) {
                 Log::info('TreealService::getQRCodesAccessToken - Tentando novamente com scope');
                 $payload['scope'] = 'cob.write cob.read';
-                
+
                 $response = Http::withOptions([
                     'verify' => $verifySSL,
                     'cert' => $pemFiles['cert'],
@@ -334,20 +362,20 @@ class TreealService
                     'status' => $response->status(),
                     'response' => $errorBody,
                 ]);
-                
+
                 $errorData = json_decode($errorBody, true);
                 $errorMessage = 'Erro ao obter token OAuth2';
-                
+
                 if (is_array($errorData)) {
-                    $errorMessage = $errorData['detail'] 
-                        ?? $errorData['title'] 
-                        ?? $errorData['message'] 
-                        ?? $errorData['error'] 
+                    $errorMessage = $errorData['detail']
+                        ?? $errorData['title']
+                        ?? $errorData['message']
+                        ?? $errorData['error']
                         ?? json_encode($errorData);
                 } elseif (!empty($errorBody)) {
                     $errorMessage = $errorBody;
                 }
-                
+
                 throw new \Exception("Erro ao obter token OAuth2 QR Codes ({$response->status()}): {$errorMessage}");
             }
 
@@ -355,10 +383,13 @@ class TreealService
             $token = $data['access_token'] ?? null;
 
             if (!$token) {
-                throw new \Exception("Token não encontrado na resposta OAuth2. Resposta: " . json_encode($data));
+                $keys = is_array($data) ? implode(', ', array_keys($data)) : 'n/a';
+                Log::warning('TreealService::getQRCodesAccessToken - Token não encontrado na resposta', [
+                    'response_keys' => $keys,
+                ]);
+                throw new \Exception("Token não encontrado na resposta OAuth2 (chaves recebidas: {$keys}).");
             }
 
-            // Cachear token
             $expiresIn = $data['expires_in'] ?? self::TOKEN_CACHE_TTL;
             Cache::put($cacheKey, $token, now()->addSeconds($expiresIn - 60));
 
@@ -367,7 +398,6 @@ class TreealService
             ]);
 
             return $token;
-
         } catch (\Exception $e) {
             Log::error('TreealService::getQRCodesAccessToken - Exceção', [
                 'error' => $e->getMessage(),
@@ -458,18 +488,17 @@ class TreealService
 
     /**
      * Obtém token OAuth2 para Accounts API
-     * 
-     * Usa certificado digital + client_credentials
-     * 
+     *
+     * Usa lock na renovação para evitar corrida entre workers quando o cache está vazio.
+     *
      * @return string Access token
      * @throws \Exception Se falhar autenticação
      */
     public function getAccessToken(): string
     {
-        // Verificar cache primeiro
         $cacheKey = "treeal:oauth_token:{$this->config->id}";
         $cachedToken = Cache::get($cacheKey);
-        
+
         if ($cachedToken) {
             Log::debug('TreealService::getAccessToken - Token obtido do cache');
             return $cachedToken;
@@ -492,15 +521,48 @@ class TreealService
             throw new \Exception("Credenciais OAuth2 não configuradas (client_id/client_secret)");
         }
 
+        $lockKey = "treeal:oauth_lock:{$this->config->id}";
+        $lock = Cache::lock($lockKey, 15);
+
+        try {
+            return $lock->block(10, function () use ($cacheKey) {
+                $cachedToken = Cache::get($cacheKey);
+                if ($cachedToken) {
+                    return $cachedToken;
+                }
+                return $this->fetchNewAccessToken();
+            });
+        } catch (LockTimeoutException $e) {
+            Log::warning('TreealService::getAccessToken - Lock timeout ao renovar token, tentando sem lock');
+            $cachedToken = Cache::get($cacheKey);
+            if ($cachedToken) {
+                return $cachedToken;
+            }
+            return $this->fetchNewAccessToken();
+        }
+    }
+
+    /**
+     * Requisição HTTP para obter novo token OAuth2 Accounts e gravar no cache.
+     * Usado por getAccessToken (com lock e fallback).
+     *
+     * @return string Access token
+     * @throws \Exception Se falhar autenticação
+     */
+    private function fetchNewAccessToken(): string
+    {
+        $cacheKey = "treeal:oauth_token:{$this->config->id}";
+        $certificatePath = $this->config->getAccountsCertificateFullPath();
+        $certificatePassword = $this->accountsCertificatePassword;
+        $clientId = $this->accountsClientId;
+        $clientSecret = $this->accountsClientSecret;
+
         try {
             Log::info('TreealService::getAccessToken - Obtendo novo token OAuth2', [
                 'accounts_api_url' => $this->config->accounts_api_url,
             ]);
 
-            // Converter .PFX para PEM (certificado Cash Out)
             $pemFiles = $this->convertPfxToPem($certificatePath, $certificatePassword);
-
-            // Em sandbox SSL desligado; em produção usa config (TREEAL_VERIFY_SSL)
             $verifySSL = $this->config->environment === 'sandbox' ? false : (bool) config('treeal.verify_ssl', true);
 
             $payload = [
@@ -536,7 +598,11 @@ class TreealService
             $token = $data['accessToken'] ?? $data['access_token'] ?? null;
 
             if (!$token) {
-                throw new \Exception("Token não encontrado na resposta OAuth2. Resposta: " . json_encode($data));
+                $keys = is_array($data) ? implode(', ', array_keys($data)) : 'n/a';
+                Log::warning('TreealService::getAccessToken - Token não encontrado na resposta', [
+                    'response_keys' => $keys,
+                ]);
+                throw new \Exception("Token não encontrado na resposta OAuth2 (chaves recebidas: {$keys}).");
             }
 
             $expiresIn = $data['expires_in'] ?? null;
@@ -544,8 +610,12 @@ class TreealService
                 $expiresAt = (int) $data['expiresAt'];
                 $expiresIn = $expiresAt > 0 ? max(0, $expiresAt - time()) : self::TOKEN_CACHE_TTL;
             }
+            if ($expiresIn === null && isset($data['expires_at'])) {
+                $expiresAt = (int) $data['expires_at'];
+                $expiresIn = $expiresAt > 0 ? max(0, $expiresAt - time()) : self::TOKEN_CACHE_TTL;
+            }
             $expiresIn = $expiresIn ?? self::TOKEN_CACHE_TTL;
-            Cache::put($cacheKey, $token, now()->addSeconds($expiresIn - 60)); // Cache com 1 minuto de margem
+            Cache::put($cacheKey, $token, now()->addSeconds($expiresIn - 60));
 
             Log::info('TreealService::getAccessToken - Token obtido com sucesso', [
                 'expires_in' => $expiresIn,
@@ -553,7 +623,6 @@ class TreealService
             ]);
 
             return $token;
-
         } catch (\Exception $e) {
             Log::error('TreealService::getAccessToken - Exceção', [
                 'error' => $e->getMessage(),
@@ -590,19 +659,29 @@ class TreealService
     }
 
     /**
-     * Gera QR Code para depósito (Cash In)
-     * 
-     * Endpoint: POST /cob/{txid} (QR Codes API)
-     * Documentação: https://treeal-pix.readme.io/reference/post-cob-txid
-     * 
+     * Gera QR Code para depósito (Cash In) – cobrança de pagamento imediato.
+     *
+     * Conforme doc Onz: POST /cob (txid pela API) ou PUT /cob/{txid} (txid próprio).
+     * Opcionais: valor.modalidadeAlteracao, devedor, infoAdicionais.
+     *
      * @param float $amount Valor do depósito
-     * @param string $description Descrição do pagamento
-     * @param string|null $txid Transaction ID (opcional, será gerado se não fornecido)
-     * @param int $expirationSeconds Tempo de expiração em segundos (padrão: 3600 = 1 hora)
-     * @return array Resposta da API com QR Code
+     * @param string $description Descrição (solicitacaoPagador, máx. 140 caracteres)
+     * @param string|null $txid Se null, usa POST /cob; senão PUT /cob/{txid}
+     * @param int $expirationSeconds Expiração em segundos (padrão 3600)
+     * @param int $modalidadeAlteracao 0 = valor fixo, 1 = valor alterável (doc)
+     * @param array $devedor Opcional: nome, cpf, cnpj, logradouro, cidade, uf, cep
+     * @param array $infoAdicionais Opcional: [['nome'=>..., 'valor'=>...]] (nome máx. 50, valor máx. 200)
+     * @return array success, txid, qr_code, location, status, expires_at, data
      */
-    public function generateQRCode(float $amount, string $description, ?string $txid = null, int $expirationSeconds = 3600): array
-    {
+    public function generateQRCode(
+        float $amount,
+        string $description,
+        ?string $txid = null,
+        int $expirationSeconds = 3600,
+        int $modalidadeAlteracao = 0,
+        array $devedor = [],
+        array $infoAdicionais = []
+    ): array {
         if (!$this->isActive()) {
             throw new \Exception("Treeal não está configurado ou ativo");
         }
@@ -611,85 +690,95 @@ class TreealService
             throw new \Exception("Chave PIX secundária não configurada");
         }
 
-        // Gerar txid se não fornecido (formato: 26-35 caracteres alfanuméricos conforme padrão PIX)
-        if (!$txid) {
-            // Gerar 32 caracteres alfanuméricos (padrão mais comum)
-            $txid = strtoupper(bin2hex(random_bytes(16)));
-        }
-
-        // Validar formato do txid (26-35 caracteres alfanuméricos)
-        if (!preg_match('/^[a-zA-Z0-9]{26,35}$/', $txid)) {
+        $usePostCob = ($txid === null || $txid === '');
+        if (!$usePostCob && !preg_match('/^[a-zA-Z0-9]{26,35}$/', $txid)) {
             throw new \Exception("txid inválido. Deve ter entre 26 e 35 caracteres alfanuméricos");
         }
 
+        $valorPayload = ['original' => number_format($amount, 2, '.', '')];
+        if ($modalidadeAlteracao !== 0) {
+            $valorPayload['modalidadeAlteracao'] = $modalidadeAlteracao;
+        }
+
         $payload = [
-            'calendario' => [
-                'expiracao' => $expirationSeconds,
-            ],
-            'valor' => [
-                'original' => number_format($amount, 2, '.', ''),
-            ],
+            'calendario' => ['expiracao' => $expirationSeconds],
+            'valor' => $valorPayload,
             'chave' => $this->pixKeySecondary,
-            'solicitacaoPagador' => substr($description, 0, 140), // Máximo 140 caracteres
+            'solicitacaoPagador' => substr($description, 0, 140),
         ];
+
+        if (!empty($devedor)) {
+            $devedorPayload = $this->buildDevedorPayload($devedor);
+            if (!empty($devedorPayload)) {
+                $payload['devedor'] = $devedorPayload;
+            }
+        }
+
+        if (!empty($infoAdicionais)) {
+            $payload['infoAdicionais'] = array_values(array_filter(array_map(
+                function (array $item): array {
+                    $nome = isset($item['nome']) ? substr((string) $item['nome'], 0, 50) : '';
+                    $valor = isset($item['valor']) ? substr((string) $item['valor'], 0, 200) : '';
+                    return ['nome' => $nome, 'valor' => $valor];
+                },
+                $infoAdicionais
+            ), fn(array $row): bool => $row['nome'] !== '' || $row['valor'] !== ''));
+        }
+
+        $client = $this->getQRCodesHttpClient();
+        $baseUrl = $this->config->qrcodes_api_url;
 
         try {
             Log::info('TreealService::generateQRCode - Gerando QR Code', [
                 'amount' => $amount,
+                'use_post' => $usePostCob,
                 'txid' => $txid,
                 'pix_key' => $this->pixKeySecondary,
             ]);
 
-            // Endpoint: PUT /cob/{txid} (cria ou atualiza cobrança imediata)
-            $response = $this->getQRCodesHttpClient()
-                ->put($this->config->qrcodes_api_url . '/cob/' . $txid, $payload);
+            if ($usePostCob) {
+                $response = $client->post($baseUrl . '/cob', $payload);
+                $requestUrl = $baseUrl . '/cob';
+            } else {
+                $response = $client->put($baseUrl . '/cob/' . $txid, $payload);
+                $requestUrl = $baseUrl . '/cob/' . $txid;
+            }
 
             if (!$response->successful()) {
                 $errorBody = $response->body();
                 $errorHeaders = $response->headers();
-                
                 Log::error('TreealService::generateQRCode - Erro na API', [
                     'status' => $response->status(),
                     'response' => $errorBody,
                     'headers' => $errorHeaders,
                     'txid' => $txid,
-                    'url' => $this->config->qrcodes_api_url . '/cob/' . $txid,
+                    'url' => $requestUrl,
                 ]);
-                
-                // Tentar parsear erro RFC 7807 ou JSON genérico
                 $errorData = json_decode($errorBody, true);
                 $errorMessage = 'Erro ao gerar QR Code';
-                
                 if (is_array($errorData)) {
-                    $errorMessage = $errorData['detail'] 
-                        ?? $errorData['title'] 
-                        ?? $errorData['message'] 
-                        ?? $errorData['error'] 
-                        ?? json_encode($errorData);
+                    $errorMessage = $errorData['detail'] ?? $errorData['title'] ?? $errorData['message']
+                        ?? $errorData['error'] ?? json_encode($errorData);
                 } elseif (!empty($errorBody)) {
                     $errorMessage = $errorBody;
                 }
-                
                 throw new \Exception("Erro ao gerar QR Code ({$response->status()}): {$errorMessage}");
             }
 
             $data = $response->json();
+            $txidResposta = $data['txid'] ?? $txid;
 
             Log::info('TreealService::generateQRCode - QR Code gerado com sucesso', [
-                'txid' => $txid,
+                'txid' => $txidResposta,
                 'status' => $data['status'] ?? 'UNKNOWN',
             ]);
 
-            // Obter QR Code da location se necessário
             $qrCode = $data['pixCopiaECola'] ?? null;
-            $location = $data['loc']['location'] ?? null;
+            $location = $data['loc']['location'] ?? $data['location'] ?? null;
 
-            // Se não tem pixCopiaECola direto, buscar da location
             if (!$qrCode && $location) {
                 try {
-                    $locationResponse = $this->getQRCodesHttpClient()
-                        ->get($location);
-                    
+                    $locationResponse = $client->get($location);
                     if ($locationResponse->successful()) {
                         $locationData = $locationResponse->json();
                         $qrCode = $locationData['pixCopiaECola'] ?? $qrCode;
@@ -704,25 +793,59 @@ class TreealService
 
             return [
                 'success' => true,
-                'txid' => $txid,
+                'txid' => $txidResposta,
                 'qr_code' => $qrCode,
-                'qr_code_image_url' => null, // Será gerado no front-end
+                'qr_code_image_url' => null,
                 'location' => $location,
                 'status' => $data['status'] ?? 'ATIVA',
-                'expires_at' => isset($data['calendario']['expiracao']) 
-                    ? now()->addSeconds($data['calendario']['expiracao'])->toIso8601String()
+                'expires_at' => isset($data['calendario']['expiracao'])
+                    ? now()->addSeconds((int) $data['calendario']['expiracao'])->toIso8601String()
                     : now()->addSeconds($expirationSeconds)->toIso8601String(),
                 'data' => $data,
             ];
-
         } catch (\Exception $e) {
             Log::error('TreealService::generateQRCode - Exceção', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
-                'txid' => $txid,
+                'txid' => $txid ?? 'POST',
             ]);
             throw $e;
         }
+    }
+
+    /**
+     * Monta o payload do devedor para cobrança PIX (API QRCodes).
+     * Campos com limite de tamanho são truncados; cpf, cnpj e cep são enviados só com dígitos.
+     *
+     * @param array<string, mixed> $devedor
+     * @return array<string, string>
+     */
+    private function buildDevedorPayload(array $devedor): array
+    {
+        $rules = [
+            'nome'        => ['max' => 200, 'normalize' => 'substr'],
+            'cpf'         => ['max' => null, 'normalize' => 'digits'],
+            'cnpj'        => ['max' => null, 'normalize' => 'digits'],
+            'logradouro'  => ['max' => 200, 'normalize' => 'substr'],
+            'cidade'      => ['max' => 100, 'normalize' => 'substr'],
+            'uf'          => ['max' => 2, 'normalize' => 'substr'],
+            'cep'         => ['max' => null, 'normalize' => 'digits'],
+        ];
+
+        $out = [];
+        foreach ($rules as $key => $config) {
+            if (empty($devedor[$key])) {
+                continue;
+            }
+            $value = $devedor[$key];
+            if ($config['normalize'] === 'digits') {
+                $out[$key] = preg_replace('/\D/', '', (string) $value);
+            } else {
+                $out[$key] = substr((string) $value, 0, $config['max']);
+            }
+        }
+
+        return $out;
     }
 
     /**
@@ -958,10 +1081,13 @@ class TreealService
                 ]);
 
                 $errorData    = json_decode($errorBody, true);
-                $errorMessage = (is_array($errorData)
+                $rawMessage   = (is_array($errorData)
                     ? ($errorData['detail'] ?? $errorData['title'] ?? $errorData['message'] ?? json_encode($errorData))
                     : $errorBody)
                     ?: 'Erro ao criar saque';
+                $errorMessage = is_array($errorData)
+                    ? PixErrorCodes::getMessageFromPayload($errorData, $rawMessage)
+                    : $rawMessage;
 
                 if (isset($errorData['errors']) && is_array($errorData['errors'])) {
                     $errorMessage .= ' - ' . json_encode($errorData['errors']);
@@ -1069,6 +1195,97 @@ class TreealService
 
         } catch (\Exception $e) {
             Log::error('TreealService::registerCashOutWebhook - Exceção', [
+                'error' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
+     * Registra webhook de receive (recebimentos/Cash In) na Accounts API v2.
+     *
+     * Documentação Onz: POST /api/v2/webhooks/receive
+     * Permite que a Onz envie eventos de recebimento para a mesma URL do callback.
+     *
+     * @param string $uri URL do webhook (ex: https://api.orizonpay.com/treeal/webhook)
+     * @param array  $headers Headers opcionais
+     * @return array Resposta da API
+     */
+    public function registerReceiveWebhook(string $uri, array $headers = []): array
+    {
+        return $this->registerWebhookByType('receive', $uri, $headers);
+    }
+
+    /**
+     * Registra webhook de refund (estornos) na Accounts API v2.
+     *
+     * Documentação Onz: POST /api/v2/webhooks/refund
+     * Permite que a Onz envie eventos de estorno para a mesma URL do callback.
+     *
+     * @param string $uri URL do webhook (ex: https://api.orizonpay.com/treeal/webhook)
+     * @param array  $headers Headers opcionais
+     * @return array Resposta da API
+     */
+    public function registerRefundWebhook(string $uri, array $headers = []): array
+    {
+        return $this->registerWebhookByType('refund', $uri, $headers);
+    }
+
+    /**
+     * Registra um webhook por tipo na Accounts API v2 (receive, refund, etc.).
+     *
+     * @param string $type Tipo: receive, refund (transfer já tem registerCashOutWebhook)
+     * @param string $uri URL do webhook
+     * @param array  $headers Headers opcionais
+     * @return array success, data, webhook_id
+     */
+    private function registerWebhookByType(string $type, string $uri, array $headers = []): array
+    {
+        if (!$this->isActive()) {
+            throw new \Exception("Treeal não está configurado ou ativo");
+        }
+
+        $payload = [
+            'uri'     => $uri,
+            'enabled' => true,
+        ];
+        if (!empty($headers)) {
+            $payload['headers'] = $headers;
+        }
+
+        $endpoint = $this->config->accounts_api_url . '/webhooks/' . $type;
+
+        try {
+            Log::info("TreealService::registerWebhookByType - Registrando webhook [{$type}]", ['uri' => $uri]);
+            Cache::forget("treeal:oauth_token:{$this->config->id}");
+
+            $response = $this->getAccountsHttpClient()->post($endpoint, $payload);
+
+            if (!$response->successful()) {
+                $errorBody    = $response->body();
+                $errorData    = json_decode($errorBody, true);
+                $errorMessage = (is_array($errorData)
+                    ? ($errorData['detail'] ?? $errorData['title'] ?? $errorData['message'] ?? json_encode($errorData))
+                    : $errorBody)
+                    ?: 'Erro ao registrar webhook';
+
+                Log::error("TreealService::registerWebhookByType - Erro [{$type}]", [
+                    'status'   => $response->status(),
+                    'response' => $errorBody,
+                ]);
+                throw new \Exception("Erro ao registrar webhook {$type} ({$response->status()}): {$errorMessage}");
+            }
+
+            $data = $response->json();
+            Log::info("TreealService::registerWebhookByType - Webhook [{$type}] registrado", ['response' => $data]);
+
+            return [
+                'success'    => true,
+                'data'       => $data,
+                'webhook_id' => $data['id'] ?? null,
+            ];
+        } catch (\Exception $e) {
+            Log::error("TreealService::registerWebhookByType - Exceção [{$type}]", [
                 'error' => $e->getMessage(),
             ]);
             throw $e;
@@ -1324,8 +1541,14 @@ class TreealService
             
             case 'evp':
             case 'aleatoria':
-                // EVP (chave aleatória) já está no formato correto (UUID)
-                return strtolower(trim($pixKey));
+                // EVP (chave aleatória): formato UUID conforme doc BCB/Onz
+                $normalized = strtolower(trim($pixKey));
+                if (!preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/', $normalized)) {
+                    throw new \InvalidArgumentException(
+                        'Chave PIX do tipo EVP (aleatória) deve estar no formato UUID (ex.: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).'
+                    );
+                }
+                return $normalized;
             
             default:
                 // Se tipo desconhecido, retornar como está

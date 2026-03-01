@@ -640,7 +640,7 @@ class AdminDashboardController extends Controller
     private function calculateAcquirerFees($solicitacoes, $saques): array
     {
         // Custo fixo da TREEAL por transação
-        $custoTreealPorTransacao = (float) config('treeal.custo_fixo_por_transacao', 0.02);
+        $custoTreealPorTransacao = (float) config('treeal.custo_fixo_por_transacao', 0.04);
         
         // Contar número de transações aprovadas
         $totalDepositos = (clone $solicitacoes)->count();

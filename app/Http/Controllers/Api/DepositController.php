@@ -594,12 +594,29 @@ class DepositController extends Controller
                 'verificacao' => 'deposito_liquido = ' . $amount . ' - ' . $taxaTotal . ' = ' . $depositoLiquido,
             ]);
 
-            // Gerar QR Code usando TreealService
+            // Montar devedor para a API de cobrança (doc Onz: nome, cpf/cnpj opcionais)
+            $devedor = [];
+            if (!empty($debtorName)) {
+                $devedor['nome'] = $debtorName;
+            }
+            if (!empty($debtorDocument)) {
+                $docDigits = preg_replace('/\D/', '', $debtorDocument);
+                if (strlen($docDigits) === 11) {
+                    $devedor['cpf'] = $docDigits;
+                } elseif (strlen($docDigits) === 14) {
+                    $devedor['cnpj'] = $docDigits;
+                }
+            }
+
+            // Gerar QR Code usando TreealService (POST /cob quando txid null; opcionais devedor)
             $qrCodeResult = $treealService->generateQRCode(
                 $amount,
                 $description,
-                null, // txid será gerado automaticamente
-                3600  // 1 hora de expiração
+                null, // txid null = POST /cob (API retorna txid)
+                3600, // 1 hora de expiração
+                0,    // modalidadeAlteracao: 0 = valor fixo
+                $devedor,
+                []    // infoAdicionais
             );
 
             if (!$qrCodeResult['success']) {

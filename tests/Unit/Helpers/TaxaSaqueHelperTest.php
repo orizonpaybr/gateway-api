@@ -22,7 +22,7 @@ class TaxaSaqueHelperTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        config(['treeal.custo_fixo_por_transacao' => 0.02]);
+        config(['treeal.custo_fixo_por_transacao' => 0.04]);
         $this->setting = App::create([
             'taxa_fixa_padrao' => 1.00,
             'taxa_fixa_pix' => 1.00,

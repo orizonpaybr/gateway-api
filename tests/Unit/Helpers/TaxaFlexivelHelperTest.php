@@ -24,7 +24,7 @@ class TaxaFlexivelHelperTest extends TestCase
     {
         parent::setUp();
         Log::spy();
-        config(['treeal.custo_fixo_por_transacao' => 0.02]);
+        config(['treeal.custo_fixo_por_transacao' => 0.04]);
         $this->setting = App::create([
             'taxa_fixa_padrao' => 1.00,
             'taxa_fixa_pix' => 1.00,
@@ -41,7 +41,7 @@ class TaxaFlexivelHelperTest extends TestCase
         $this->assertEquals(1.00, $result['taxa_cash_in']);
         $this->assertEquals(99.00, $result['deposito_liquido']);
         $this->assertEquals('GLOBAL_FIXA', $result['descricao']);
-        $this->assertEquals(0.02, $result['taxa_adquirente']);
+        $this->assertEquals(0.04, $result['taxa_adquirente']);
         $this->assertEquals(0.98, $result['taxa_aplicacao']);
         $this->assertEquals(0.00, $result['comissao_afiliado']);
     }
@@ -84,8 +84,8 @@ class TaxaFlexivelHelperTest extends TestCase
 
         $this->assertEquals(1.00, $result['taxa_cash_in']);
         $this->assertEquals(0.50, $result['comissao_afiliado']);
-        $this->assertEquals(0.02, $result['taxa_adquirente']);
-        $this->assertEquals(0.48, round($result['taxa_aplicacao'], 2)); // 1 - 0.02 - 0.50
+        $this->assertEquals(0.04, $result['taxa_adquirente']);
+        $this->assertEquals(0.46, round($result['taxa_aplicacao'], 2)); // 1 - 0.04 - 0.50
     }
 
     /** @test */
@@ -108,7 +108,7 @@ class TaxaFlexivelHelperTest extends TestCase
 
         $this->assertEquals(1.00, $result['taxa_cash_in']);
         $this->assertEquals(0.30, $result['comissao_afiliado']);
-        $this->assertEquals(0.68, round($result['taxa_aplicacao'], 2)); // 1 - 0.02 - 0.30
+        $this->assertEquals(0.66, round($result['taxa_aplicacao'], 2)); // 1 - 0.04 - 0.30
     }
 
     /** @test */
