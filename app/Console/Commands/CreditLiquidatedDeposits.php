@@ -2,31 +2,32 @@
 
 namespace App\Console\Commands;
 
+use App\Models\PaymentEvent;
 use App\Models\Solicitacoes;
 use App\Services\PaymentProcessingService;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
  * Credita depósitos que vieram como LIQUIDATED (ou equivalente) e não foram creditados.
  *
- * Útil quando:
- * - Webhooks vieram no formato antigo e só atualizaram status na base sem enfileirar o job.
- * - O job de Cash In falhou e o depósito ficou com status LIQUIDATED sem crédito no saldo.
- *
- * Não consulta a API: apenas busca na base os que já estão com status "pago" (LIQUIDATED, etc.)
- * e aplica o crédito via PaymentProcessingService (idempotente).
+ * Inclui:
+ * 1) Status LIQUIDATED, CONCLUIDA, etc. (formato antigo / webhook sem job).
+ * 2) Status PAID_OUT/COMPLETED que não têm evento em payment_events (crédito nunca aplicado).
  *
  * Uso na VPS:
- *   php artisan deposits:credit-liquidated
+ *   php artisan deposits:credit-liquidated --show-statuses  (só lista status que existem na base)
  *   php artisan deposits:credit-liquidated --dry-run
+ *   php artisan deposits:credit-liquidated
  */
 class CreditLiquidatedDeposits extends Command
 {
     protected $signature = 'deposits:credit-liquidated
-                            {--dry-run : Apenas lista, não credita}';
+                            {--dry-run        : Apenas lista, não credita}
+                            {--show-statuses  : Lista os status existentes na tabela solicitacoes (diagnóstico)}';
 
-    protected $description = 'Credita depósitos com status LIQUIDATED/equivalentes que ainda não tiveram saldo creditado';
+    protected $description = 'Credita depósitos LIQUIDATED ou PAID_OUT/COMPLETED que ainda não tiveram saldo creditado';
 
     /** Status que indicam "pago na adquirente" mas podem não ter passado pelo job de crédito. */
     private const LIQUIDATED_STATUSES = [
@@ -38,18 +39,37 @@ class CreditLiquidatedDeposits extends Command
         'PROCESSED',
     ];
 
+    /** Status já "pagos" no nosso sistema mas que podem não ter tido o crédito aplicado. */
+    private const PAID_STATUSES = ['PAID_OUT', 'COMPLETED'];
+
     public function handle(PaymentProcessingService $paymentService): int
     {
         $dryRun = (bool) $this->option('dry-run');
+        $showStatuses = (bool) $this->option('show-statuses');
 
-        $this->info('Buscando depósitos com status LIQUIDATED/equivalentes (não creditados)...');
+        if ($showStatuses) {
+            $this->printStatuses();
+            return 0;
+        }
 
-        $deposits = Solicitacoes::whereIn('status', self::LIQUIDATED_STATUSES)
+        $this->info('Buscando depósitos não creditados (LIQUIDATED/equivalentes ou PAID_OUT/COMPLETED sem evento)...');
+
+        $idsWithEvent = PaymentEvent::where('event_type', 'PAYMENT_RECEIVED')
+            ->where('transaction_type', 'deposit')
+            ->pluck('transaction_id');
+
+        $deposits = Solicitacoes::where(function ($q) use ($idsWithEvent) {
+            $q->whereIn('status', self::LIQUIDATED_STATUSES)
+                ->orWhere(function ($q2) use ($idsWithEvent) {
+                    $q2->whereIn('status', self::PAID_STATUSES)
+                        ->whereNotIn('id', $idsWithEvent->toArray());
+                });
+        })
             ->orderBy('date', 'asc')
             ->get();
 
         if ($deposits->isEmpty()) {
-            $this->info('Nenhum depósito nesse formato encontrado.');
+            $this->info('Nenhum depósito não creditado encontrado.');
             return 0;
         }
 
@@ -110,5 +130,22 @@ class CreditLiquidatedDeposits extends Command
         }
 
         return $errors > 0 ? 1 : 0;
+    }
+
+    private function printStatuses(): void
+    {
+        $statuses = Solicitacoes::query()
+            ->select('status', DB::raw('COUNT(*) as total'))
+            ->groupBy('status')
+            ->orderBy('status')
+            ->get();
+
+        $this->info('Status existentes na tabela solicitacoes (depósitos):');
+        $this->newLine();
+        foreach ($statuses as $row) {
+            $this->line('  ' . ($row->status ?? '(vazio)') . '  =>  ' . $row->total . ' registro(s)');
+        }
+        $this->newLine();
+        $this->comment('Use --dry-run para listar os que seriam creditados sem aplicar.');
     }
 }
