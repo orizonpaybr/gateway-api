@@ -132,7 +132,7 @@ class CallbackController extends Controller
 
         // Treeal pode enviar webhook sem campo "status" → considerar CONCLUIDA
         $statusNormalized   = $status !== null && $status !== '' ? strtoupper((string) $status) : 'CONCLUIDA';
-        $isPaymentConfirmed = in_array($statusNormalized, ['CONCLUIDA', 'ATIVA', 'PAID', 'COMPLETED']);
+        $isPaymentConfirmed = in_array($statusNormalized, ['CONCLUIDA', 'ATIVA', 'PAID', 'COMPLETED', 'LIQUIDATED', 'PAID_OUT']);
         $isRefund = in_array($statusNormalized, ['REFUNDED', 'PARTIALLY_REFUNDED']);
 
         if ($isRefund) {
