@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\PaymentEvent;
 use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
@@ -42,13 +43,20 @@ class PaymentProcessingService
                 throw new \Exception("Transação não encontrada: {$cashin->id}");
             }
             
-            // Verificar idempotência
+            // Verificar idempotência: se já está pago, só seguir se não houver evento (crédito nunca aplicado)
             if ($cashin->status === 'PAID_OUT' || $cashin->status === 'COMPLETED') {
-                Log::info("Pagamento já processado anteriormente", [
-                    'transaction_id' => $cashin->idTransaction,
-                    'status' => $cashin->status,
-                ]);
-                return; // Idempotência - já foi processado
+                $alreadyCredited = PaymentEvent::where('transaction_id', $cashin->id)
+                    ->where('event_type', 'PAYMENT_RECEIVED')
+                    ->where('transaction_type', 'deposit')
+                    ->exists();
+                if ($alreadyCredited) {
+                    Log::info("Pagamento já processado anteriormente", [
+                        'transaction_id' => $cashin->idTransaction,
+                        'status' => $cashin->status,
+                    ]);
+                    return; // Idempotência - já foi processado e creditado
+                }
+                // Status pago mas sem evento = crédito nunca rodou; continua para creditar
             }
             
             // Lock no usuário
