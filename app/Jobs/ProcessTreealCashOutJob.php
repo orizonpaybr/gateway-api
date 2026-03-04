@@ -348,17 +348,33 @@ class ProcessTreealCashOutJob implements ShouldQueue
     }
 
     /**
-     * Monta payload extra do webhook para o cliente (Cash Out): tipo, beneficiário e conta que solicitou.
+     * Monta payload extra do webhook para o cliente (Cash Out), alinhado ao formato do depósito (PIX_IN):
+     * endToEndId, tipo, beneficiário, solicitante e datas.
      *
      * @return array<string, mixed>
      */
     private function buildCashOutWebhookExtra(SolicitacoesCashOut $cashOut): array
     {
         $pixKey = $cashOut->pix ?? $cashOut->pixkey ?? null;
+        $endToEndId = $cashOut->end_to_end && str_starts_with((string) $cashOut->end_to_end, 'E')
+            ? $cashOut->end_to_end
+            : null;
+
+        $createdAt = null;
+        if ($cashOut->date) {
+            $createdAt = $cashOut->date instanceof \DateTimeInterface
+                ? $cashOut->date->format('c')
+                : (\Carbon\Carbon::parse($cashOut->date)->format('c') ?? null);
+        }
+        if ($createdAt === null && $cashOut->created_at) {
+            $createdAt = $cashOut->created_at->format('c');
+        }
 
         return [
             'typeTransaction' => 'PIX_OUT',
-            'beneficiary' => [
+            'endToEndId'       => $endToEndId,
+            'createdAt'       => $createdAt,
+            'beneficiary'      => [
                 'name'     => $cashOut->beneficiaryname ?? null,
                 'document' => $cashOut->beneficiarydocument ?? null,
                 'pixKey'   => $pixKey,
