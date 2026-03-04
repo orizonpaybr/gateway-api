@@ -286,7 +286,7 @@ class UserController extends Controller
                     'valor_liquido' => (float) ($transaction->valor_liquido ?? 0),
                     'taxa' => (float) ($transaction->taxa ?? 0),
                     'status' => $transaction->status ?? 'PENDING',
-                    'status_legivel' => $this->getStatusLegivel($transaction->status ?? 'PENDING'),
+                    'status_legivel' => $this->getStatusLegivel($transaction->status ?? 'PENDING', $transaction->tipo ?? null),
                     'data' => $transaction->date ?? now()->format('Y-m-d H:i:s'),
                     'created_at' => $transaction->created_at ?? now()->format('Y-m-d H:i:s'),
                     'nome_cliente' => $transaction->nome_cliente ?? 'Cliente',
@@ -448,7 +448,7 @@ class UserController extends Controller
                         'valor_liquido' => (float) $saque->cash_out_liquido,
                         'taxa' => (float) $saque->taxa_cash_out,
                         'status' => $saque->status,
-                        'status_legivel' => $this->getStatusLegivel($saque->status),
+                        'status_legivel' => $this->getStatusLegivel($saque->status, 'saque'),
                         'data' => $saque->date,
                         'created_at' => $saque->created_at,
                         'updated_at' => $saque->updated_at,
@@ -941,7 +941,7 @@ class UserController extends Controller
                         'valor_liquido' => (float) $saida->cash_out_liquido,
                         'taxa' => (float) $saida->taxa_cash_out,
                         'status' => $saida->status,
-                        'status_legivel' => $this->getStatusLegivel($saida->status),
+                        'status_legivel' => $this->getStatusLegivel($saida->status, 'saque'),
                         'data' => $saida->date,
                         'created_at' => $saida->created_at,
                         'nome_cliente' => $saida->beneficiaryname ?? 'Cliente',
@@ -1021,9 +1021,13 @@ class UserController extends Controller
     }
 
     /**
-     * Obter status legível para transações
+     * Obter status legível para transações.
+     * Para saques: na Treeal, PROCESSING já indica PIX enviado, então exibimos como "Concluída".
+     *
+     * @param string $status Status interno (COMPLETED, PROCESSING, etc.)
+     * @param string|null $tipo 'saque' ou 'deposito' (ou null para usar só o mapa padrão)
      */
-    private function getStatusLegivel($status)
+    private function getStatusLegivel($status, $tipo = null)
     {
         $statusMap = [
             'COMPLETED' => 'Concluída',
@@ -1039,6 +1043,11 @@ class UserController extends Controller
             'MEDIATION' => 'Mediação',
             'DISPUTE' => 'Disputa',
         ];
+
+        // Saque com PROCESSING na Treeal = PIX já enviado; normalizar para exibição como concluído
+        if ($tipo === 'saque' && $status === 'PROCESSING') {
+            return 'Concluída';
+        }
 
         return $statusMap[$status] ?? ucfirst(strtolower(str_replace('_', ' ', $status)));
     }
@@ -2168,7 +2177,7 @@ class UserController extends Controller
                     'valor' => $saida->amount,
                     'valor_liquido' => $saida->cash_out_liquido,
                     'taxa' => $saida->taxa_cash_out,
-                    'status' => $this->getStatusLegivel($saida->status),
+                    'status' => $this->getStatusLegivel($saida->status, 'saque'),
                     'data' => $saida->date,
                     'nome' => $saida->beneficiaryname ?? 'Cliente',
                     'documento' => $saida->beneficiarydocument ?? '00000000000',
