@@ -406,7 +406,9 @@ class WithdrawalController extends Controller
             $statusInterno = $this->mapTreealStatusToInternal($status);
 
             // Atualizar saque em transação (valor + taxa já foram debitados na criação do saque)
-            DB::transaction(function () use ($saque, $transactionId, $statusInterno, $taxaCashOut) {
+            $endToEnd = $withdrawalResult['end_to_end_id'] ?? null;
+
+            DB::transaction(function () use ($saque, $transactionId, $statusInterno, $taxaCashOut, $endToEnd, $idempotencyKey) {
                 $saqueAtualizado = SolicitacoesCashOut::where('id', $saque->id)
                     ->lockForUpdate()
                     ->first();
@@ -424,8 +426,9 @@ class WithdrawalController extends Controller
                     'externalreference' => $transactionId ?? $saqueAtualizado->externalreference,
                     'idTransaction' => $transactionId ?? $saqueAtualizado->idTransaction,
                     'executor_ordem' => 'Treeal',
-                    'end_to_end' => $transactionId ?? $saqueAtualizado->end_to_end,
+                    'end_to_end' => $endToEnd ?? $saqueAtualizado->end_to_end,
                     'taxa_cash_out' => $taxaCashOut,
+                    'descricao_externa' => $idempotencyKey,
                 ]);
             });
 
@@ -609,7 +612,7 @@ class WithdrawalController extends Controller
             'PAID_OUT' => 'Pago',
             'CANCELLED' => 'Cancelado',
             'FAILED' => 'Falhou',
-            'PROCESSING' => 'Processando',
+            'PROCESSING' => 'Concluído', // Treeal: PROCESSING = PIX enviado
         ];
 
         return $labels[$status] ?? $status;

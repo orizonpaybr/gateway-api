@@ -50,17 +50,17 @@ class ProcessTreealCashOutJob implements ShouldQueue
         $jobStart = microtime(true);
 
         $endToEndId = $this->data['endToEndId'] ?? $this->data['end_to_end_id'] ?? null;
+        $onzNumericId = isset($this->data['id']) ? (string) $this->data['id'] : null;
+        $webhookIdempotencyKey = $this->data['idempotencyKey'] ?? null;
 
-        $cashOut = SolicitacoesCashOut::where('idTransaction', $this->transactionId)
-            ->orWhere('externalreference', $this->transactionId)
-            ->orWhere('end_to_end', $this->transactionId)
-            ->when($endToEndId && $endToEndId !== $this->transactionId, fn($q) => $q->orWhere('end_to_end', $endToEndId))
-            ->first();
+        $cashOut = $this->findCashOut($endToEndId, $onzNumericId, $webhookIdempotencyKey);
 
         if (!$cashOut) {
             Log::warning('[TREEAL CashOut Job] Saque não encontrado', [
-                'transaction_id' => $this->transactionId,
-                'end_to_end_id'  => $endToEndId,
+                'transaction_id'       => $this->transactionId,
+                'end_to_end_id'        => $endToEndId,
+                'onz_numeric_id'       => $onzNumericId,
+                'idempotency_key'      => $webhookIdempotencyKey,
             ]);
             $this->failWebhookLog('Saque não encontrado no banco de dados');
             return;
@@ -69,11 +69,12 @@ class ProcessTreealCashOutJob implements ShouldQueue
         $statusUpper = strtoupper($this->status ?? '');
 
         $statusConfirmado = ['LIQUIDATED', 'COMPLETED', 'PAID', 'CONCLUIDO', 'PROCESSED'];
-        $statusCancelado  = ['CANCELED', 'CANCELLED', 'FAILED'];
+        $statusCancelado  = ['CANCELED', 'CANCELLED', 'FAILED', 'REJECTED'];
         $statusEstornado  = ['REFUNDED', 'PARTIALLY_REFUNDED'];
 
         $updateData = [];
-        if ($endToEndId && empty($cashOut->end_to_end)) {
+        // Atualizar end_to_end se o atual estiver vazio ou for um ID numérico (não E2E real)
+        if ($endToEndId && (empty($cashOut->end_to_end) || !str_starts_with($cashOut->end_to_end, 'E'))) {
             $updateData['end_to_end'] = $endToEndId;
         }
 
@@ -143,7 +144,7 @@ class ProcessTreealCashOutJob implements ShouldQueue
                     'current_status' => $cashOut->status,
                 ]);
 
-                if (in_array($cashOut->status, ['PROCESSING', 'PAID_OUT', 'COMPLETED'])) {
+                if (in_array($cashOut->status, ['PENDING', 'PROCESSING', 'PAID_OUT', 'COMPLETED'])) {
                     $this->reverterSaldo($cashOut, 'cancelamento');
                 }
 
@@ -230,6 +231,56 @@ class ProcessTreealCashOutJob implements ShouldQueue
             $this->failWebhookLog($e->getMessage());
             throw $e;
         }
+    }
+
+    /**
+     * Busca o saque usando múltiplas estratégias (mais específica → mais genérica).
+     *
+     * 1. transactionId / externalreference / end_to_end diretos
+     * 2. idempotencyKey armazenado em descricao_externa
+     * 3. ID interno extraído de remittanceInformation (fallback para TRANSFER)
+     */
+    private function findCashOut(?string $endToEndId, ?string $onzNumericId, ?string $webhookIdempotencyKey): ?SolicitacoesCashOut
+    {
+        $cashOut = SolicitacoesCashOut::where('idTransaction', $this->transactionId)
+            ->orWhere('externalreference', $this->transactionId)
+            ->orWhere('end_to_end', $this->transactionId)
+            ->when($endToEndId && $endToEndId !== $this->transactionId, fn($q) => $q->orWhere('end_to_end', $endToEndId))
+            ->when($onzNumericId && $onzNumericId !== $this->transactionId, fn($q) => $q
+                ->orWhere('idTransaction', $onzNumericId)
+                ->orWhere('externalreference', $onzNumericId))
+            ->first();
+
+        if ($cashOut) {
+            return $cashOut;
+        }
+
+        if ($webhookIdempotencyKey) {
+            $cashOut = SolicitacoesCashOut::where('descricao_externa', $webhookIdempotencyKey)->first();
+            if ($cashOut) {
+                Log::info('[TREEAL CashOut Job] Saque encontrado via idempotencyKey', [
+                    'transaction_id'  => $this->transactionId,
+                    'idempotency_key' => $webhookIdempotencyKey,
+                    'saque_id'        => $cashOut->id,
+                ]);
+                return $cashOut;
+            }
+        }
+
+        $remittanceInfo = $this->data['remittanceInformation'] ?? null;
+        if ($remittanceInfo && preg_match('/ID:\s*(\d+)/', $remittanceInfo, $m)) {
+            $cashOut = SolicitacoesCashOut::find((int) $m[1]);
+            if ($cashOut) {
+                Log::info('[TREEAL CashOut Job] Saque encontrado via remittanceInformation', [
+                    'transaction_id'       => $this->transactionId,
+                    'remittance_info'      => $remittanceInfo,
+                    'saque_id'             => $cashOut->id,
+                ]);
+                return $cashOut;
+            }
+        }
+
+        return null;
     }
 
     private function reverterSaldo(SolicitacoesCashOut $cashOut, string $motivo, ?float $valorEstornado = null): void

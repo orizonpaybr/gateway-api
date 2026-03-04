@@ -746,7 +746,7 @@ class FinancialService
             'valor_total' => (float) $item->amount,
             'valor_liquido' => (float) $valorLiquido,
             'status' => $item->status,
-            'status_legivel' => $this->getStatusLabel($item->status),
+            'status_legivel' => $isDeposit ? $this->getStatusLabel($item->status) : $this->getWithdrawalStatusLabel($item->status),
             'data' => $item->date,
             'created_at' => $item->created_at,
         ];
@@ -808,10 +808,22 @@ class FinancialService
             'valor_liquido' => (float) $valorLiquido,
             'taxa' => (float) $item->taxa_cash_out,
             'status' => $item->status,
-            'status_legivel' => $this->getStatusLabel($item->status),
+            'status_legivel' => $this->getWithdrawalStatusLabel($item->status),
             'data' => $item->date,
             'created_at' => $item->created_at,
         ];
+    }
+
+    /**
+     * Label de status para saques (PIX OUT).
+     * PROCESSING na adquirente = PIX já enviado; exibir como "Concluído".
+     */
+    private function getWithdrawalStatusLabel(string $status): string
+    {
+        if ($status === 'PROCESSING') {
+            return 'Concluído';
+        }
+        return $this->getStatusLabel($status);
     }
 
     /**

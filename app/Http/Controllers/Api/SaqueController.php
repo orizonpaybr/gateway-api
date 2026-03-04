@@ -311,6 +311,7 @@ class SaqueController extends Controller
                     'descricao_transacao' => 'AUTOMATICO',
                     'executor_ordem' => 'Treeal',
                     'callback' => $callbackUrl,
+                    'descricao_externa' => $idempotencyKey,
                 ]);
 
                 // Debitar do saldo combinado (saldo_afiliado primeiro, depois saldo)

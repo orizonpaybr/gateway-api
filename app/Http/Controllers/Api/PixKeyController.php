@@ -626,6 +626,7 @@ class PixKeyController extends Controller
                         'cash_out_liquido' => $cashOutLiquido,
                         'descricao_transacao' => 'AUTOMATICO',
                         'executor_ordem' => 'Treeal',
+                        'descricao_externa' => $idempotencyKey,
                     ]);
                     
                     // Debitar saldo do usuário
