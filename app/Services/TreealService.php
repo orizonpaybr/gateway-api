@@ -1272,11 +1272,17 @@ class TreealService
                 ?? $data['paymentId']
                 ?? null;
 
+            // endToEndId real começa com "E"; se vier ID numérico, não usar como end_to_end
+            $endToEnd = $data['endToEndId'] ?? null;
+            if ($endToEnd !== null && !str_starts_with((string) $endToEnd, 'E')) {
+                $endToEnd = null;
+            }
+
             return [
                 'success' => true,
                 'idempotency_key' => $idempotencyKey,
                 'transaction_id' => $transactionId,
-                'end_to_end_id' => $data['endToEndId'] ?? $transactionId,
+                'end_to_end_id' => $endToEnd,
                 'status' => $data['status'] ?? 'PROCESSING',
                 'data' => $data,
             ];

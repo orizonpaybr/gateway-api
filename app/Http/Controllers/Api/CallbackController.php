@@ -84,6 +84,22 @@ class CallbackController extends Controller
                 return $this->handleTreealInfractionWebhook($inner, $webhookLog, $start);
             }
 
+            // ── Cash Out direto (webhookType: CASHOUT) — Treeal notifica REJECTED/CANCELED/etc.
+            if ($inner && $webhookType === 'CASHOUT') {
+                $endToEndId = $inner['endToEndId'] ?? null;
+                $idempotencyKey = $inner['idempotencyKey'] ?? $data['transaction']['reference'] ?? null;
+                $onzId = isset($inner['id']) ? (string) $inner['id'] : null;
+                $cashOutId = $endToEndId ?? $idempotencyKey ?? $onzId;
+                $status = $inner['status'] ?? $data['transaction']['status'] ?? null;
+
+                if ($cashOutId) {
+                    return $this->handleTreealCashOutWebhook((string) $cashOutId, $status, $inner, $webhookLog, $start);
+                }
+
+                Log::warning('[TREEAL] Webhook CASHOUT sem identificador', ['data' => $data]);
+                return response()->json(['status' => false, 'message' => 'CASHOUT sem identificador'], 400);
+            }
+
             if ($inner && in_array($webhookType, ['PIX', 'RECEIVING', 'CHARGE', 'RECEIVE'])) {
                 $txid   = $inner['txid'] ?? $inner['txId'] ?? null;
                 $status = $inner['status'] ?? null;
@@ -355,8 +371,7 @@ class CallbackController extends Controller
                 'current_status' => $cashOut->status,
             ]);
             
-            // Se o saque estava em processamento ou já foi debitado, reverter o saldo
-            if (in_array($cashOut->status, ['PROCESSING', 'PAID_OUT', 'COMPLETED'])) {
+            if (in_array($cashOut->status, ['PENDING', 'PROCESSING', 'PAID_OUT', 'COMPLETED'])) {
                 try {
                     $this->reverterSaldoSaque($cashOut, $transactionId, 'cancelamento');
                 } catch (\Exception $e) {
