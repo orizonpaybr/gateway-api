@@ -97,7 +97,10 @@ class User extends Authenticatable
         "preferred_adquirente_card_billet",
         "adquirente_card_billet_override",
         "taxa_comissao_afiliado",
-        "comissao_afiliado_personalizada"
+        "comissao_afiliado_personalizada",
+        "saque_config_personalizada",
+        "saque_automatico_usuario",
+        "limite_saque_automatico_usuario"
     ];
 
     /**
@@ -145,6 +148,9 @@ class User extends Authenticatable
             'limite_mensal_pf' => 'decimal:2',
             'taxa_comissao_afiliado' => 'decimal:3',
             'comissao_afiliado_personalizada' => 'boolean',
+            'saque_config_personalizada' => 'boolean',
+            'saque_automatico_usuario' => 'boolean',
+            'limite_saque_automatico_usuario' => 'decimal:2',
         ];
     }
 

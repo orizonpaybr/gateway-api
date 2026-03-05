@@ -115,6 +115,9 @@ trait UserRequestTrait
             'observacoes_taxas' => 'nullable|string|max:1000',
             'taxa_comissao_afiliado' => 'nullable|numeric|min:0',
             'comissao_afiliado_personalizada' => 'nullable|boolean',
+            'saque_config_personalizada' => 'nullable|boolean',
+            'saque_automatico_usuario' => 'nullable|boolean',
+            'limite_saque_automatico_usuario' => 'nullable|numeric|min:0',
         ];
     }
 }
