@@ -749,13 +749,17 @@ def criar_deposito(dados):
 
 ## 📝 Rate Limiting
 
-Os endpoints possuem limitação de requisições:
+Os endpoints de integração (token + secret) têm limite **por conta (token)**, não por IP:
 
-- **Transações**: 60 req/min
-- **Saques**: 30 req/min
-- **Callbacks**: 30 req/min
-- **Boletos**: 5 req/min
-- **Notificações**: 60 req/min
+| Endpoint | Limite | Chave |
+|----------|--------|--------|
+| `POST /api/wallet/deposit/payment` (PIX IN) | 500 req/min | token |
+| `POST /api/pixout` (PIX OUT) | 500 req/min | token |
+| `POST /api/status` | 500 req/min | token ou idTransaction |
+
+- **Saque (pixout)** continua exigindo **IP autorizado** (lista de IPs do cliente). O rate limit não substitui essa regra: primeiro valida token+secret, depois IP permitido, depois conta no throttle.
+- **Chave do throttle = token** (ou IP se token não vier no body). Vários clientes no mesmo IP não compartilham o mesmo limite.
+- Outros: Callbacks/webhooks 30 req/min; Boletos 5 req/min; integração (credentials, IPs) conforme rota.
 
 ---
 

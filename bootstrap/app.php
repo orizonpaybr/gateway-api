@@ -1,8 +1,11 @@
 <?php
 
+use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -11,6 +14,22 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+    ->booted(function () {
+        RateLimiter::for('pix-out', function (Request $request) {
+            $key = $request->input('token') ?? $request->ip();
+            return Limit::perMinute(500)->by('pix-out|' . $key);
+        });
+
+        RateLimiter::for('pix-in', function (Request $request) {
+            $key = $request->input('token') ?? $request->ip();
+            return Limit::perMinute(500)->by('pix-in|' . $key);
+        });
+
+        RateLimiter::for('status-check', function (Request $request) {
+            $key = $request->input('token') ?? $request->input('idTransaction') ?? $request->ip();
+            return Limit::perMinute(500)->by('status|' . $key);
+        });
+    })
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->append([
             \App\Http\Middleware\AtualizarSaldosClientes::class,
