@@ -339,30 +339,38 @@ class SaqueController extends Controller
                     ? $request->baasPostbackUrl
                     : null;
 
-                $cashOut = SolicitacoesCashOut::create([
-                    'user_id' => $user->username,
-                    'externalreference' => $transactionId,
-                    'amount' => $amount,
-                    'beneficiaryname' => $user->name ?? $user->username,
-                    'beneficiarydocument' => $pixKey,
-                    'pix' => $pixKey,
-                    'pixkey' => $pixKeyType,
-                    'date' => Carbon::now(),
-                    'status' => 'PENDING',
-                    'type' => 'PIX',
-                    'idTransaction' => $transactionId,
-                    'taxa_cash_out' => $taxaTotal,
-                    'cash_out_liquido' => $cashOutLiquido,
-                    'descricao_transacao' => 'MANUAL',
-                    'executor_ordem' => null, // Manual = sem executor automático
-                    'callback' => $callbackUrl,
-                ]);
+                // Criar registro + débito em transação atômica para garantir que
+                // o saque só existe no banco se o débito também for aplicado.
+                $cashOut = \Illuminate\Support\Facades\DB::transaction(function () use (
+                    $user, $transactionId, $amount, $pixKey, $pixKeyType,
+                    $taxaTotal, $cashOutLiquido, $valorTotalDescontar, $callbackUrl
+                ) {
+                    $co = SolicitacoesCashOut::create([
+                        'user_id' => $user->username,
+                        'externalreference' => $transactionId,
+                        'amount' => $amount,
+                        'beneficiaryname' => $user->name ?? $user->username,
+                        'beneficiarydocument' => $pixKey,
+                        'pix' => $pixKey,
+                        'pixkey' => $pixKeyType,
+                        'date' => Carbon::now(),
+                        'status' => 'PENDING',
+                        'type' => 'PIX',
+                        'idTransaction' => $transactionId,
+                        'taxa_cash_out' => $taxaTotal,
+                        'cash_out_liquido' => $cashOutLiquido,
+                        'descricao_transacao' => 'MANUAL',
+                        'executor_ordem' => null,
+                        'callback' => $callbackUrl,
+                    ]);
 
-                // Debitar do saldo combinado (saldo_afiliado primeiro, depois saldo)
-                $balanceService = app(\App\Services\BalanceService::class);
-                $balanceService->decrementCombinedBalance($user, $valorTotalDescontar);
+                    $balanceService = app(\App\Services\BalanceService::class);
+                    $balanceService->decrementCombinedBalance($user, $valorTotalDescontar);
+
+                    return $co;
+                });
+
                 Helper::calculaSaldoLiquido($user->user_id);
-
                 app(\App\Services\PaymentProcessingService::class)->invalidateCachesAfterPayment($cashOut->user_id);
 
                 Log::info('SaqueController::processTreealWithdrawal - Saque manual criado (valor + taxa debitados)', [

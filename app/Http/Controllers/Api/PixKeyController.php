@@ -515,30 +515,37 @@ class PixKeyController extends Controller
                 $idempotencyKey = uniqid('withdraw_manual_', true);
                 $description = $request->description ?? 'Saque via PIX';
                 
-                // Criar registro de saque pendente
-                $withdrawal = \App\Models\SolicitacoesCashOut::create([
-                    'user_id' => $user->user_id ?? $user->username,
-                    'externalreference' => $idempotencyKey,
-                    'amount' => $amount,
-                    'beneficiaryname' => $user->name ?? 'Não informado',
-                    'beneficiarydocument' => $user->cpf_cnpj ?? '',
-                    'pix' => $keyValue,
-                    'pixkey' => $keyType,
-                    'idTransaction' => $idempotencyKey,
-                    'status' => 'PENDING',
-                    'type' => 'PIX',
-                    'date' => now(),
-                    'taxa_cash_out' => $taxaCashOut,
-                    'cash_out_liquido' => $cashOutLiquido,
-                    'descricao_transacao' => 'MANUAL',
-                    'executor_ordem' => null,
-                ]);
-                
-                // Debitar do saldo combinado (saldo_afiliado primeiro, depois saldo)
-                $balanceService = app(\App\Services\BalanceService::class);
-                $balanceService->decrementCombinedBalance($user, $valorTotalDescontar);
-                \App\Helpers\Helper::calculaSaldoLiquido($user->user_id ?? $user->username);
+                // Criar registro + débito em transação atômica para garantir que
+                // o saque só existe no banco se o débito também for aplicado.
+                $withdrawal = \Illuminate\Support\Facades\DB::transaction(function () use (
+                    $user, $idempotencyKey, $amount, $keyValue, $keyType,
+                    $taxaCashOut, $cashOutLiquido, $valorTotalDescontar
+                ) {
+                    $w = \App\Models\SolicitacoesCashOut::create([
+                        'user_id' => $user->user_id ?? $user->username,
+                        'externalreference' => $idempotencyKey,
+                        'amount' => $amount,
+                        'beneficiaryname' => $user->name ?? 'Não informado',
+                        'beneficiarydocument' => $user->cpf_cnpj ?? '',
+                        'pix' => $keyValue,
+                        'pixkey' => $keyType,
+                        'idTransaction' => $idempotencyKey,
+                        'status' => 'PENDING',
+                        'type' => 'PIX',
+                        'date' => now(),
+                        'taxa_cash_out' => $taxaCashOut,
+                        'cash_out_liquido' => $cashOutLiquido,
+                        'descricao_transacao' => 'MANUAL',
+                        'executor_ordem' => null,
+                    ]);
 
+                    $balanceService = app(\App\Services\BalanceService::class);
+                    $balanceService->decrementCombinedBalance($user, $valorTotalDescontar);
+
+                    return $w;
+                });
+
+                \App\Helpers\Helper::calculaSaldoLiquido($user->user_id ?? $user->username);
                 app(\App\Services\PaymentProcessingService::class)->invalidateCachesAfterPayment($withdrawal->user_id);
 
                 Log::info('Saque PIX manual criado - pendente de aprovação (valor + taxa debitados)', [
