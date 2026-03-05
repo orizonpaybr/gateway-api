@@ -496,14 +496,7 @@ class PixKeyController extends Controller
                 ], 503)->header('Access-Control-Allow-Origin', '*');
             }
             
-            // Verificar se o saque deve ser processado automaticamente ou manualmente
-            $processarAutomatico = false;
-            if ($setting->saque_automatico) {
-                // Se saque_automatico está ativo, verificar limite
-                $temLimite = !is_null($setting->limite_saque_automatico) && (float)$setting->limite_saque_automatico > 0;
-                $dentroDoLimite = !$temLimite || ((float)$amount <= (float)$setting->limite_saque_automatico);
-                $processarAutomatico = $dentroDoLimite;
-            }
+            $processarAutomatico = \App\Helpers\WithdrawalConfigResolver::isAutomatico($user, $setting, (float) $amount);
             
             Log::info('Realizando saque PIX com chave', [
                 'user_id' => $user->username,

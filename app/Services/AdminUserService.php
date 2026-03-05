@@ -200,12 +200,13 @@ class AdminUserService
                 'observacoes_taxas',
                 // Adquirentes / overrides
                 'preferred_adquirente', 'adquirente_override',
-                'preferred_adquirente_card_billet', 'adquirente_card_billet_override'
+                'preferred_adquirente_card_billet', 'adquirente_card_billet_override',
+                'saque_config_personalizada', 'saque_automatico_usuario', 'limite_saque_automatico_usuario'
             ];
             
             $updateData = [];
             // Campos que devem ser convertidos de string vazia para null
-            $nullableFields = ['telefone', 'cpf', 'cep', 'rua', 'estado', 'cidade', 'bairro', 'numero_residencia', 'complemento', 'observacoes_taxas', 'taxa_comissao_afiliado'];
+            $nullableFields = ['telefone', 'cpf', 'cep', 'rua', 'estado', 'cidade', 'bairro', 'numero_residencia', 'complemento', 'observacoes_taxas', 'taxa_comissao_afiliado', 'saque_automatico_usuario', 'limite_saque_automatico_usuario'];
             
             foreach ($allowedFields as $field) {
                 if (array_key_exists($field, $data)) {
