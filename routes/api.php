@@ -194,9 +194,9 @@ Route::get('/link-storage', function (Request $request) {
 })->middleware('auth:sanctum');
 
 /* PIX */
-Route::middleware(['check.token.secret', 'throttle:60,1'])->post('wallet/deposit/payment', [DepositController::class, 'makeDeposit']);
-Route::middleware(['check.token.secret', 'check.allowed.ip', 'throttle:30,1'])->post('pixout', [SaqueController::class, 'makePayment']);
-Route::middleware('throttle:20,1')->post('status', [DepositController::class, 'statusDeposito']);
+Route::middleware(['check.token.secret', 'throttle:pix-in'])->post('wallet/deposit/payment', [DepositController::class, 'makeDeposit']);
+Route::middleware(['check.token.secret', 'check.allowed.ip', 'throttle:pix-out'])->post('pixout', [SaqueController::class, 'makePayment']);
+Route::middleware('throttle:status-check')->post('status', [DepositController::class, 'statusDeposito']);
 
 /* CARTÃO */
 Route::middleware(['check.token.secret', 'throttle:60,1'])->post('card/payment', [\App\Http\Controllers\Api\CardPaymentController::class, 'createPayment']);
