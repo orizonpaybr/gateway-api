@@ -1111,6 +1111,14 @@ class AdminDashboardController extends Controller
                 'taxa_comissao_afiliado' => $user->taxa_comissao_afiliado !== null
                     ? (float) $user->taxa_comissao_afiliado
                     : (float) ($setting->taxa_comissao_afiliado_padrao ?? 0.50),
+                // Configuração de saque personalizada (para modal de taxas)
+                'saque_config_personalizada' => (bool) ($user->saque_config_personalizada ?? false),
+                'saque_automatico_usuario' => $user->saque_automatico_usuario === null
+                    ? null
+                    : (bool) $user->saque_automatico_usuario,
+                'limite_saque_automatico_usuario' => $user->limite_saque_automatico_usuario !== null
+                    ? (float) $user->limite_saque_automatico_usuario
+                    : null,
                 // Observações
                 'observacoes_taxas' => $user->observacoes_taxas ?? null,
             ];
