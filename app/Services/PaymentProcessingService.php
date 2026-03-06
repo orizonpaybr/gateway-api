@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Helpers\Helper;
 use App\Models\PaymentEvent;
 use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
@@ -287,8 +288,14 @@ class PaymentProcessingService
             // 1. Atualizar status
             $cashout->update(['status' => 'COMPLETED']);
 
+            // 2. Atualizar total sacado do usuário (usado em relatórios/carteiras)
+            $valorSaque = (float) ($cashout->amount ?? 0);
+            if ($valorSaque > 0) {
+                Helper::incrementAmount($user, $valorSaque, 'valor_sacado');
+            }
+
             $balanceAfter = $user->fresh()->saldo;
-            
+
             // 3. Registrar evento
             $this->eventService->recordPaymentSent(
                 $cashout,
