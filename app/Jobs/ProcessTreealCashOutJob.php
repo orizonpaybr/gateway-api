@@ -301,6 +301,17 @@ class ProcessTreealCashOutJob implements ShouldQueue
         $balanceService = app(\App\Services\BalanceService::class);
         $balanceService->incrementBalance($user, $valorTotalReverter, 'saldo');
 
+        // Reverter valor_sacado apenas quando o saque já tinha sido pago (PAID_OUT/COMPLETED)
+        // Assim o relatório "Valor sacado" reflete só saques realmente pagos, não cancelados/estornados
+        if (in_array($cashOut->status, ['PAID_OUT', 'COMPLETED']) && $valorPrincipal > 0) {
+            User::where('id', $user->id)->decrement('valor_sacado', $valorPrincipal);
+            Log::info("[TREEAL CashOut Job] valor_sacado revertido por {$motivo}", [
+                'transaction_id' => $this->transactionId,
+                'user_id'        => $user->user_id,
+                'valor_principal' => $valorPrincipal,
+            ]);
+        }
+
         Helper::calculaSaldoLiquido($user->user_id);
 
         Log::info("[TREEAL CashOut Job] Saldo revertido por {$motivo}", [
