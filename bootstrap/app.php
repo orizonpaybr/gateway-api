@@ -17,17 +17,17 @@ return Application::configure(basePath: dirname(__DIR__))
     ->booted(function () {
         RateLimiter::for('pix-out', function (Request $request) {
             $key = $request->input('token') ?? $request->ip();
-            return Limit::perMinute(500)->by('pix-out|' . $key);
+            return Limit::perSecond(200)->by('pix-out|' . $key);
         });
 
         RateLimiter::for('pix-in', function (Request $request) {
             $key = $request->input('token') ?? $request->ip();
-            return Limit::perMinute(500)->by('pix-in|' . $key);
+            return Limit::perSecond(200)->by('pix-in|' . $key);
         });
 
         RateLimiter::for('status-check', function (Request $request) {
             $key = $request->input('token') ?? $request->input('idTransaction') ?? $request->ip();
-            return Limit::perMinute(500)->by('status|' . $key);
+            return Limit::perSecond(500)->by('status|' . $key);
         });
     })
     ->withMiddleware(function (Middleware $middleware) {
