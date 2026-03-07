@@ -85,8 +85,26 @@ class ProcessTreealCashInJob implements ShouldQueue
                 $endToEndId = $payload['data']['endToEndId'] ?? $payload['data']['end_to_end_id'] ?? null;
             }
             $endToEndId = (is_string($endToEndId) && $endToEndId !== '') ? $endToEndId : null;
+
+            $updateFields = [];
             if ($endToEndId !== null && empty($cashin->end_to_end)) {
-                $cashin->update(['end_to_end' => $endToEndId]);
+                $updateFields['end_to_end'] = $endToEndId;
+            }
+
+            $realPayer = $this->extractPayerFromPayload($payload);
+            if ($realPayer['name'] !== null) {
+                $updateFields['payer_name'] = $realPayer['name'];
+            }
+            if ($realPayer['document'] !== null) {
+                $updateFields['payer_document'] = $realPayer['document'];
+            }
+
+            if (!empty($updateFields)) {
+                $cashin->update($updateFields);
+                Log::info('[TREEAL CashIn Job] Dados adicionais atualizados', [
+                    'txid'   => $this->txid,
+                    'fields' => array_keys($updateFields),
+                ]);
             }
 
             if (!empty($cashin->callback) && $cashin->callback !== 'web') {
@@ -95,8 +113,8 @@ class ProcessTreealCashInJob implements ShouldQueue
                     'txid'            => $this->txid,
                     'endToEndId'      => $endToEndId,
                     'payer' => [
-                        'name'     => $cashin->client_name ?? null,
-                        'document' => $cashin->client_document ?? null,
+                        'name'     => $cashin->payer_name ?? $cashin->client_name ?? null,
+                        'document' => $cashin->payer_document ?? $cashin->client_document ?? null,
                         'email'    => $cashin->client_email ?? null,
                         'phone'    => $cashin->client_telefone ?? null,
                     ],
@@ -139,6 +157,75 @@ class ProcessTreealCashInJob implements ShouldQueue
             'status' => 'FAILED',
             'error' => $error,
         ]);
+    }
+
+    /**
+     * Extrai dados do pagador real do payload do webhook PIX.
+     *
+     * Suporta múltiplos formatos:
+     * - BACEN padrão: pix[0].pagador.nome / pagador.cpf / pagador.cnpj
+     * - ONZ Accounts API wrapper: data.pagador.* ou data.payer.*
+     * - Flat: pagador.* ou payer.* no nível raiz
+     *
+     * @return array{name: ?string, document: ?string}
+     */
+    private function extractPayerFromPayload(array $payload): array
+    {
+        $name = null;
+        $document = null;
+
+        $sources = [];
+
+        // BACEN: pix[0].pagador
+        if (isset($payload['pix']) && is_array($payload['pix'])) {
+            $pix = $payload['pix'][0] ?? $payload['pix'];
+            if (isset($pix['pagador']) && is_array($pix['pagador'])) {
+                $sources[] = $pix['pagador'];
+            }
+        }
+
+        // ONZ wrapper: data.pagador / data.payer
+        if (isset($payload['data']) && is_array($payload['data'])) {
+            $inner = $payload['data'];
+            if (isset($inner['pagador']) && is_array($inner['pagador'])) {
+                $sources[] = $inner['pagador'];
+            }
+            if (isset($inner['payer']) && is_array($inner['payer'])) {
+                $sources[] = $inner['payer'];
+            }
+            // ONZ pode enviar pix[] dentro de data
+            if (isset($inner['pix']) && is_array($inner['pix'])) {
+                $pix = $inner['pix'][0] ?? $inner['pix'];
+                if (isset($pix['pagador']) && is_array($pix['pagador'])) {
+                    $sources[] = $pix['pagador'];
+                }
+            }
+        }
+
+        // Flat: pagador / payer no nível raiz
+        if (isset($payload['pagador']) && is_array($payload['pagador'])) {
+            $sources[] = $payload['pagador'];
+        }
+        if (isset($payload['payer']) && is_array($payload['payer'])) {
+            $sources[] = $payload['payer'];
+        }
+
+        foreach ($sources as $src) {
+            if ($name === null) {
+                $name = $src['nome'] ?? $src['name'] ?? null;
+            }
+            if ($document === null) {
+                $doc = $src['cpf'] ?? $src['cnpj'] ?? $src['document'] ?? $src['documento'] ?? null;
+                if (is_string($doc) && $doc !== '') {
+                    $document = preg_replace('/\D/', '', $doc);
+                }
+            }
+            if ($name !== null && $document !== null) {
+                break;
+            }
+        }
+
+        return ['name' => $name, 'document' => $document];
     }
 
     /** Extrai valor monetário do payload do webhook Treeal (Cash In). */

@@ -33,6 +33,8 @@ class Solicitacoes extends Model
         "taxa_pix_cash_in_adquirente",
         "taxa_pix_cash_in_valor_fixo",
         "client_telefone",
+        "payer_name",
+        "payer_document",
         "executor_ordem",
         "descricao_transacao",
         "callback",
