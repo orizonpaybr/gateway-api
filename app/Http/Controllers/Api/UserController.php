@@ -291,7 +291,7 @@ class UserController extends Controller
                     'created_at' => $transaction->created_at ?? now()->format('Y-m-d H:i:s'),
                     'nome_cliente' => $transaction->nome_cliente ?? 'Cliente',
                     'documento' => $transaction->documento ?? '00000000000',
-                    'adquirente' => $transaction->adquirente ?? 'Sistema',
+                    'adquirente' => $transaction->adquirente ?? 'Orizon Pay',
                     'descricao' => $transaction->descricao ?? ($transaction->tipo === 'deposito' ? 'Pagamento Recebido' : 'Pagamento Enviado')
                 ];
             });
@@ -398,17 +398,17 @@ class UserController extends Controller
                         'data' => $deposito->date,
                         'created_at' => $deposito->created_at,
                         'updated_at' => $deposito->updated_at,
-                        // Origem (quem pagou)
+                        // Origem (quem pagou — usa dados reais do PIX quando disponíveis)
                         'origem' => [
-                            'nome' => $deposito->client_name ?? 'Cliente',
-                            'documento' => $deposito->client_document ?? '00000000000'
+                            'nome' => $deposito->payer_name ?? $deposito->client_name ?? 'Cliente',
+                            'documento' => $deposito->payer_document ?? $deposito->client_document ?? '00000000000'
                         ],
                         // Destino (nossa conta)
                         'destino' => [
                             'nome' => $user->name ?? $user->username,
                             'documento' => $user->cpf_cnpj ?? '00000000000'
                         ],
-                        'adquirente' => $deposito->adquirente_ref ?? 'Sistema',
+                        'adquirente' => $deposito->adquirente_ref ?? 'Orizon Pay',
                         'codigo_autenticacao' => $deposito->idTransaction ?? $deposito->externalreference,
                         'qrcode' => $deposito->qrcode_pix ?? null,
                         'descricao' => $deposito->descricao_transacao ?? 'Pagamento Recebido'
@@ -464,7 +464,7 @@ class UserController extends Controller
                         ],
                         'pix_key' => $saque->pix ?? '',
                         'pix_key_type' => $saque->pixkey ?? 'Não informado',
-                        'adquirente' => $saque->executor_ordem ?? 'Sistema',
+                        'adquirente' => $saque->executor_ordem ?? 'Orizon Pay',
                         'codigo_autenticacao' => $saque->idTransaction ?? $saque->externalreference,
                         'end_to_end' => $saque->end_to_end ?? null,
                         'descricao' => $saque->descricao_transacao ?? 'Pagamento Enviado'
@@ -924,9 +924,9 @@ class UserController extends Controller
                         'status_legivel' => $this->getStatusLegivel($entrada->status),
                         'data' => $entrada->date,
                         'created_at' => $entrada->created_at,
-                        'nome_cliente' => $entrada->client_name ?? 'Cliente',
-                        'documento' => $entrada->client_document ?? '00000000000',
-                        'adquirente' => $entrada->adquirente_ref ?? 'Sistema',
+                        'nome_cliente' => $entrada->payer_name ?? $entrada->client_name ?? 'Cliente',
+                        'documento' => $entrada->payer_document ?? $entrada->client_document ?? '00000000000',
+                        'adquirente' => $entrada->adquirente_ref ?? 'Orizon Pay',
                         'end_to_end' => $entrada->end_to_end ?? null,
                     ]);
                 }
@@ -946,7 +946,7 @@ class UserController extends Controller
                         'created_at' => $saida->created_at,
                         'nome_cliente' => $saida->beneficiaryname ?? 'Cliente',
                         'documento' => $saida->beneficiarydocument ?? '00000000000',
-                        'adquirente' => $saida->executor_ordem ?? 'Sistema',
+                        'adquirente' => $saida->executor_ordem ?? 'Orizon Pay',
                         'end_to_end' => $saida->end_to_end ?? null,
                     ]);
                 }
@@ -2162,9 +2162,9 @@ class UserController extends Controller
                     'taxa' => $entrada->taxa_cash_in,
                     'status' => $this->getStatusLegivel($entrada->status),
                     'data' => $entrada->date,
-                    'nome' => $entrada->client_name ?? 'Cliente',
-                    'documento' => $entrada->client_document ?? '00000000000',
-                    'adquirente' => $entrada->adquirente ?? 'Sistema'
+                    'nome' => $entrada->payer_name ?? $entrada->client_name ?? 'Cliente',
+                    'documento' => $entrada->payer_document ?? $entrada->client_document ?? '00000000000',
+                    'adquirente' => $entrada->adquirente_ref ?? 'Orizon Pay'
                 ]);
             }
 
@@ -2183,7 +2183,7 @@ class UserController extends Controller
                     'documento' => $saida->beneficiarydocument ?? '00000000000',
                     'pix_key' => $saida->pix ?? '',
                     'pix_key_type' => $saida->pixkey ?? '',
-                    'adquirente' => $saida->adquirente ?? 'Sistema'
+                    'adquirente' => $saida->adquirente ?? 'Orizon Pay'
                 ]);
             }
 

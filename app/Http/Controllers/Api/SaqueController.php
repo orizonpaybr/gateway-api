@@ -216,7 +216,7 @@ class SaqueController extends Controller
                 Log::error('SaqueController::processTreealWithdrawal - Treeal não configurado ou inativo');
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Adquirente Treeal não está configurada ou ativa.'
+                    'message' => 'Serviço de saque PIX indisponível no momento.'
                 ], 500);
             }
 

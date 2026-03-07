@@ -547,7 +547,7 @@ class DepositController extends Controller
                     'status' => 500,
                     'data' => [
                         'status' => 'error',
-                        'message' => 'Adquirente Treeal não está configurada ou ativa.'
+                        'message' => 'Serviço de pagamento PIX indisponível no momento.'
                     ]
                 ];
             }

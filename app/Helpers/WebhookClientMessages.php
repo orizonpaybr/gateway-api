@@ -19,6 +19,10 @@ class WebhookClientMessages
         'FAILED'                 => 'Saque PIX não realizado.',
         'PENDING'                => 'Saque PIX em processamento.',
         'PROCESSING'             => 'Saque PIX em processamento.',
+        'INFRACTION_OPEN'        => 'Nova infração PIX registrada.',
+        'INFRACTION_ACKNOWLEDGED' => 'Infração PIX em análise.',
+        'INFRACTION_CLOSED'      => 'Infração PIX encerrada.',
+        'INFRACTION_CANCELLED'   => 'Infração PIX cancelada.',
     ];
 
     /**
@@ -48,6 +52,12 @@ class WebhookClientMessages
             return $typeTransaction === 'PIX_IN'
                 ? 'Depósito PIX recebido com sucesso.'
                 : 'Saque PIX liquidado com sucesso.';
+        }
+        if ($statusUpper === 'CANCELLED' && $typeTransaction === 'PIX_IN') {
+            return 'Depósito PIX cancelado ou expirado.';
+        }
+        if ($statusUpper === 'FAILED' && $typeTransaction === 'PIX_IN') {
+            return 'Depósito PIX não realizado.';
         }
         if ($statusUpper === 'REFUNDED' && $typeTransaction === 'PIX_IN') {
             return 'Depósito PIX estornado.';

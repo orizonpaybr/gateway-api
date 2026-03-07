@@ -2,8 +2,11 @@
 
 namespace App\Jobs;
 
+use App\Helpers\WebhookClientMessages;
+use App\Jobs\ClientWebhookDispatchJob;
 use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
+use App\Models\User;
 use App\Models\WebhookLog;
 use App\Services\PaymentProcessingService;
 use Carbon\Carbon;
@@ -140,6 +143,8 @@ class ProcessTreealInfractionJob implements ShouldQueue
 
             $paymentService->invalidateInfractionCaches($username);
 
+            $this->notifyClientInfraction($username, $transactionId, $status, $tipo, $valor, $reportDetails, $endToEnd);
+
             $this->markWebhookProcessed();
 
             Log::info('[TREEAL Infraction Job] Infração processada', [
@@ -189,6 +194,66 @@ class ProcessTreealInfractionJob implements ShouldQueue
             'REFUND_CANCELLED'  => 'cancelada',
         ];
         return $map[strtoupper($typeOnz)] ?? 'pix';
+    }
+
+    /**
+     * Repassa a infração PIX para a URL de callback do cliente.
+     * Busca transações (depósito ou saque) do usuário que tenham callback configurado.
+     */
+    private function notifyClientInfraction(
+        string $username,
+        string $transactionId,
+        string $status,
+        string $tipo,
+        float $valor,
+        string $descricao,
+        ?string $endToEnd
+    ): void {
+        $deposito = Solicitacoes::where('idTransaction', $transactionId)
+            ->orWhere('externalreference', $transactionId)
+            ->first();
+
+        $saque = null;
+        if (!$deposito) {
+            $saque = SolicitacoesCashOut::where('idTransaction', $transactionId)
+                ->orWhere('externalreference', $transactionId)
+                ->orWhere('end_to_end', $transactionId)
+                ->first();
+        }
+
+        $callbackUrl = $deposito->callback ?? $saque->callback ?? null;
+
+        if (empty($callbackUrl) || $callbackUrl === 'web') {
+            return;
+        }
+
+        $statusKey = match ($status) {
+            'RESOLVIDA'  => 'INFRACTION_CLOSED',
+            'CANCELADA'  => 'INFRACTION_CANCELLED',
+            'EM_ANALISE' => 'INFRACTION_ACKNOWLEDGED',
+            default      => 'INFRACTION_OPEN',
+        };
+
+        $message = WebhookClientMessages::getMessageForStatus($statusKey);
+
+        $extra = [
+            'typeTransaction' => 'INFRACTION',
+            'infractionType'  => $tipo,
+            'infractionStatus' => $status,
+            'description'     => $descricao,
+            'endToEndId'      => $endToEnd,
+            'relatedUser'     => $username,
+        ];
+
+        ClientWebhookDispatchJob::dispatch(
+            $callbackUrl,
+            $transactionId,
+            $statusKey,
+            $valor,
+            now()->toIso8601String(),
+            $extra,
+            $message
+        )->onQueue('webhooks');
     }
 
     private function markWebhookProcessed(): void
