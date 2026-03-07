@@ -46,7 +46,8 @@ class RegisterTreealCashoutValidationWebhook extends Command
                     $this->line('Execute sem --list para registrar.');
                 } else {
                     $this->info('Webhooks registrados:');
-                    foreach ((array) $data as $webhook) {
+                    $items = $this->normalizeWebhookList($data);
+                    foreach ($items as $webhook) {
                         $id      = $webhook['id'] ?? '-';
                         $uri     = $webhook['uri'] ?? '-';
                         $type    = $webhook['type'] ?? '-';
@@ -99,5 +100,52 @@ class RegisterTreealCashoutValidationWebhook extends Command
         }
 
         return 0;
+    }
+
+    /**
+     * Normaliza a resposta da API ONZ para uma lista de webhooks com id, uri, type, enabled.
+     * A API pode retornar: lista plana, ou objeto agrupado por tipo (transfer, receive, cashout, etc.).
+     *
+     * @param array<int|string, mixed> $data
+     * @return list<array{id: string, uri: string, type: string, enabled: bool|null}>
+     */
+    private function normalizeWebhookList(array $data): array
+    {
+        $out = [];
+        $isList = array_keys($data) === range(0, count($data) - 1);
+
+        if ($isList) {
+            foreach ($data as $item) {
+                if (is_array($item)) {
+                    $out[] = $this->normalizeWebhookItem($item, null);
+                }
+            }
+        } else {
+            foreach ($data as $type => $items) {
+                $items = is_array($items) ? $items : [$items];
+                foreach ($items as $item) {
+                    if (is_array($item)) {
+                        $out[] = $this->normalizeWebhookItem($item, (string) $type);
+                    }
+                }
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $item
+     * @param string|null $typeFallback
+     * @return array{id: string, uri: string, type: string, enabled: bool|null}
+     */
+    private function normalizeWebhookItem(array $item, ?string $typeFallback): array
+    {
+        return [
+            'id'     => (string) ($item['id'] ?? $item['webhookId'] ?? $item['webhook_id'] ?? '-'),
+            'uri'    => (string) ($item['uri'] ?? $item['url'] ?? $item['callbackUrl'] ?? $item['endpoint'] ?? '-'),
+            'type'   => (string) ($item['type'] ?? $item['name'] ?? $typeFallback ?? '-'),
+            'enabled' => isset($item['enabled']) ? (bool) $item['enabled'] : (isset($item['active']) ? (bool) $item['active'] : null),
+        ];
     }
 }
