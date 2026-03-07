@@ -12,6 +12,8 @@ use App\Helpers\Helper;
 use App\Helpers\PixErrorCodes;
 use App\Models\App;
 use App\Helpers\SecureLog;
+use App\Helpers\WebhookClientMessages;
+use App\Jobs\ClientWebhookDispatchJob;
 use App\Jobs\ProcessTreealCashInJob;
 use App\Jobs\ProcessTreealCashInRefundJob;
 use App\Jobs\ProcessTreealCashOutJob;
@@ -172,7 +174,7 @@ class CallbackController extends Controller
             return ['async' => true, 'response' => response()->json(['status' => true, 'message' => 'Webhook aceito'])];
         }
 
-        // Pagamento ainda não confirmado → atualizar status apenas
+        // Status não confirmado (FAILED, CANCELLED, PROCESSING, etc.) → atualizar e notificar cliente
         $internalStatus = $this->mapTreealStatusToInternal($status);
         $cashin = Solicitacoes::where('idTransaction', $txid)
             ->orWhere('externalreference', $txid)
@@ -180,11 +182,43 @@ class CallbackController extends Controller
 
         if ($cashin && $cashin->status !== $internalStatus) {
             $cashin->update(['status' => $internalStatus]);
+
+            if (!empty($cashin->callback) && $cashin->callback !== 'web') {
+                $endToEndId = $data['endToEndId'] ?? $data['end_to_end_id'] ?? null;
+                $extra = [
+                    'typeTransaction' => 'PIX_IN',
+                    'txid'            => $txid,
+                    'endToEndId'      => $endToEndId,
+                    'payer' => [
+                        'name'     => $cashin->payer_name ?? $cashin->client_name ?? null,
+                        'document' => $cashin->payer_document ?? $cashin->client_document ?? null,
+                    ],
+                    'receiver' => [
+                        'user_id' => $cashin->user_id ?? null,
+                    ],
+                ];
+                $message = WebhookClientMessages::getMessageForStatus($internalStatus, 'PIX_IN', $data);
+                ClientWebhookDispatchJob::dispatch(
+                    $cashin->callback,
+                    $cashin->idTransaction ?? (string) $cashin->id,
+                    $internalStatus,
+                    (float) $cashin->amount,
+                    now()->toIso8601String(),
+                    $extra,
+                    $message
+                )->onQueue('webhooks');
+
+                Log::info('[TREEAL] Cash In webhook repassado ao cliente', [
+                    'txid'   => $txid,
+                    'status' => $internalStatus,
+                ]);
+            }
         }
 
         Log::info('[TREEAL] Cash In status intermediário', [
             'txid'        => $txid,
             'status'      => $status,
+            'internal'    => $internalStatus,
             'duration_ms' => round((microtime(true) - $start) * 1000, 2),
         ]);
 
