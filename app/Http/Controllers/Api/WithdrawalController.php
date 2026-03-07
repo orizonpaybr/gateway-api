@@ -322,13 +322,13 @@ class WithdrawalController extends Controller
                     // Pagar.me não suporta saques PIX diretamente
                     return response()->json([
                         'success' => false,
-                        'message' => 'Pagar.me não suporta saques PIX. Use Treeal para saques PIX.'
+                        'message' => 'Este método de pagamento não suporta saques PIX.'
                     ], 500);
                 
                 default:
                     return response()->json([
                         'success' => false,
-                        'message' => 'Adquirente não suportado para aprovação de saques: ' . $adquirente
+                        'message' => 'Método de pagamento não suportado para aprovação de saques.'
                     ], 500);
             }
 
@@ -362,7 +362,7 @@ class WithdrawalController extends Controller
             if (!$treealConfig || !$treealService->isActive()) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Treeal não está configurado ou ativo.'
+                    'message' => 'Serviço de saque PIX indisponível no momento.'
                 ], 500);
             }
 
@@ -395,7 +395,7 @@ class WithdrawalController extends Controller
                 ]);
                 return response()->json([
                     'success' => false,
-                    'message' => $withdrawalResult['message'] ?? 'Erro ao processar saque PIX na Treeal'
+                    'message' => $withdrawalResult['message'] ?? 'Erro ao processar saque PIX'
                 ], 500);
             }
 
