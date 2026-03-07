@@ -1564,6 +1564,85 @@ class TreealService
     }
 
     /**
+     * Registra webhook de cashout (falhas de validação pré-processamento) na Accounts API v2.
+     *
+     * Documentação Onz: POST /api/v2/webhooks/cashout
+     * Disparado quando ocorre falha de validação no cash-out (ex: saldo insuficiente, chave PIX inválida).
+     *
+     * @param string $uri URL do webhook (ex: https://api.orizonpay.com/treeal/webhook)
+     * @param array  $opts Opções: email, method, enabled, pauseOnFail, headers
+     * @return array success, data, webhook_id
+     */
+    public function registerCashoutValidationWebhook(string $uri, array $opts = []): array
+    {
+        if (!$this->isActive()) {
+            throw new \Exception("Treeal não está configurado ou ativo");
+        }
+
+        $payload = [
+            'uri'     => $uri,
+            'enabled' => $opts['enabled'] ?? true,
+        ];
+
+        if (!empty($opts['email'])) {
+            $payload['email'] = $opts['email'];
+        }
+        if (isset($opts['method'])) {
+            $payload['method'] = $opts['method'];
+        }
+        if (isset($opts['pauseOnFail'])) {
+            $payload['pauseOnFail'] = $opts['pauseOnFail'];
+        }
+        if (!empty($opts['headers']) && is_array($opts['headers'])) {
+            $payload['headers'] = $opts['headers'];
+        }
+
+        try {
+            Log::info('TreealService::registerCashoutValidationWebhook - Registrando webhook de Cashout', [
+                'uri' => $uri,
+            ]);
+
+            Cache::forget("treeal:oauth_token:{$this->config->id}");
+
+            $response = $this->getAccountsHttpClient()
+                ->post($this->config->accounts_api_url . '/webhooks/cashout', $payload);
+
+            if (!$response->successful()) {
+                $errorBody    = $response->body();
+                $errorData    = json_decode($errorBody, true);
+                $errorMessage = (is_array($errorData)
+                    ? ($errorData['detail'] ?? $errorData['title'] ?? $errorData['message'] ?? json_encode($errorData))
+                    : $errorBody)
+                    ?: 'Erro ao registrar webhook';
+
+                Log::error('TreealService::registerCashoutValidationWebhook - Erro', [
+                    'status'   => $response->status(),
+                    'response' => $errorBody,
+                ]);
+
+                throw new \Exception("Erro ao registrar webhook Cashout ({$response->status()}): {$errorMessage}");
+            }
+
+            $data = $response->json();
+
+            Log::info('TreealService::registerCashoutValidationWebhook - Webhook registrado com sucesso', [
+                'response' => $data,
+            ]);
+
+            return [
+                'success'     => true,
+                'data'        => $data,
+                'webhook_id'  => $data['id'] ?? null,
+            ];
+        } catch (\Exception $e) {
+            Log::error('TreealService::registerCashoutValidationWebhook - Exceção', [
+                'error' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
      * Consulta status de um pagamento (Cash Out)
      * 
      * Endpoint: GET /pix/payments/{endToEndId}
