@@ -6,7 +6,7 @@ namespace App\Helpers;
  * Mensagens amigáveis para o webhook enviado ao cliente (Orizon → cliente final).
  * Usado quando notificamos o cliente sobre status de depósito PIX (Cash In) ou saque (Cash Out).
  *
- * Fluxo: Treeal → Orizon (webhook interno) → processamento → este payload → URL do cliente.
+ * Fluxo: Adquirente (HeartPay) → Orizon (webhook interno) → processamento → este payload → URL do cliente.
  */
 class WebhookClientMessages
 {
@@ -27,11 +27,11 @@ class WebhookClientMessages
 
     /**
      * Retorna mensagem amigável para o status enviado no webhook ao cliente.
-     * Para CANCELLED, se houver payload da Treeal com motivo (errorCode/rejectionReason), usa PixErrorCodes.
+     * Para CANCELLED, se houver payload do adquirente com motivo (errorCode/rejectionReason), usa PixErrorCodes.
      *
      * @param string $status Status enviado (ex.: PAID_OUT, CANCELLED, REFUNDED)
      * @param string $typeTransaction PIX_IN ou PIX_OUT (para mensagens específicas se necessário)
-     * @param array<string, mixed>|null $payloadForReason Payload do webhook Treeal (para CANCELLED/FAILED com motivo)
+     * @param array<string, mixed>|null $payloadForReason Payload do webhook (para CANCELLED/FAILED com motivo)
      */
     public static function getMessageForStatus(
         string $status,
@@ -40,7 +40,7 @@ class WebhookClientMessages
     ): string {
         $statusUpper = strtoupper(trim($status));
 
-        // Para cancelamento/falha, priorizar motivo da Treeal (código PIX SPI) quando disponível
+        // Para cancelamento/falha, priorizar motivo do adquirente (código PIX SPI) quando disponível
         if (in_array($statusUpper, ['CANCELLED', 'FAILED']) && $payloadForReason !== null && $payloadForReason !== []) {
             $reason = PixErrorCodes::getMessageFromPayload($payloadForReason, null);
             if ($reason !== null && $reason !== '' && $reason !== 'Não informado') {

@@ -435,12 +435,12 @@ class PixKeyController extends Controller
                 ], 500)->header('Access-Control-Allow-Origin', '*');
             }
 
-            // Calcular taxas (taxa Orizon + custo Treeal)
+            // Calcular taxas (taxa Orizon + custo HeartPay)
             $isInterfaceWeb = true;
             $taxaCalculada = \App\Helpers\TaxaSaqueHelper::calcularTaxaSaque((float) $amount, $setting, $user, $isInterfaceWeb);
             $taxaCashOut = $taxaCalculada['taxa_cash_out'];           // Taxa total cobrada do cliente
             $taxaAplicacao = $taxaCalculada['taxa_aplicacao'];        // Lucro Orizon
-            $taxaAdquirente = $taxaCalculada['taxa_adquirente'];      // Custo Treeal
+            $taxaAdquirente = $taxaCalculada['taxa_adquirente'];      // Custo HeartPay
             $cashOutLiquido = $taxaCalculada['saque_liquido'];        // Valor que o cliente recebe
             $valorTotalDescontar = $taxaCalculada['valor_total_descontar']; // Total a debitar do saldo
 
@@ -510,7 +510,7 @@ class PixKeyController extends Controller
             ]);
 
             // Regra abaixo: APENAS saque MANUAL. Débito na criação; em rejeição, valor + taxa são devolvidos.
-            // Saque automático é processado na hora no bloco seguinte (Treeal + débito, sem aprovação).
+            // Saque automático é processado na hora no bloco seguinte (HeartPay + débito, sem aprovação).
             if (!$processarAutomatico) {
                 $idempotencyKey = uniqid('withdraw_manual_', true);
                 $description = $request->description ?? 'Saque via PIX';
@@ -585,63 +585,48 @@ class PixKeyController extends Controller
                 ])->header('Access-Control-Allow-Origin', '*');
             }
 
-            // Saque AUTOMÁTICO: processado na hora (Treeal + débito), sem aprovação.
-            if ($adquirenteDefault === 'treeal') {
+            // Saque AUTOMÁTICO: processado na hora (HeartPay + débito), sem aprovação.
+            if ($adquirenteDefault === 'heartpay') {
                 try {
-                    $treealService = app(\App\Services\TreealService::class);
-                    
-                    if (!$treealService->isActive()) {
-                        throw new \Exception('Adquirente Treeal não está configurada ou ativa');
+                    $heartPay = app(\App\Services\HeartPayService::class);
+                    if (!$heartPay->isActive()) {
+                        throw new \Exception('Adquirente HeartPay não está configurada ou ativa');
                     }
-                    
-                    $idempotencyKey = uniqid('withdraw_auto_', true);
+                    $correlationID = preg_replace('/[^a-zA-Z0-9]/', '', \Illuminate\Support\Str::uuid()->toString());
                     $description = $request->description ?? 'Saque via PIX';
-                    
-                    // Criar saque via Treeal
-                    $treealResponse = $treealService->createWithdrawalByPixKey(
-                        $amount,
-                        $keyValue,
-                        $description,
-                        $idempotencyKey,
-                        $keyType
-                    );
-                    
-                    // Registrar transação no banco 
-                    $idTxn = $treealResponse['transaction_id'] ?? $treealResponse['paymentId'] ?? $idempotencyKey;
-                    $endToEnd = $treealResponse['end_to_end_id'] ?? null;
+                    $payoutResult = $heartPay->createPayout((float) $amount, $keyValue, $keyType, $description, $correlationID);
+                    if (!$payoutResult['success']) {
+                        throw new \Exception($payoutResult['message'] ?? 'Erro ao criar saque no adquirente');
+                    }
+                    $idTxn = $payoutResult['referenceCode'] ?? $correlationID;
+                    $statusMapped = \App\Services\HeartPayService::mapPayoutStatus($payoutResult['status'] ?? 'pending');
                     $withdrawal = \App\Models\SolicitacoesCashOut::create([
                         'user_id' => $user->user_id ?? $user->username,
-                        'externalreference' => $idempotencyKey,
+                        'externalreference' => $idTxn,
                         'amount' => $amount,
                         'beneficiaryname' => $user->name ?? 'Não informado',
                         'beneficiarydocument' => $user->cpf_cnpj ?? '',
                         'pix' => $keyValue,
                         'pixkey' => $keyType,
                         'idTransaction' => $idTxn,
-                        'end_to_end' => $endToEnd,
-                        'status' => 'PROCESSING',
+                        'status' => $statusMapped,
                         'type' => 'PIX',
                         'date' => now(),
                         'taxa_cash_out' => $taxaCashOut,
                         'cash_out_liquido' => $cashOutLiquido,
                         'descricao_transacao' => 'AUTOMATICO',
-                        'executor_ordem' => 'Treeal',
-                        'descricao_externa' => $idempotencyKey,
+                        'executor_ordem' => 'HeartPay',
+                        'descricao_externa' => $correlationID,
                     ]);
-                    
-                    // Debitar saldo do usuário
-                    $user->saldo -= $valorTotalDescontar;
-                    $user->save();
-
+                    $balanceService = app(\App\Services\BalanceService::class);
+                    $balanceService->decrementCombinedBalance($user, $valorTotalDescontar);
+                    \App\Helpers\Helper::calculaSaldoLiquido($user->user_id ?? $user->username);
                     app(\App\Services\PaymentProcessingService::class)->invalidateCachesAfterPayment($withdrawal->user_id);
-
-                    Log::info('Saque PIX automático criado com sucesso via Treeal', [
+                    Log::info('Saque PIX automático criado com sucesso via HeartPay', [
                         'withdrawal_id' => $withdrawal->id,
                         'transaction_id' => $idTxn,
-                        'end_to_end' => $endToEnd,
                         'user_id' => $user->username
                     ]);
-                    
                     return response()->json([
                         'success' => true,
                         'message' => 'Saque PIX realizado com sucesso',
@@ -651,12 +636,11 @@ class PixKeyController extends Controller
                             'key_type' => $keyType,
                             'key_value' => $keyValue,
                             'description' => $description,
-                            'status' => 'PROCESSING',
+                            'status' => $statusMapped,
                             'tipo_processamento' => 'Automático',
                             'estimated_time' => '5-10 minutos',
                             'created_at' => now()->toISOString(),
-                            'adquirente' => 'treeal',
-                            // Split de taxas
+                            'adquirente' => 'heartpay',
                             'taxa_cash_out' => round($taxaCashOut, 2),
                             'taxa_adquirente' => round($taxaAdquirente, 2),
                             'taxa_aplicacao' => round($taxaAplicacao, 2),
@@ -664,14 +648,12 @@ class PixKeyController extends Controller
                             'valor_total_descontado' => round($valorTotalDescontar, 2)
                         ]
                     ])->header('Access-Control-Allow-Origin', '*');
-                    
                 } catch (\Exception $e) {
-                    Log::error('Erro ao processar saque automático via Treeal', [
+                    Log::error('Erro ao processar saque automático via HeartPay', [
                         'error' => $e->getMessage(),
                         'user_id' => $user->username,
                         'amount' => $amount
                     ]);
-                    
                     return response()->json([
                         'success' => false,
                         'message' => 'Erro ao processar saque PIX: ' . $e->getMessage()

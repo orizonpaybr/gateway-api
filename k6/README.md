@@ -223,7 +223,7 @@ thresholds: {
 | `GET /balance` | < 100ms | < 200ms |
 | `POST /wallet/deposit/payment` | < 1000ms | < 2000ms |
 | `POST /pixout` | < 1500ms | < 3000ms |
-| `POST /treeal/webhook` | < 200ms | < 500ms |
+| `POST /heartpay/webhook` | < 200ms | < 500ms |
 
 ## Interpretando Resultados
 

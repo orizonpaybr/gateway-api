@@ -13,8 +13,8 @@ use App\Helpers\Helper;
 use App\Models\Adquirente;
 use App\Models\SolicitacoesCashOut;
 use App\Helpers\ApiResponseStandardizer;
-use App\Services\TreealService;
-use App\Models\Treeal;
+use App\Services\HeartPayService;
+use App\Models\HeartPay;
 use Carbon\Carbon;
 
 class SaqueController extends Controller
@@ -167,14 +167,13 @@ class SaqueController extends Controller
                 case 'pagarme':
                     // Pagar.me não suporta saques PIX diretamente
                     return response()->json(['status' => 'error', 'message' => 'Adquirente não suportado para saques.'], 500);
-                case 'treeal':
-                    Log::info('SaqueController - Processando saque Treeal', [
+                case 'heartpay':
+                    Log::info('SaqueController - Processando saque HeartPay', [
                         'user_id' => $request->user()?->id,
                         'amount' => $request->amount,
-                        'is_automatico' => $isAutomatico
+                        'is_automatico' => $isAutomatico,
                     ]);
-                    // processTreealWithdrawal já retorna JsonResponse completo
-                    return $this->processTreealWithdrawal($request, $isAutomatico);
+                    return $this->processHeartPayWithdrawal($request, $isAutomatico);
                 default:
                     return response()->json(['status' => 'error', 'message' => 'Adquirente não suportado.'], 500);
             }
@@ -194,132 +193,108 @@ class SaqueController extends Controller
         }
     }
 
-    /**
-     * Processa saque PIX usando Treeal/ONZ
-     * 
-     * Implementação limpa e moderna que serve como referência para futuras integrações
-     * 
-     * @param Request $request
-     * @param bool $isAutomatico Se true, executa o saque imediatamente; se false, cria solicitação manual
-     * @return \Illuminate\Http\JsonResponse
-     */
-    private function processTreealWithdrawal(Request $request, bool $isAutomatico = false)
+    private function processHeartPayWithdrawal(Request $request, bool $isAutomatico = false)
     {
         try {
             $user = $request->user();
-            $treealService = app(TreealService::class);
-            $treealConfig = Treeal::first();
+            $heartPayService = app(HeartPayService::class);
             $setting = App::first();
 
-            // Validar se Treeal está configurado e ativo
-            if (!$treealConfig || !$treealService->isActive()) {
-                Log::error('SaqueController::processTreealWithdrawal - Treeal não configurado ou inativo');
+            if (!$heartPayService->isActive()) {
+                Log::error('SaqueController::processHeartPayWithdrawal - HeartPay não configurado ou inativo');
                 return response()->json([
                     'status' => 'error',
                     'message' => 'Serviço de saque PIX indisponível no momento.'
                 ], 500);
             }
 
-            $amount = (float) $request->amount;
-            $pixKey = $request->pixKey;
-            $pixKeyType = $request->pixKeyType;
+            $amount      = (float) $request->amount;
+            $pixKey      = $request->pixKey;
+            $pixKeyType  = $request->pixKeyType;
             $description = $request->input('description', 'Saque via PIX');
-            
-            // Calcular taxas usando o Helper centralizado
-            // O helper obtém o custo da TREEAL automaticamente do config
-            // isInterfaceWeb = true para saques via dashboard, false para API
-            $isInterfaceWeb = !$request->has('api_key'); // Se não tem api_key, é interface web
-            $taxaCalculada = \App\Helpers\TaxaSaqueHelper::calcularTaxaSaque($amount, $setting, $user, $isInterfaceWeb);
-            $taxaTotal = $taxaCalculada['taxa_cash_out'];          // Taxa total cobrada do cliente
-            $taxaAplicacao = $taxaCalculada['taxa_aplicacao'];     // Lucro líquido da aplicação
-            $taxaAdquirente = $taxaCalculada['taxa_adquirente'];   // Custo da TREEAL
-            $cashOutLiquido = $taxaCalculada['saque_liquido'];
+
+            $isInterfaceWeb = !$request->has('api_key');
+            $taxaCalculada     = \App\Helpers\TaxaSaqueHelper::calcularTaxaSaque($amount, $setting, $user, $isInterfaceWeb);
+            $taxaTotal         = $taxaCalculada['taxa_cash_out'];
+            $taxaAplicacao     = $taxaCalculada['taxa_aplicacao'];
+            $taxaAdquirente    = $taxaCalculada['taxa_adquirente'];
+            $cashOutLiquido    = $taxaCalculada['saque_liquido'];
             $valorTotalDescontar = $taxaCalculada['valor_total_descontar'];
 
-            // Verificar saldo total disponível (saldo principal + saldo de afiliados)
             $balanceService = app(\App\Services\BalanceService::class);
             $saldoTotalDisponivel = $balanceService->getTotalAvailableBalance($user);
-            
+
             if ($saldoTotalDisponivel < $valorTotalDescontar) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Saldo insuficiente. Disponível: R$ ' . number_format($saldoTotalDisponivel, 2, ',', '.') . ', Necessário: R$ ' . number_format($valorTotalDescontar, 2, ',', '.') . ' (incluindo taxa de R$ ' . number_format($taxaTotal, 2, ',', '.') . ')'
+                    'message' => 'Saldo insuficiente. Disponível: R$ ' . number_format($saldoTotalDisponivel, 2, ',', '.') .
+                        ', Necessário: R$ ' . number_format($valorTotalDescontar, 2, ',', '.') .
+                        ' (incluindo taxa de R$ ' . number_format($taxaTotal, 2, ',', '.') . ')'
                 ], 401);
             }
 
-            // Se for saque automático, executar imediatamente
             if ($isAutomatico) {
-                // Gerar idempotency key único
-                $idempotencyKey = str()->uuid()->toString();
+                $correlationID = preg_replace('/[^a-zA-Z0-9]/', '', str()->uuid()->toString());
 
-                // Criar saque na API Treeal
-                $withdrawalResult = $treealService->createWithdrawalByPixKey(
+                $payoutResult = $heartPayService->createPayout(
                     $amount,
                     $pixKey,
+                    $pixKeyType,
                     $description,
-                    $idempotencyKey,
-                    $pixKeyType
+                    $correlationID
                 );
 
-                if (!$withdrawalResult['success']) {
-                    Log::error('SaqueController::processTreealWithdrawal - Erro ao criar saque na API', [
-                        'error' => $withdrawalResult['message'] ?? 'Erro desconhecido'
+                if (!$payoutResult['success']) {
+                    Log::error('SaqueController::processHeartPayWithdrawal - Erro ao criar payout', [
+                        'error' => $payoutResult['message'] ?? 'Erro desconhecido',
                     ]);
                     return response()->json([
                         'status' => 'error',
-                        'message' => $withdrawalResult['message'] ?? 'Erro ao processar saque PIX'
+                        'message' => $payoutResult['message'] ?? 'Erro ao processar saque PIX'
                     ], 500);
                 }
 
-                $transactionId = $withdrawalResult['transaction_id'] ?? $withdrawalResult['id'] ?? null;
-                $status = $withdrawalResult['status'] ?? 'PROCESSING';
-                $endToEndId = $withdrawalResult['end_to_end_id'] ?? null;
+                $referenceCode = $payoutResult['referenceCode'] ?? $correlationID;
+                $hpStatus      = $payoutResult['status'] ?? 'pending';
 
-                // Criar registro na tabela SolicitacoesCashOut
                 $callbackUrl = ($request->baasPostbackUrl && $request->baasPostbackUrl !== 'web')
                     ? $request->baasPostbackUrl
                     : null;
 
                 $cashOut = SolicitacoesCashOut::create([
-                    'user_id' => $user->username,
-                    'externalreference' => $transactionId,
-                    'amount' => $amount,
-                    'beneficiaryname' => $user->name ?? $user->username,
+                    'user_id'            => $user->username,
+                    'externalreference'  => $referenceCode,
+                    'amount'             => $amount,
+                    'beneficiaryname'    => $user->name ?? $user->username,
                     'beneficiarydocument' => $pixKey,
-                    'pix' => $pixKey,
-                    'pixkey' => $pixKeyType,
-                    'date' => Carbon::now(),
-                    'status' => $this->mapTreealStatusToInternal($status),
-                    'type' => 'PIX',
-                    'idTransaction' => $transactionId,
-                    'taxa_cash_out' => $taxaTotal,
-                    'cash_out_liquido' => $cashOutLiquido,
-                    'end_to_end' => $endToEndId,
+                    'pix'                => $pixKey,
+                    'pixkey'             => $pixKeyType,
+                    'date'               => Carbon::now(),
+                    'status'             => HeartPayService::mapPayoutStatus($hpStatus),
+                    'type'               => 'PIX',
+                    'idTransaction'      => $referenceCode,
+                    'taxa_cash_out'      => $taxaTotal,
+                    'cash_out_liquido'   => $cashOutLiquido,
                     'descricao_transacao' => 'AUTOMATICO',
-                    'executor_ordem' => 'Treeal',
-                    'callback' => $callbackUrl,
-                    'descricao_externa' => $idempotencyKey,
+                    'executor_ordem'     => 'HeartPay',
+                    'callback'           => $callbackUrl,
+                    'descricao_externa'  => $correlationID,
                 ]);
 
-                // Debitar do saldo combinado (saldo_afiliado primeiro, depois saldo)
-                $balanceService = app(\App\Services\BalanceService::class);
                 $balanceService->decrementCombinedBalance($user, $valorTotalDescontar);
                 Helper::calculaSaldoLiquido($user->user_id);
-
                 app(\App\Services\PaymentProcessingService::class)->invalidateCachesAfterPayment($cashOut->user_id);
 
-                Log::info('SaqueController::processTreealWithdrawal - Saque automático criado', [
-                    'transaction_id' => $transactionId,
+                Log::info('SaqueController::processHeartPayWithdrawal - Saque automático criado', [
+                    'referenceCode' => $referenceCode,
                     'amount' => $amount,
-                    'cash_out_liquido' => $cashOutLiquido,
-                    'cash_out_id' => $cashOut->id
+                    'cash_out_id' => $cashOut->id,
                 ]);
 
-                // Padronizar resposta usando ApiResponseStandardizer
                 $standardizedResponse = ApiResponseStandardizer::standardizeWithdrawResponse([
                     'data' => [
-                        'id' => $transactionId,
-                        'idTransaction' => $transactionId,
+                        'id' => $referenceCode,
+                        'idTransaction' => $referenceCode,
                         'status' => 'processing',
                         'amount' => $amount,
                         'pixKey' => $pixKey,
@@ -331,37 +306,33 @@ class SaqueController extends Controller
                 return response()->json($standardizedResponse, 200);
 
             } else {
-                // APENAS saque MANUAL (API pixout). Débito na criação; em rejeição, valor + taxa são devolvidos.
-                // Saque automático é processado no bloco anterior (Treeal + débito na hora).
-                $transactionId = str()->uuid()->toString();
+                $transactionId = preg_replace('/[^a-zA-Z0-9]/', '', str()->uuid()->toString());
 
                 $callbackUrl = ($request->baasPostbackUrl && $request->baasPostbackUrl !== 'web')
                     ? $request->baasPostbackUrl
                     : null;
 
-                // Criar registro + débito em transação atômica para garantir que
-                // o saque só existe no banco se o débito também for aplicado.
                 $cashOut = \Illuminate\Support\Facades\DB::transaction(function () use (
                     $user, $transactionId, $amount, $pixKey, $pixKeyType,
                     $taxaTotal, $cashOutLiquido, $valorTotalDescontar, $callbackUrl
                 ) {
                     $co = SolicitacoesCashOut::create([
-                        'user_id' => $user->username,
-                        'externalreference' => $transactionId,
-                        'amount' => $amount,
-                        'beneficiaryname' => $user->name ?? $user->username,
+                        'user_id'            => $user->username,
+                        'externalreference'  => $transactionId,
+                        'amount'             => $amount,
+                        'beneficiaryname'    => $user->name ?? $user->username,
                         'beneficiarydocument' => $pixKey,
-                        'pix' => $pixKey,
-                        'pixkey' => $pixKeyType,
-                        'date' => Carbon::now(),
-                        'status' => 'PENDING',
-                        'type' => 'PIX',
-                        'idTransaction' => $transactionId,
-                        'taxa_cash_out' => $taxaTotal,
-                        'cash_out_liquido' => $cashOutLiquido,
+                        'pix'                => $pixKey,
+                        'pixkey'             => $pixKeyType,
+                        'date'               => Carbon::now(),
+                        'status'             => 'PENDING',
+                        'type'               => 'PIX',
+                        'idTransaction'      => $transactionId,
+                        'taxa_cash_out'      => $taxaTotal,
+                        'cash_out_liquido'   => $cashOutLiquido,
                         'descricao_transacao' => 'MANUAL',
-                        'executor_ordem' => null,
-                        'callback' => $callbackUrl,
+                        'executor_ordem'     => null,
+                        'callback'           => $callbackUrl,
                     ]);
 
                     $balanceService = app(\App\Services\BalanceService::class);
@@ -373,14 +344,12 @@ class SaqueController extends Controller
                 Helper::calculaSaldoLiquido($user->user_id);
                 app(\App\Services\PaymentProcessingService::class)->invalidateCachesAfterPayment($cashOut->user_id);
 
-                Log::info('SaqueController::processTreealWithdrawal - Saque manual criado (valor + taxa debitados)', [
+                Log::info('SaqueController::processHeartPayWithdrawal - Saque manual criado', [
                     'transaction_id' => $transactionId,
                     'amount' => $amount,
-                    'valor_total_descontar' => $valorTotalDescontar,
-                    'cash_out_id' => $cashOut->id
+                    'cash_out_id' => $cashOut->id,
                 ]);
 
-                // Padronizar resposta usando ApiResponseStandardizer
                 $standardizedResponse = ApiResponseStandardizer::standardizeWithdrawResponse([
                     'data' => [
                         'id' => $transactionId,
@@ -398,9 +367,9 @@ class SaqueController extends Controller
             }
 
         } catch (\Exception $e) {
-            Log::error('SaqueController::processTreealWithdrawal - Exceção', [
+            Log::error('SaqueController::processHeartPayWithdrawal - Exceção', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
@@ -410,38 +379,4 @@ class SaqueController extends Controller
         }
     }
 
-    /**
-     * Mapeia status da Treeal para status interno
-     * 
-     * Status TREEAL (Cash Out - API ONZ):
-     * - PROCESSING: Transação em processamento
-     * - LIQUIDATED: Transação liquidada com sucesso
-     * - CANCELED: Transação cancelada
-     * - REFUNDED: Transação estornada
-     * - PARTIALLY_REFUNDED: Transação parcialmente estornada
-     */
-    private function mapTreealStatusToInternal(string $treealStatus): string
-    {
-        $statusMap = [
-            // Status de processamento
-            'PROCESSING' => 'PROCESSING',
-            'EM_PROCESSAMENTO' => 'PROCESSING',
-            
-            // Status de sucesso (liquidação)
-            'LIQUIDATED' => 'PAID_OUT',
-            'COMPLETED' => 'PAID_OUT',
-            'CONFIRMED' => 'PAID_OUT',
-            
-            // Status de falha/cancelamento
-            'FAILED' => 'FAILED',
-            'CANCELLED' => 'CANCELLED',
-            'CANCELED' => 'CANCELLED',
-            
-            // Status de estorno
-            'REFUNDED' => 'REFUNDED',
-            'PARTIALLY_REFUNDED' => 'PARTIALLY_REFUNDED',
-        ];
-
-        return $statusMap[strtoupper($treealStatus)] ?? 'PENDING';
-    }
 }

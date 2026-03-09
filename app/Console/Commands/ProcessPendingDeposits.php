@@ -3,7 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Solicitacoes;
-use App\Services\TreealService;
+use App\Services\HeartPayService;
 use App\Services\PaymentProcessingService;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Log;
 /**
  * Fallback: verifica depósitos WAITING_FOR_APPROVAL e processa os que já foram pagos.
  *
- * Útil quando o webhook da Treeal não chega (URL não registrada, falha de rede, etc.).
+ * Útil quando o webhook do adquirente não chega (URL não registrada, falha de rede, etc.).
  * Pode ser agendado via cron para rodar a cada minuto, ou executado manualmente.
  *
  * Uso:
@@ -25,7 +25,7 @@ class ProcessPendingDeposits extends Command
     protected $signature = 'deposits:process-pending
                             {--hours=2     : Janela de busca em horas (padrão 2)}
                             {--dry-run     : Apenas lista, não processa}
-                            {--adquirente= : Filtrar por adquirente (ex: Treeal)}';
+                            {--adquirente= : Filtrar por adquirente (ex: HeartPay)}';
 
     protected $description = 'Processa depósitos pendentes consultando o status diretamente na adquirente (fallback de webhook)';
 
@@ -64,40 +64,46 @@ class ProcessPendingDeposits extends Command
             $this->line("  ID: {$dep->id} | TXID: {$dep->idTransaction} | Valor: R$ " .
                 number_format($dep->amount, 2, ',', '.') . " | Adquirente: {$dep->adquirente_ref}");
 
-            if ($dep->adquirente_ref === 'Treeal') {
+            if ($dep->adquirente_ref === 'HeartPay') {
                 try {
-                    $treeal = app(TreealService::class);
+                    $heartPay = app(HeartPayService::class);
 
-                    if (!$treeal->isActive()) {
-                        $this->warn("  ⚠️  Treeal inativo, pulando.");
+                    if (!$heartPay->isActive()) {
+                        $this->warn("  ⚠️  HeartPay inativo, pulando.");
                         continue;
                     }
 
-                    $statusResult = $treeal->getCobStatus($dep->idTransaction ?? $dep->externalreference);
+                    $chargeResult = $heartPay->getCharge($dep->idTransaction ?? $dep->externalreference);
+                    $statusRemoto = strtoupper($chargeResult['status'] ?? 'UNKNOWN');
+                    $this->line("     Status na HeartPay: {$statusRemoto}");
 
-                    $statusRemoto = strtoupper($statusResult['status'] ?? 'UNKNOWN');
-                    $this->line("     Status na Treeal: {$statusRemoto}");
-
-                    if (in_array($statusRemoto, ['CONCLUIDA', 'ATIVA', 'PAID', 'COMPLETED'])) {
+                    if ($statusRemoto === 'COMPLETED') {
                         if ($dryRun) {
                             $this->info("     [DRY-RUN] Seria processado.");
                         } else {
                             $paymentService = app(PaymentProcessingService::class);
                             $paymentService->processPaymentReceived($dep);
                             $this->info("     ✅ Processado! Saldo creditado.");
-                            Log::info("ProcessPendingDeposits - Depósito processado via fallback", [
-                                'id'    => $dep->id,
-                                'txid'  => $dep->idTransaction,
-                                'valor' => $dep->amount,
+                            Log::info("ProcessPendingDeposits - Depósito HeartPay processado via fallback", [
+                                'id'              => $dep->id,
+                                'correlationID'   => $dep->idTransaction,
+                                'valor'           => $dep->amount,
                             ]);
                             $processados++;
                         }
+                    } elseif ($statusRemoto === 'EXPIRED') {
+                        if (!$dryRun) {
+                            $dep->update(['status' => 'CANCELLED']);
+                            $this->warn("     ⏰ Cobrança expirada, marcada como CANCELLED.");
+                        } else {
+                            $this->info("     [DRY-RUN] Seria marcada como CANCELLED (expirada).");
+                        }
                     } else {
-                        $this->line("     ⏳ Status ainda pendente na Treeal ({$statusRemoto}), aguardando.");
+                        $this->line("     ⏳ Status ainda pendente na HeartPay ({$statusRemoto}), aguardando.");
                     }
                 } catch (\Exception $e) {
                     $this->error("     ❌ Erro: " . $e->getMessage());
-                    Log::error("ProcessPendingDeposits - Erro ao processar", [
+                    Log::error("ProcessPendingDeposits - Erro HeartPay", [
                         'id'    => $dep->id,
                         'error' => $e->getMessage(),
                     ]);

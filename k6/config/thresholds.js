@@ -40,20 +40,20 @@ export const endpointThresholds = {
     'http_req_duration{name:dashboard_stats}': ['p(95)<200', 'p(99)<400'],
   },
   
-  // Cash In (PIX) - envolve comunicação com TREEAL
+  // Cash In (PIX) - envolve comunicação com HeartPay
   cashIn: {
     'http_req_duration{name:generate_qr}': ['p(95)<1000', 'p(99)<2000'],
     'http_req_duration{name:deposit_status}': ['p(95)<200', 'p(99)<400'],
   },
   
-  // Cash Out (Saque) - envolve comunicação com TREEAL
+  // Cash Out (Saque) - envolve comunicação com HeartPay
   cashOut: {
     'http_req_duration{name:pixout}': ['p(95)<1500', 'p(99)<3000'],
   },
   
   // Webhooks - devem responder rapidamente
   webhooks: {
-    'http_req_duration{name:webhook_treeal}': ['p(95)<200', 'p(99)<500'],
+    'http_req_duration{name:webhook_heartpay}': ['p(95)<200', 'p(99)<500'],
   },
 };
 

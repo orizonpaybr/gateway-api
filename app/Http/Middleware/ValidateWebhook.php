@@ -66,7 +66,7 @@ class ValidateWebhook
         $path = $request->path();
         
         if (str_contains($path, 'pagarme')) return 'pagarme';
-        if (str_contains($path, 'treeal')) return 'treeal';
+        if (str_contains($path, 'heartpay')) return 'heartpay';
         return 'unknown';
     }
 
@@ -75,8 +75,8 @@ class ValidateWebhook
         switch ($adquirente) {
             case 'pagarme':
                 return $this->validatePagarmeWebhook($request);
-            case 'treeal':
-                return $this->validateTreealWebhook($request);
+            case 'heartpay':
+                return $this->validateHeartPayWebhook($request);
             default:
                 // Para adquirentes desconhecidos, rejeitar em produção
                 return !app()->environment('production');
@@ -84,116 +84,81 @@ class ValidateWebhook
     }
     
     /**
-     * Valida assinatura do webhook da Treeal/ONZ
-     * 
-     * Implementa múltiplos métodos de validação:
-     * 1. HMAC SHA256 com webhook secret (se configurado)
-     * 2. Validação de IP de origem (whitelist)
-     * 3. Validação de estrutura do payload
-     * 
-     * IMPORTANTE: Ative a validação HMAC assim que a TREEAL fornecer
-     * a documentação de assinatura de webhooks.
+     * Valida webhook da HeartPay.
+     *
+     * HeartPay utiliza HMAC-SHA256 com a API Key para assinar webhooks.
+     * Validação: IP whitelist → HMAC → estrutura do payload.
      */
-    private function validateTreealWebhook(Request $request): bool
+    private function validateHeartPayWebhook(Request $request): bool
     {
-        $webhookSecret = config('treeal.webhook_secret');
-        $whitelistedIps = config('treeal.webhook_ips', []);
-        
-        // 1. Validação de IP (se configurado)
+        $whitelistedIps = config('heartpay.webhook_ips', []);
+
         if (!empty($whitelistedIps)) {
             $requestIp = $request->ip();
             $ipValid = false;
-            
+
             foreach ($whitelistedIps as $allowedIp) {
-                // Suporte a ranges CIDR (ex: 192.168.1.0/24)
                 if (str_contains($allowedIp, '/')) {
                     if ($this->ipInRange($requestIp, $allowedIp)) {
                         $ipValid = true;
                         break;
                     }
-                } elseif ($requestIp === $allowedIp) {
+                } elseif ($requestIp === trim($allowedIp)) {
                     $ipValid = true;
                     break;
                 }
             }
-            
+
             if (!$ipValid) {
-                Log::warning('ValidateTreealWebhook - IP não autorizado', [
+                Log::warning('ValidateHeartPayWebhook - IP não autorizado', [
                     'ip' => $requestIp,
                     'allowed_ips' => $whitelistedIps,
                 ]);
                 return false;
             }
-            
-            Log::debug('ValidateTreealWebhook - IP autorizado', ['ip' => $requestIp]);
         }
-        
-        // 2. Validação HMAC (se webhook secret configurado)
+
+        $webhookSecret = config('heartpay.webhook_secret');
+
         if (!empty($webhookSecret)) {
-            // Procurar assinatura em headers comuns
-            $signature = $request->header('X-Webhook-Signature') 
-                ?? $request->header('X-Signature')
-                ?? $request->header('X-Treeal-Signature')
-                ?? $request->header('Signature');
-                
+            $signature = $request->header('X-HeartPay-Signature');
+            $timestamp = $request->header('X-HeartPay-Timestamp');
+
             if (!$signature) {
-                Log::warning('ValidateTreealWebhook - Assinatura não encontrada no header', [
+                Log::warning('ValidateHeartPayWebhook - Header X-HeartPay-Signature ausente', [
                     'headers' => array_keys($request->headers->all()),
                 ]);
-                // Se não há assinatura mas secret está configurado, rejeitar em produção
                 return !app()->environment('production');
             }
-            
-            $payload = $request->getContent();
-            $expectedSignature = hash_hmac('sha256', $payload, $webhookSecret);
-            
-            // Comparação segura contra timing attacks
-            if (!hash_equals($expectedSignature, $signature)) {
-                Log::warning('ValidateTreealWebhook - Assinatura inválida', [
-                    'expected_prefix' => substr($expectedSignature, 0, 10) . '...',
-                    'received_prefix' => substr($signature, 0, 10) . '...',
-                ]);
+
+            if ($timestamp) {
+                $age = time() - (int) $timestamp;
+                if ($age > 300) {
+                    Log::warning('ValidateHeartPayWebhook - Webhook expirado (> 5 min)', [
+                        'timestamp' => $timestamp,
+                        'age_seconds' => $age,
+                    ]);
+                    return false;
+                }
+            }
+
+            $rawBody = $request->getContent();
+            $signedPayload = $timestamp ? ($timestamp . '.' . $rawBody) : $rawBody;
+            $expected = hash_hmac('sha256', $signedPayload, $webhookSecret);
+
+            if (!hash_equals($expected, $signature)) {
+                Log::warning('ValidateHeartPayWebhook - Assinatura HMAC inválida');
                 return false;
             }
-            
-            Log::debug('ValidateTreealWebhook - Assinatura válida');
+
+            Log::debug('ValidateHeartPayWebhook - Assinatura HMAC válida');
             return true;
         }
-        
-        // 3. Validação de estrutura do payload (validação mínima)
-        $payload = $request->all();
-        
-        // Verificar se tem campos esperados de webhook TREEAL
-        // Cash In: txid ou txId
-        // Cash Out: transactionId ou endToEndId
-        $hasCashInFields = isset($payload['txid']) || isset($payload['txId']);
-        $hasCashOutFields = isset($payload['transactionId']) || isset($payload['endToEndId']);
-        $hasStatusField = isset($payload['status']);
-        
-        if (!$hasCashInFields && !$hasCashOutFields) {
-            Log::warning('ValidateTreealWebhook - Payload não reconhecido como webhook TREEAL', [
-                'fields' => array_keys($payload),
-            ]);
-            // Não rejeitar automaticamente - pode ser um novo formato
+
+        if (app()->environment('production') && empty($webhookSecret)) {
+            Log::warning('ValidateHeartPayWebhook - HEARTPAY_WEBHOOK_SECRET não configurado em produção');
         }
-        
-        // Log de auditoria
-        Log::info('ValidateTreealWebhook - Webhook recebido', [
-            'has_cash_in_fields' => $hasCashInFields,
-            'has_cash_out_fields' => $hasCashOutFields,
-            'has_status' => $hasStatusField,
-            'ip' => $request->ip(),
-            'validation_mode' => empty($webhookSecret) ? 'structure_only' : 'hmac',
-        ]);
-        
-        // Se não há webhook secret configurado, aceitar com validação básica
-        // ALERTA: Configure TREEAL_WEBHOOK_SECRET em produção quando disponível
-        if (empty($webhookSecret) && app()->environment('production')) {
-            Log::warning('ValidateTreealWebhook - ATENÇÃO: TREEAL_WEBHOOK_SECRET não configurado em produção!', [
-                'recommendation' => 'Configure TREEAL_WEBHOOK_SECRET no .env quando a TREEAL fornecer a documentação',
-            ]);
-        }
-        
+
         return true;
     }
 

@@ -12,21 +12,21 @@ use App\Models\App;
  * 1. Taxa global padrão: R$ 1,00 (taxa_fixa_padrao) para todos os usuários
  * 2. Taxa personalizada: pode ser definida por usuário (taxa_fixa_deposito)
  * 3. A taxa NÃO muda se houver afiliado - a comissão sai da taxa fixa
- * 4. Split da taxa: Treeal (R$ 0,04) → Afiliado (R$ 0,50 se houver) → Orizon (resto)
+ * 4. Split da taxa: Adquirente PIX (R$ 0,025) → Afiliado (R$ 0,50 se houver) → Orizon (resto)
  *
  * EXEMPLOS:
  * 
  * Caso 1: Taxa global R$ 1,00, sem afiliado, depósito R$ 5,00
  * - Usuário recebe: R$ 4,00
- * - Taxa: R$ 1,00 → Treeal R$ 0,04 + Orizon R$ 0,96
+ * - Taxa: R$ 1,00 → Adquirente R$ 0,025 + Orizon R$ 0,975
  *
  * Caso 2: Taxa personalizada R$ 0,90, sem afiliado, depósito R$ 5,00
  * - Usuário recebe: R$ 4,10
- * - Taxa: R$ 0,90 → Treeal R$ 0,04 + Orizon R$ 0,86
+ * - Taxa: R$ 0,90 → Adquirente R$ 0,025 + Orizon R$ 0,875
  *
  * Caso 3: Taxa personalizada R$ 0,90, COM afiliado, depósito R$ 5,00
  * - Usuário recebe: R$ 4,10 (taxa NÃO muda com afiliado)
- * - Taxa: R$ 0,90 → Treeal R$ 0,04 + Afiliado R$ 0,50 + Orizon R$ 0,36
+ * - Taxa: R$ 0,90 → Adquirente R$ 0,025 + Afiliado R$ 0,50 + Orizon R$ 0,375
  */
 class TaxaFlexivelHelper
 {
@@ -40,9 +40,9 @@ class TaxaFlexivelHelper
      *   'taxa_cash_in' => float,           // Taxa total cobrada do cliente (taxa fixa configurada)
      *   'deposito_liquido' => float,       // Valor que o cliente recebe (amount - taxa_cash_in)
      *   'descricao' => string,             // Descrição do tipo de taxa
-     *   'taxa_aplicacao' => float,         // Lucro líquido da aplicação (taxa - custo TREEAL)
-     *   'taxa_adquirente' => float,        // Custo da TREEAL (já descontado automaticamente por ela)
-     *   'valor_recebido_treeal' => float   // Valor que a TREEAL envia para nossa conta (amount - custo TREEAL)
+     *   'taxa_aplicacao' => float,         // Lucro líquido da aplicação (taxa - custo HeartPay)
+     *   'taxa_adquirente' => float,        // Custo do adquirente PIX (HeartPay)
+     *   'valor_recebido_adquirente' => float   // Valor líquido após custo adquirente (informativo)
      * ]
      */
     public static function calcularTaxaDeposito($amount, $setting, $user = null)
@@ -121,29 +121,26 @@ class TaxaFlexivelHelper
             ]);
         }
         
-        // Custo fixo da TREEAL por transação (já descontado automaticamente por ela)
-        $custoTreeal = (float) config('treeal.custo_fixo_por_transacao');
+        // Custo fixo HeartPay por transação (R$ 0,025). Futuras adquirentes: cada uma com seu nome (ex: custoOutroAdquirente).
+        $custoHeartpay = (float) config('heartpay.custo_fixo_por_transacao', 0.025);
         
-        // Lucro líquido da aplicação = taxa fixa - custo TREEAL - comissão afiliado
-        // A comissão do afiliado e o custo Treeal saem da taxa fixa
-        $lucroAplicacao = max(0, $taxaTotal - $custoTreeal - $comissaoAfiliado);
+        // Lucro líquido da aplicação = taxa fixa - custo HeartPay - comissão afiliado
+        $lucroAplicacao = max(0, $taxaTotal - $custoHeartpay - $comissaoAfiliado);
         
         // Depósito líquido para o cliente = valor bruto - taxa fixa (NÃO muda com afiliado)
-        // Exemplo: R$ 5,00 - R$ 0,90 = R$ 4,10 (taxa 0,90 independente de ter afiliado)
         $depositoLiquido = max(0, $amount - $taxaTotal);
         
-        // Valor que a TREEAL envia para nossa conta (já descontado o custo dela)
-        // Exemplo: R$ 100,00 - R$ 0,04 = R$ 99,96
-        // NOTA: Este valor é apenas informativo. A TREEAL já desconta automaticamente.
-        $valorRecebidoTreeal = max(0, $amount - $custoTreeal);
+        // Valor líquido após custo HeartPay (informativo)
+        $valorRecebidoHeartpay = max(0, $amount - $custoHeartpay);
         
         return [
-            'taxa_cash_in' => $taxaTotal,              // Taxa fixa cobrada do cliente (NÃO muda com afiliado)
-            'taxa_aplicacao' => $lucroAplicacao,       // Lucro Orizon (taxa - Treeal - afiliado)
-            'taxa_adquirente' => $custoTreeal,         // Custo da TREEAL (R$ 0,04)
-            'comissao_afiliado' => $comissaoAfiliado,  // Comissão do pai afiliado (R$ 0,50 se houver)
-            'deposito_liquido' => $depositoLiquido,    // Valor que o cliente recebe (amount - taxa fixa)
-            'valor_recebido_treeal' => $valorRecebidoTreeal, // Valor que a TREEAL envia (informativo)
+            'taxa_cash_in' => $taxaTotal,
+            'taxa_aplicacao' => $lucroAplicacao,
+            'taxa_adquirente' => $custoHeartpay,
+            'comissao_afiliado' => $comissaoAfiliado,
+            'deposito_liquido' => $depositoLiquido,
+            'valor_recebido_treeal' => $valorRecebidoHeartpay, // compatibilidade (chave legada)
+            'valor_recebido_adquirente' => $valorRecebidoHeartpay,
             'descricao' => $descricao
         ];
     }

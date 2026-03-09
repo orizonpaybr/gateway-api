@@ -45,7 +45,7 @@ export function setup() {
   
   // IMPORTANTE: Testes de Cash Out reais movimentam dinheiro!
   // Em ambiente de teste, use:
-  // 1. Sandbox/Homologação da TREEAL
+  // 1. Sandbox/Homologação do HeartPay
   // 2. Valores mínimos
   // 3. Contas de teste específicas
   console.log('⚠️  ATENÇÃO: Testes de Cash Out podem movimentar valores reais!');
@@ -127,7 +127,7 @@ function testWithdrawRequest(options = {}) {
     } else if (response.status === 422) {
       console.log('Erro de processamento - verificar saldo/limites');
     } else if (response.status >= 500) {
-      console.log('Erro de servidor - problema na API ou TREEAL');
+      console.log('Erro de servidor - problema na API ou adquirente (HeartPay)');
     }
     
     return null;

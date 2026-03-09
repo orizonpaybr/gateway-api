@@ -10,13 +10,13 @@ use Illuminate\Console\Command;
  *
  * Uso:
  *   php artisan webhooks:list
- *   php artisan webhooks:list --adquirente=treeal
+ *   php artisan webhooks:list --adquirente=heartpay
  *   php artisan webhooks:list --limit=20
  */
 class ListWebhookLogs extends Command
 {
     protected $signature = 'webhooks:list
-                            {--adquirente= : Filtrar por adquirente (ex: treeal)}
+                            {--adquirente= : Filtrar por adquirente (ex: heartpay)}
                             {--limit=15 : Quantidade de registros}';
 
     protected $description = 'Lista os últimos webhooks recebidos (debug)';
@@ -77,7 +77,7 @@ class ListWebhookLogs extends Command
         $this->line('(dentro do tinker, digite só a linha acima sem o prompt >>>)');
         $this->newLine();
         $this->line('Para ver POSTs no endpoint do webhook (nginx):');
-        $this->line('  grep "treeal/webhook" /var/log/nginx/access.log | tail -30');
+        $this->line('  grep "heartpay/webhook" /var/log/nginx/access.log | tail -30');
 
         return 0;
     }

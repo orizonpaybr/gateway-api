@@ -105,7 +105,7 @@ export function generateWithdrawPayload(options = {}) {
 }
 
 /**
- * Gera payload de webhook TREEAL (para simular callbacks)
+ * Gera payload de webhook HeartPay (para simular callbacks)
  */
 export function generateWebhookPayload(type = 'CASH_IN', status = 'CONCLUIDA') {
   const timestamp = new Date().toISOString();

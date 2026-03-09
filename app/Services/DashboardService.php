@@ -32,14 +32,11 @@ class DashboardService
         $cacheKey = sprintf('dashboard:stats:%s:%s', $username, now()->format('Y-m-d'));
         
         return Cache::remember($cacheKey, self::CACHE_TTL_STATS, function () use ($username, $startOfMonth, $endOfMonth) {
-            // Custo fixo da TREEAL por transação
-            $custoTreealPorTransacao = (float) config('treeal.custo_fixo_por_transacao');
+            // Custo fixo HeartPay por transação
+            $custoHeartpayPorTransacao = (float) config('heartpay.custo_fixo_por_transacao', 0.025);
             
             // Query única otimizada usando UNION ALL
-            // IMPORTANTE: Calcular lucro líquido (taxa - custo TREEAL)
-            // TODAS as transações TREEAL (depósitos E saques) têm custo de 4 centavos por transação
-            // Para depósitos TREEAL sem taxa_pix_cash_in_adquirente ou com valor 0, usar custo fixo
-            // Para saques TREEAL, identificar pelo campo executor_ordem = 'Treeal'
+            // Lucro líquido = taxa - custo adquirente (HeartPay). Legado: adquirente_ref/executor_ordem 'Treeal' tratado como HeartPay.
             $statsQuery = "
                 SELECT 
                     'deposito' as tipo,
@@ -47,9 +44,9 @@ class DashboardService
                     SUM(CASE WHEN status IN ('PAID_OUT', 'COMPLETED') THEN (
                         taxa_cash_in - 
                         CASE 
-                            WHEN (adquirente_ref = 'Treeal' OR executor_ordem = 'Treeal') 
+                            WHEN (adquirente_ref IN ('Treeal', 'HeartPay') OR executor_ordem IN ('Treeal', 'HeartPay')) 
                                  AND (taxa_pix_cash_in_adquirente IS NULL OR taxa_pix_cash_in_adquirente = 0)
-                            THEN {$custoTreealPorTransacao}
+                            THEN {$custoHeartpayPorTransacao}
                             WHEN taxa_pix_cash_in_adquirente IS NOT NULL AND taxa_pix_cash_in_adquirente > 0
                             THEN taxa_pix_cash_in_adquirente
                             ELSE 0
@@ -70,7 +67,7 @@ class DashboardService
 
             $results = DB::select($statsQuery, [
                 $username, $startOfMonth, $endOfMonth, // depósitos
-                $custoTreealPorTransacao, // custo TREEAL para saques
+                $custoHeartpayPorTransacao, // custo HeartPay para saques
                 $username, $startOfMonth, $endOfMonth // saques
             ]);
 

@@ -7,9 +7,9 @@ import { thinkTime } from '../helpers/utils.js';
 import crypto from 'k6/crypto';
 
 /**
- * Testes de Webhook TREEAL
- * 
- * Simula callbacks da TREEAL para testar processamento de webhooks.
+ * Testes de Webhook HeartPay
+ *
+ * Simula callbacks do HeartPay para testar processamento de webhooks.
  * ATENÇÃO: Este teste simula webhooks - não use em produção sem cuidado!
  */
 
@@ -35,19 +35,19 @@ export const options = {
     },
   },
   thresholds: {
-    'http_req_duration{name:webhook_treeal}': ['p(95)<200', 'p(99)<500'],
+    'http_req_duration{name:webhook_heartpay}': ['p(95)<200', 'p(99)<500'],
     'webhook_success_rate': ['rate>0.95'],
     'http_req_failed': ['rate<0.05'],
   },
 };
 
 export function setup() {
-  console.log('=== Iniciando Testes de Webhook TREEAL ===');
+  console.log('=== Iniciando Testes de Webhook HeartPay ===');
   console.log(`Base URL: ${config.baseUrl}`);
   console.log(`Webhook Secret: ${WEBHOOK_SECRET ? '***configurado***' : 'NÃO CONFIGURADO'}`);
   
   // AVISO: Webhooks em ambiente de teste
-  console.log('⚠️  ATENÇÃO: Este teste simula webhooks da TREEAL');
+  console.log('⚠️  ATENÇÃO: Este teste simula webhooks do HeartPay');
   console.log('⚠️  Certifique-se de estar em ambiente de HOMOLOGAÇÃO');
   
   return { 
@@ -90,7 +90,7 @@ function testCashInWebhook() {
   const headers = {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
-    'User-Agent': 'TREEAL-Webhook/1.0',
+    'User-Agent': 'HeartPay-Webhook/1.0',
   };
   
   // Adiciona assinatura se secret estiver configurado
@@ -101,11 +101,11 @@ function testCashInWebhook() {
   const startTime = Date.now();
   
   const response = http.post(
-    `${config.baseUrl.replace('/api', '')}/api/treeal/webhook`,
+    `${config.baseUrl.replace('/api', '')}/heartpay/webhook`,
     payloadString,
     {
       headers,
-      tags: { name: 'webhook_treeal', type: 'cash_in' },
+      tags: { name: 'webhook_heartpay', type: 'cash_in' },
     }
   );
   
@@ -145,7 +145,7 @@ function testCashOutWebhook() {
   const headers = {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
-    'User-Agent': 'TREEAL-Webhook/1.0',
+    'User-Agent': 'HeartPay-Webhook/1.0',
   };
   
   // Adiciona assinatura se secret estiver configurado
@@ -156,11 +156,11 @@ function testCashOutWebhook() {
   const startTime = Date.now();
   
   const response = http.post(
-    `${config.baseUrl.replace('/api', '')}/api/treeal/webhook`,
+    `${config.baseUrl.replace('/api', '')}/heartpay/webhook`,
     payloadString,
     {
       headers,
-      tags: { name: 'webhook_treeal', type: 'cash_out' },
+      tags: { name: 'webhook_heartpay', type: 'cash_out' },
     }
   );
   
@@ -187,7 +187,7 @@ export function testInvalidSignature() {
   const payload = generateWebhookPayload('CASH_IN', 'CONCLUIDA');
   
   const response = http.post(
-    `${config.baseUrl.replace('/api', '')}/api/treeal/webhook`,
+    `${config.baseUrl.replace('/api', '')}/heartpay/webhook`,
     JSON.stringify(payload),
     {
       headers: {
@@ -221,7 +221,7 @@ export function testInvalidPayload() {
   
   invalidPayloads.forEach((payload, index) => {
     const response = http.post(
-      `${config.baseUrl.replace('/api', '')}/api/treeal/webhook`,
+      `${config.baseUrl.replace('/api', '')}/heartpay/webhook`,
       typeof payload === 'string' ? payload : JSON.stringify(payload),
       {
         headers: {
@@ -255,14 +255,14 @@ export function testIdempotency() {
   
   // Primeira chamada
   const response1 = http.post(
-    `${config.baseUrl.replace('/api', '')}/api/treeal/webhook`,
+    `${config.baseUrl.replace('/api', '')}/heartpay/webhook`,
     payloadString,
     { headers, tags: { name: 'webhook_idempotency_1' } }
   );
   
   // Segunda chamada com mesmo payload
   const response2 = http.post(
-    `${config.baseUrl.replace('/api', '')}/api/treeal/webhook`,
+    `${config.baseUrl.replace('/api', '')}/heartpay/webhook`,
     payloadString,
     { headers, tags: { name: 'webhook_idempotency_2' } }
   );
@@ -294,7 +294,7 @@ export function testWebhookBurst() {
     }
     
     const response = http.post(
-      `${config.baseUrl.replace('/api', '')}/api/treeal/webhook`,
+      `${config.baseUrl.replace('/api', '')}/heartpay/webhook`,
       JSON.stringify(payload),
       { headers, tags: { name: 'webhook_burst' } }
     );
@@ -320,7 +320,7 @@ export function testAllStatuses() {
     cashInStatuses.forEach((status) => {
       const payload = generateWebhookPayload('CASH_IN', status);
       const response = http.post(
-        `${config.baseUrl.replace('/api', '')}/api/treeal/webhook`,
+        `${config.baseUrl.replace('/api', '')}/heartpay/webhook`,
         JSON.stringify(payload),
         {
           headers: { 'Content-Type': 'application/json' },
@@ -341,7 +341,7 @@ export function testAllStatuses() {
     cashOutStatuses.forEach((status) => {
       const payload = generateWebhookPayload('CASH_OUT', status);
       const response = http.post(
-        `${config.baseUrl.replace('/api', '')}/api/treeal/webhook`,
+        `${config.baseUrl.replace('/api', '')}/heartpay/webhook`,
         JSON.stringify(payload),
         {
           headers: { 'Content-Type': 'application/json' },

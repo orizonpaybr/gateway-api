@@ -20,7 +20,7 @@ use Illuminate\Support\Facades\Log;
  *
  * Idempotência:
  *   - PROCESSED ou QUEUED → devolve 200 sem reprocessar.
- *   - FAILED → permite reprocessar (a Treeal reenviou, tentamos de novo).
+ *   - FAILED → permite reprocessar (reenvio do adquirente).
  */
 class WebhookService
 {
@@ -177,17 +177,28 @@ class WebhookService
     }
 
     /**
-     * Extrai transaction_id do request (suporta formato Treeal e genérico)
+     * Extrai transaction_id do request (suporta HeartPay e genérico).
      *
-     * ONZ envolve o payload em { "data": { "webhookType": "TRANSFER"|"PIX", ... } }.
-     * Para TRANSFER (Cash Out) priorizamos endToEndId pois é o campo que gravamos em
-     * solicitacoes_cash_out.end_to_end — o campo "id" é um ID interno da ONZ diferente
-     * do nosso idTransaction.
+     * HeartPay: payload com { "event": "...", "data": { "data": { "correlationID": "..." } } }
+     * HeartPay: { "event": "...", "data": { ... } }
      */
     private function extractTransactionId(Request $request): ?string
     {
         $data  = $request->all();
         $inner = isset($data['data']) && is_array($data['data']) ? $data['data'] : null;
+
+        // HeartPay: evento top-level + data.data com correlationID
+        $event = $data['event'] ?? null;
+        if ($event && $inner) {
+            $nested = isset($inner['data']) && is_array($inner['data']) ? $inner['data'] : $inner;
+            return $nested['correlationID']
+                ?? $nested['correlation_id']
+                ?? $nested['txid']
+                ?? $nested['referenceCode']
+                ?? $nested['reference_code']
+                ?? $nested['endToEndId']
+                ?? (isset($nested['id']) ? (string) $nested['id'] : null);
+        }
 
         if ($inner) {
             $type = $inner['webhookType'] ?? $data['type'] ?? null;
@@ -200,12 +211,14 @@ class WebhookService
             }
             return $inner['txid']
                 ?? $inner['txId']
+                ?? $inner['correlationID']
                 ?? $inner['endToEndId']
                 ?? (isset($inner['id']) ? (string) $inner['id'] : null);
         }
 
         return $data['txid']
             ?? $data['txId']
+            ?? $data['correlationID']
             ?? $data['idTransaction']
             ?? $data['transaction_id']
             ?? $data['transactionId']

@@ -502,7 +502,7 @@ class AdminDashboardController extends Controller
         $lucroDepositos = $depositStats->lucro_depositos ?? 0;
         $lucroSaques = $withdrawStats->lucro_saques ?? 0;
 
-        // Calcular taxas pagas aos adquirentes (TREEAL)
+        // Calcular taxas pagas aos adquirentes (HeartPay)
         $taxasAdquirentes = $this->calculateAcquirerFees($solicitacoes, $saques);
         
         // Calcular comissões pagas aos afiliados no período
@@ -510,10 +510,10 @@ class AdminDashboardController extends Controller
         // mas são pagas aos afiliados (saindo do saldo do sistema), então precisam ser descontadas do lucro líquido
         $comissoesAfiliados = $this->calculateAffiliateCommissions($dataInicio, $dataFim);
         
-        // Lucro líquido = (taxas recebidas) - (custos TREEAL) - (comissões pagas aos afiliados)
+        // Lucro líquido = (taxas recebidas) - (custos HeartPay) - (comissões pagas aos afiliados)
         // Onde:
         // - taxas recebidas = taxa_cash_in + taxa_cash_out (já inclui comissões de afiliados)
-        // - custos TREEAL = número de transações * R$ 0,02
+        // - custos HeartPay = número de transações * R$ 0,02
         // - comissões pagas = valor total creditado aos afiliados (R$ 0,50 por transação)
         $lucroLiquido = ($lucroDepositos + $lucroSaques) - ($taxasAdquirentes['entradas'] + $taxasAdquirentes['saidas']) - $comissoesAfiliados;
 
@@ -628,10 +628,10 @@ class AdminDashboardController extends Controller
     }
 
     /**
-     * Calcular taxas pagas aos adquirentes (TREEAL)
+     * Calcular taxas pagas aos adquirentes (HeartPay)
      * 
-     * Calcula os custos fixos da TREEAL por transação (R$ 0,02 por transação)
-     * conforme configurado em config('treeal.custo_fixo_por_transacao')
+     * Calcula os custos fixos da HeartPay por transação (R$ 0,02 por transação)
+     * conforme configurado em config('heartpay.custo_fixo_por_transacao')
      * 
      * @param $solicitacoes Query builder de depósitos
      * @param $saques Query builder de saques
@@ -639,16 +639,16 @@ class AdminDashboardController extends Controller
      */
     private function calculateAcquirerFees($solicitacoes, $saques): array
     {
-        // Custo fixo da TREEAL por transação
-        $custoTreealPorTransacao = (float) config('treeal.custo_fixo_por_transacao', 0.04);
+        // Custo fixo da HeartPay por transação
+        $custoHeartpayPorTransacao = (float) config('heartpay.custo_fixo_por_transacao', 0.025);
         
         // Contar número de transações aprovadas
         $totalDepositos = (clone $solicitacoes)->count();
         $totalSaques = (clone $saques)->count();
         
-        // Calcular custos totais da TREEAL
-        $custosEntradas = $totalDepositos * $custoTreealPorTransacao;
-        $custosSaidas = $totalSaques * $custoTreealPorTransacao;
+        // Calcular custos totais da HeartPay
+        $custosEntradas = $totalDepositos * $custoHeartpayPorTransacao;
+        $custosSaidas = $totalSaques * $custoHeartpayPorTransacao;
         
         return [
             'entradas' => (float) $custosEntradas,
