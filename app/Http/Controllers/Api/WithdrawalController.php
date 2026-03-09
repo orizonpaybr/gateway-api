@@ -8,12 +8,12 @@ use App\Http\Requests\WithdrawalIndexRequest;
 use App\Http\Requests\WithdrawalStatsRequest;
 use App\Services\WithdrawalStatsService;
 use App\Services\FinancialService;
-use App\Services\TreealService;
+use App\Services\HeartPayService;
 use App\Services\BalanceService;
 use App\Models\App;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
-use App\Models\Treeal;
+use App\Models\HeartPay;
 use App\Helpers\Helper;
 use App\Constants\UserPermission;
 use Illuminate\Support\Facades\DB;
@@ -254,7 +254,7 @@ class WithdrawalController extends Controller
     /**
      * Aprovar uma solicitação de saque.
      * Apenas saques MANUAIS (PENDING) são aprovados aqui. Saque automático é processado na hora (PixKeyController/SaqueController).
-     * Valor + taxa já foram debitados na criação do saque manual; aqui só enviamos à Treeal e atualizamos o registro.
+     * Valor + taxa já foram debitados na criação do saque manual; aqui só enviamos ao adquirente e atualizamos o registro.
      */
     public function approve($id, Request $request)
     {
@@ -288,13 +288,13 @@ class WithdrawalController extends Controller
                 ], 404);
             }
 
-            // Valor + taxa já foram debitados na criação do saque; na aprovação só enviamos à Treeal e atualizamos o registro
+            // Valor + taxa já foram debitados na criação do saque; na aprovação só enviamos ao adquirente e atualizamos o registro
             $taxaEfetiva = $this->getTaxaEfetivaSaque($saque);
 
             // Determinar adquirente baseado no executor_ordem ou adquirente padrão
             $adquirente = $saque->executor_ordem ?? Helper::adquirenteDefault();
             
-            // Se não tem executor_ordem e adquirente padrão é Treeal, usar Treeal
+            // Se não tem executor_ordem, usar adquirente padrão (HeartPay)
             if (!$saque->executor_ordem) {
                 $adquirente = Helper::adquirenteDefault();
             }
@@ -308,8 +308,8 @@ class WithdrawalController extends Controller
 
             // Processar aprovação baseado no adquirente
             switch (strtolower($adquirente)) {
-                case 'treeal':
-                    $response = $this->approveWithTreeal($saque, $userSaque, $taxaEfetiva);
+                case 'heartpay':
+                    $response = $this->approveWithHeartPay($saque, $userSaque, $taxaEfetiva);
                     if ($response->getStatusCode() === 200) {
                         $this->statsService->invalidateCache();
                         $this->financialService->invalidateWalletsCache();
@@ -317,14 +317,13 @@ class WithdrawalController extends Controller
                         app(\App\Services\PaymentProcessingService::class)->invalidateCachesAfterPayment($saque->user_id);
                     }
                     return $response;
-                
+
                 case 'pagarme':
-                    // Pagar.me não suporta saques PIX diretamente
                     return response()->json([
                         'success' => false,
                         'message' => 'Este método de pagamento não suporta saques PIX.'
                     ], 500);
-                
+
                 default:
                     return response()->json([
                         'success' => false,
@@ -348,132 +347,105 @@ class WithdrawalController extends Controller
     }
 
     /**
-     * Aprovar saque usando Treeal
-     * Valor + taxa já foram debitados na criação do saque; aqui só enviamos à Treeal e atualizamos o registro.
-     * @param float $taxaCashOut Taxa efetiva cobrada (respeita customização do usuário)
+     * Aprovar saque usando HeartPay.
+     * Valor + taxa já foram debitados na criação; aqui criamos o payout na HeartPay e atualizamos o registro.
      */
-    private function approveWithTreeal(SolicitacoesCashOut $saque, User $userSaque, float $taxaCashOut)
+    private function approveWithHeartPay(SolicitacoesCashOut $saque, User $userSaque, float $taxaCashOut)
     {
         try {
-            $treealService = app(TreealService::class);
-            $treealConfig = Treeal::first();
+            $heartPayService = app(HeartPayService::class);
 
-            // Validar se Treeal está configurado e ativo
-            if (!$treealConfig || !$treealService->isActive()) {
+            if (!$heartPayService->isActive()) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Serviço de saque PIX indisponível no momento.'
                 ], 500);
             }
 
-            // Gerar idempotency key único
-            $idempotencyKey = str()->uuid()->toString();
+            $correlationID = preg_replace('/[^a-zA-Z0-9]/', '', str()->uuid()->toString());
 
-            // CORRIGIDO: Os campos no banco:
-            // - pix = valor da chave PIX (ex: "12345678901", "email@exemplo.com")
-            // - pixkey = tipo da chave PIX (ex: "cpf", "email", "telefone")
-            // Criar saque na API Treeal
-            Log::info('WithdrawalController::approveWithTreeal - Preparando aprovação', [
+            Log::info('WithdrawalController::approveWithHeartPay - Preparando aprovação', [
                 'saque_id' => $saque->id,
                 'pix_value' => $saque->pix,
                 'pix_type' => $saque->pixkey,
                 'amount' => $saque->amount,
             ]);
-            
-            $withdrawalResult = $treealService->createWithdrawalByPixKey(
+
+            $payoutResult = $heartPayService->createPayout(
                 (float) $saque->amount,
-                $saque->pix, // CORRIGIDO: pix contém o valor da chave PIX
+                $saque->pix,
+                $saque->pixkey,
                 'Saque aprovado manualmente - ID: ' . $saque->id,
-                $idempotencyKey,
-                $saque->pixkey // CORRIGIDO: pixkey contém o tipo da chave PIX
+                $correlationID
             );
 
-            if (!$withdrawalResult['success']) {
-                Log::error('WithdrawalController::approveWithTreeal - Erro ao criar saque na API', [
-                    'error' => $withdrawalResult['message'] ?? 'Erro desconhecido',
-                    'saque_id' => $saque->id
+            if (!$payoutResult['success']) {
+                Log::error('WithdrawalController::approveWithHeartPay - Erro ao criar payout', [
+                    'error' => $payoutResult['message'] ?? 'Erro desconhecido',
+                    'saque_id' => $saque->id,
                 ]);
                 return response()->json([
                     'success' => false,
-                    'message' => $withdrawalResult['message'] ?? 'Erro ao processar saque PIX'
+                    'message' => $payoutResult['message'] ?? 'Erro ao processar saque PIX'
                 ], 500);
             }
 
-            $transactionId = $withdrawalResult['transaction_id'] ?? $withdrawalResult['id'] ?? null;
-            $status = $withdrawalResult['status'] ?? 'PROCESSING';
+            $referenceCode = $payoutResult['referenceCode'] ?? $correlationID;
+            $hpStatus      = $payoutResult['status'] ?? 'pending';
+            $statusInterno = HeartPayService::mapPayoutStatus($hpStatus);
 
-            // Mapear status da Treeal para status interno
-            $statusInterno = $this->mapTreealStatusToInternal($status);
-
-            // Atualizar saque em transação (valor + taxa já foram debitados na criação do saque)
-            $endToEnd = $withdrawalResult['end_to_end_id'] ?? null;
-
-            DB::transaction(function () use ($saque, $transactionId, $statusInterno, $taxaCashOut, $endToEnd, $idempotencyKey) {
+            DB::transaction(function () use ($saque, $referenceCode, $statusInterno, $taxaCashOut, $correlationID) {
                 $saqueAtualizado = SolicitacoesCashOut::where('id', $saque->id)
                     ->lockForUpdate()
                     ->first();
 
                 if (in_array($saqueAtualizado->status, ['COMPLETED', 'PAID_OUT'])) {
-                    Log::info('WithdrawalController::approveWithTreeal - Saque já processado', [
+                    Log::info('WithdrawalController::approveWithHeartPay - Saque já processado', [
                         'saque_id' => $saque->id,
-                        'status' => $saqueAtualizado->status
+                        'status' => $saqueAtualizado->status,
                     ]);
                     return;
                 }
 
                 $saqueAtualizado->update([
-                    'status' => $statusInterno,
-                    'externalreference' => $transactionId ?? $saqueAtualizado->externalreference,
-                    'idTransaction' => $transactionId ?? $saqueAtualizado->idTransaction,
-                    'executor_ordem' => 'Treeal',
-                    'end_to_end' => $endToEnd ?? $saqueAtualizado->end_to_end,
-                    'taxa_cash_out' => $taxaCashOut,
-                    'descricao_externa' => $idempotencyKey,
+                    'status'            => $statusInterno,
+                    'externalreference' => $referenceCode,
+                    'idTransaction'     => $referenceCode,
+                    'executor_ordem'    => 'HeartPay',
+                    'taxa_cash_out'     => $taxaCashOut,
+                    'descricao_externa' => $correlationID,
                 ]);
             });
 
             Helper::calculaSaldoLiquido($userSaque->user_id);
 
-            Log::info('WithdrawalController::approveWithTreeal - Saque aprovado com sucesso', [
+            Log::info('WithdrawalController::approveWithHeartPay - Saque aprovado', [
                 'saque_id' => $saque->id,
-                'transaction_id' => $transactionId,
+                'referenceCode' => $referenceCode,
                 'status' => $statusInterno,
-                'user_id' => $userSaque->user_id
             ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Saque aprovado e processado com sucesso.',
                 'data' => [
-                    'transaction_id' => $transactionId,
-                    'status' => $statusInterno
+                    'transaction_id' => $referenceCode,
+                    'status' => $statusInterno,
                 ]
             ], 200);
 
         } catch (\Exception $e) {
-            Log::error('WithdrawalController::approveWithTreeal - Exceção', [
+            Log::error('WithdrawalController::approveWithHeartPay - Exceção', [
                 'saque_id' => $saque->id,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
-            throw $e;
-        }
-    }
 
-    /**
-     * Mapear status da Treeal para status interno
-     */
-    private function mapTreealStatusToInternal(string $statusTreeal): string
-    {
-        $statusNormalizado = strtoupper(trim($statusTreeal));
-        
-        return match($statusNormalizado) {
-            'PROCESSING', 'PENDING' => 'PROCESSING',
-            'COMPLETED', 'CONCLUIDO', 'PAID' => 'COMPLETED',
-            'FAILED', 'FALHOU', 'ERROR' => 'FAILED',
-            'CANCELLED', 'CANCELADO' => 'CANCELLED',
-            default => 'PROCESSING'
-        };
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro ao aprovar saque PIX: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
@@ -612,7 +584,7 @@ class WithdrawalController extends Controller
             'PAID_OUT' => 'Pago',
             'CANCELLED' => 'Cancelado',
             'FAILED' => 'Falhou',
-            'PROCESSING' => 'Concluído', // Treeal: PROCESSING = PIX enviado
+            'PROCESSING' => 'Concluído',
         ];
 
         return $labels[$status] ?? $status;

@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\Log;
 /**
  * Repassa o evento de pagamento/saque confirmado para a URL de callback do cliente.
  *
- * Fluxo: Treeal → nossa API → processamento interno → este job → URL do cliente (e-commerce, etc.)
+ * Fluxo: Adquirente (HeartPay) → nossa API → processamento interno → este job → URL do cliente (e-commerce, etc.)
  *
  * Falhas neste job NÃO afetam o processamento financeiro interno. O job loga o erro e encerra
  * sem relançar exceção, evitando retentativas infinitas que poderiam sobrecarregar a fila.

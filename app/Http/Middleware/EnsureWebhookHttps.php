@@ -10,7 +10,7 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * Garante que a URL de callback do webhook seja acessada apenas via HTTPS.
  *
- * Conformidade com a documentação Treeal: "A URL de retorno opera exclusivamente
+ * Conformidade com documentação de webhooks: "A URL de retorno opera exclusivamente
  * no protocolo HTTPS?". Em produção rejeita requisições HTTP a esta rota.
  */
 class EnsureWebhookHttps

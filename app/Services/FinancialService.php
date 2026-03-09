@@ -381,13 +381,13 @@ class FinancialService
             $mesInicio = $now->copy()->startOfMonth();
             $mesFim = $now->copy()->endOfMonth();
 
-            // Custo fixo da TREEAL por transação
-            $custoTreealPorTransacao = (float) config('treeal.custo_fixo_por_transacao');
+            // Custo fixo HeartPay por transação
+            $custoHeartpayPorTransacao = (float) config('heartpay.custo_fixo_por_transacao', 0.025);
             
             // Usar uma única query com subqueries para melhor performance
             // Isso reduz o número de round-trips ao banco
-            // IMPORTANTE: TODOS os saques são processados pela TREEAL, incluindo os manuais
-            // Portanto, calcular lucro líquido subtraindo o custo da TREEAL de TODOS os saques
+            // IMPORTANTE: TODOS os saques são processados pela HeartPay, incluindo os manuais
+            // Portanto, calcular lucro líquido subtraindo o custo da HeartPay de TODOS os saques
             $stats = DB::selectOne("
                 SELECT 
                     -- Estatísticas gerais
@@ -408,20 +408,20 @@ class FinancialService
             ", array_merge(
                 self::APPROVED_STATUSES, // saques_aprovados_geral
                 self::APPROVED_STATUSES, // valor_total_geral
-                [$custoTreealPorTransacao], // custo TREEAL para lucro_total_geral
+                [$custoHeartpayPorTransacao], // custo HeartPay para lucro_total_geral
                 self::APPROVED_STATUSES, // lucro_total_geral
                 [$hojeInicio, $hojeFim], // saques_aprovados_hoje
                 self::APPROVED_STATUSES,
                 [$hojeInicio, $hojeFim], // valor_total_hoje
                 self::APPROVED_STATUSES,
-                [$custoTreealPorTransacao], // custo TREEAL para lucro_total_hoje
+                [$custoHeartpayPorTransacao], // custo HeartPay para lucro_total_hoje
                 [$hojeInicio, $hojeFim], // lucro_total_hoje
                 self::APPROVED_STATUSES,
                 [$mesInicio, $mesFim], // saques_aprovados_mes
                 self::APPROVED_STATUSES,
                 [$mesInicio, $mesFim], // valor_total_mes
                 self::APPROVED_STATUSES,
-                [$custoTreealPorTransacao], // custo TREEAL para lucro_total_mes
+                [$custoHeartpayPorTransacao], // custo HeartPay para lucro_total_mes
                 [$mesInicio, $mesFim], // lucro_total_mes
                 self::APPROVED_STATUSES,
                 ['PENDING'] // saques_pendentes_geral
@@ -514,9 +514,9 @@ class FinancialService
      */
     private function getDepositsStatsAggregated(array $dateRange): array
     {
-        // Calcular lucro líquido: taxa_cash_in - custo TREEAL
-        // IMPORTANTE: Para transações TREEAL sem taxa_pix_cash_in_adquirente ou com valor 0, usar custo fixo
-        $custoTreealPorTransacao = (float) config('treeal.custo_fixo_por_transacao');
+        // Calcular lucro líquido: taxa_cash_in - custo HeartPay
+        // IMPORTANTE: Para transações HeartPay sem taxa_pix_cash_in_adquirente ou com valor 0, usar custo fixo
+        $custoHeartpayPorTransacao = (float) config('heartpay.custo_fixo_por_transacao', 0.025);
         
         $stats = Solicitacoes::whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
             ->selectRaw('
@@ -524,9 +524,9 @@ class FinancialService
                 SUM(CASE WHEN status IN (?, ?) THEN (
                     taxa_cash_in - 
                     CASE 
-                        WHEN (adquirente_ref = \'Treeal\' OR executor_ordem = \'Treeal\') 
+                        WHEN (adquirente_ref = \'HeartPay\' OR executor_ordem = \'HeartPay\') 
                              AND (taxa_pix_cash_in_adquirente IS NULL OR taxa_pix_cash_in_adquirente = 0)
-                        THEN ' . $custoTreealPorTransacao . '
+                        THEN ' . $custoHeartpayPorTransacao . '
                         WHEN taxa_pix_cash_in_adquirente IS NOT NULL AND taxa_pix_cash_in_adquirente > 0
                         THEN taxa_pix_cash_in_adquirente
                         ELSE 0
@@ -546,7 +546,7 @@ class FinancialService
      */
     private function getWithdrawalsStatsAggregated(array $dateRange): array
     {
-        $custoTreealPorTransacao = (float) config('treeal.custo_fixo_por_transacao');
+        $custoHeartpayPorTransacao = (float) config('heartpay.custo_fixo_por_transacao', 0.025);
         
         $stats = SolicitacoesCashOut::whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
             ->selectRaw('
@@ -560,10 +560,10 @@ class FinancialService
 
         $totalSaques = (int) ($stats->aprovadas ?? 0);
         $taxaTotal = (float) ($stats->taxa_total ?? 0);
-        // TODOS os saques são processados pela TREEAL, incluindo os manuais
+        // TODOS os saques são processados pela HeartPay, incluindo os manuais
         // Portanto, TODOS os saques têm custo de 4 centavos por transação
-        $custoTreeal = $totalSaques * $custoTreealPorTransacao;
-        $lucro = $taxaTotal - $custoTreeal;
+        $custoHeartpay = $totalSaques * $custoHeartpayPorTransacao;
+        $lucro = $taxaTotal - $custoHeartpay;
 
         return [
             'aprovadas' => $totalSaques,
@@ -577,24 +577,24 @@ class FinancialService
     private function calculateProfit(string $periodo): float
     {
         $dateRange = $this->getDateRange($periodo);
-        $custoTreealPorTransacao = (float) config('treeal.custo_fixo_por_transacao');
+        $custoHeartpayPorTransacao = (float) config('heartpay.custo_fixo_por_transacao', 0.025);
 
-        // Lucro líquido de depósitos: taxa_cash_in - custo TREEAL
-        // IMPORTANTE: Para transações TREEAL sem taxa_pix_cash_in_adquirente ou com valor 0, usar custo fixo
+        // Lucro líquido de depósitos: taxa_cash_in - custo HeartPay
+        // IMPORTANTE: Para transações HeartPay sem taxa_pix_cash_in_adquirente ou com valor 0, usar custo fixo
         $lucroDepositos = Solicitacoes::whereIn('status', self::APPROVED_STATUSES)
             ->whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
             ->sum(DB::raw("taxa_cash_in - 
                 CASE 
-                    WHEN (adquirente_ref = 'Treeal' OR executor_ordem = 'Treeal') 
+                    WHEN (adquirente_ref = 'HeartPay' OR executor_ordem = 'HeartPay') 
                          AND (taxa_pix_cash_in_adquirente IS NULL OR taxa_pix_cash_in_adquirente = 0)
-                    THEN {$custoTreealPorTransacao}
+                    THEN {$custoHeartpayPorTransacao}
                     WHEN taxa_pix_cash_in_adquirente IS NOT NULL AND taxa_pix_cash_in_adquirente > 0
                     THEN taxa_pix_cash_in_adquirente
                     ELSE 0
                 END"));
 
-        // Lucro líquido de saques: taxa_cash_out - (número total de saques * custo TREEAL)
-        // IMPORTANTE: TODOS os saques são processados pela TREEAL, incluindo os manuais
+        // Lucro líquido de saques: taxa_cash_out - (número total de saques * custo HeartPay)
+        // IMPORTANTE: TODOS os saques são processados pela HeartPay, incluindo os manuais
         // Portanto, TODOS os saques têm custo de 4 centavos por transação
         $totalSaques = SolicitacoesCashOut::whereIn('status', self::APPROVED_STATUSES)
             ->whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
@@ -604,9 +604,9 @@ class FinancialService
             ->whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
             ->sum('taxa_cash_out');
         
-        // TODOS os saques são processados pela TREEAL, então todos têm custo de 4 centavos por transação
-        $custoTreealSaques = $totalSaques * $custoTreealPorTransacao;
-        $lucroSaques = $taxaTotalSaques - $custoTreealSaques;
+        // TODOS os saques são processados pela HeartPay, então todos têm custo de 4 centavos por transação
+        $custoHeartpaySaques = $totalSaques * $custoHeartpayPorTransacao;
+        $lucroSaques = $taxaTotalSaques - $custoHeartpaySaques;
 
         return (float) ($lucroDepositos + $lucroSaques);
     }

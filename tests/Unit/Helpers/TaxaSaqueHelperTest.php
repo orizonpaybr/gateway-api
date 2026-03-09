@@ -22,7 +22,7 @@ class TaxaSaqueHelperTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        config(['treeal.custo_fixo_por_transacao' => 0.04]);
+        config(['heartpay.custo_fixo_por_transacao' => 0.025]);
         $this->setting = App::create([
             'taxa_fixa_padrao' => 1.00,
             'taxa_fixa_pix' => 1.00,
@@ -47,8 +47,8 @@ class TaxaSaqueHelperTest extends TestCase
         $this->assertEquals(50.00, $result['saque_liquido']);
         $this->assertEquals(51.00, $result['valor_total_descontar']);
         $this->assertEquals('GLOBAL_API_FIXA', $result['descricao']);
-        // taxa_aplicacao = taxa fixa - custo Treeal - comissão afiliado = 1.00 - 0.04 - 0 = 0.96
-        $this->assertEquals(0.96, round($result['taxa_aplicacao'], 2));
+        // taxa_aplicacao = taxa fixa - custo HeartPay - comissão afiliado = 1.00 - 0.025 - 0 (round 0.975→0.98)
+        $this->assertEquals(0.98, round($result['taxa_aplicacao'], 2));
         $this->assertEquals(0.00, $result['comissao_afiliado']);
     }
 
@@ -90,8 +90,8 @@ class TaxaSaqueHelperTest extends TestCase
 
         $this->assertEquals(1.00, $result['taxa_cash_out']);
         $this->assertEquals(0.50, $result['comissao_afiliado']);
-        // taxa_aplicacao = 1.00 - 0.04 (Treeal) - 0.50 (afiliado) = 0.46
-        $this->assertEquals(0.46, round($result['taxa_aplicacao'], 2));
+        // taxa_aplicacao = 1.00 - 0.025 (HeartPay) - 0.50 (afiliado) (round 0.475→0.48)
+        $this->assertEquals(0.48, round($result['taxa_aplicacao'], 2));
     }
 
     /** @test */

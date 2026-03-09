@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Log;
  * 1. Taxa global padrão: R$ 1,00 (taxa_fixa_pix) para todos os usuários
  * 2. Taxa personalizada: pode ser definida por usuário (taxa_fixa_pix do user)
  * 3. A taxa NÃO muda se houver afiliado - a comissão sai da taxa fixa
- * 4. Split da taxa: Treeal (R$ 0,04) → Afiliado (R$ 0,50 se houver) → Orizon (resto)
+ * 4. Split da taxa: Adquirente PIX (R$ 0,025) → Afiliado (R$ 0,50 se houver) → Orizon (resto)
  * 5. Cliente sempre recebe o valor solicitado; taxa é descontada do saldo
  *
  * EXEMPLOS (mesmo padrão do depósito):
@@ -22,17 +22,17 @@ use Illuminate\Support\Facades\Log;
  * Caso 1: Taxa global R$ 1,00, sem afiliado, saque R$ 5,00
  * - Cliente recebe: R$ 5,00
  * - Saldo descontado: R$ 6,00 (5 + 1)
- * - Taxa: R$ 1,00 → Treeal R$ 0,04 + Orizon R$ 0,96
+ * - Taxa: R$ 1,00 → Adquirente R$ 0,025 + Orizon R$ 0,975
  *
  * Caso 2: Taxa personalizada R$ 0,90, sem afiliado, saque R$ 5,00
  * - Cliente recebe: R$ 5,00
  * - Saldo descontado: R$ 5,90 (5 + 0,90)
- * - Taxa: R$ 0,90 → Treeal R$ 0,04 + Orizon R$ 0,86
+ * - Taxa: R$ 0,90 → Adquirente R$ 0,025 + Orizon R$ 0,875
  *
  * Caso 3: Taxa personalizada R$ 0,90, COM afiliado, saque R$ 5,00
  * - Cliente recebe: R$ 5,00 (taxa NÃO muda com afiliado)
  * - Saldo descontado: R$ 5,90 (5 + 0,90)
- * - Taxa: R$ 0,90 → Treeal R$ 0,04 + Afiliado R$ 0,50 + Orizon R$ 0,36
+ * - Taxa: R$ 0,90 → Adquirente R$ 0,025 + Afiliado R$ 0,50 + Orizon R$ 0,375
  */
 class TaxaSaqueHelper
 {
@@ -49,8 +49,8 @@ class TaxaSaqueHelper
      *   'saque_liquido' => float,          // Valor que o cliente recebe
      *   'descricao' => string,             // Descrição do tipo de taxa
      *   'valor_total_descontar' => float,  // Total a ser descontado do saldo
-     *   'taxa_aplicacao' => float,         // Lucro líquido da aplicação (taxa - custo TREEAL)
-     *   'taxa_adquirente' => float         // Custo da TREEAL
+     *   'taxa_aplicacao' => float,         // Lucro líquido da aplicação (taxa - custo adquirente)
+     *   'taxa_adquirente' => float         // Custo do adquirente PIX (HeartPay)
      * ]
      */
     public static function calcularTaxaSaque($amount, $setting, $user, $isInterfaceWeb = false, $taxaPorFora = false)
@@ -125,19 +125,18 @@ class TaxaSaqueHelper
             ]);
         }
         
-        // Custo fixo da TREEAL por transação (já descontado automaticamente por ela)
-        $custoTreeal = (float) config('treeal.custo_fixo_por_transacao');
+        // Custo fixo HeartPay por transação (R$ 0,025). Futuras adquirentes: cada uma com seu nome.
+        $custoHeartpay = (float) config('heartpay.custo_fixo_por_transacao', 0.025);
         
-        // Lucro líquido da aplicação = taxa fixa - custo TREEAL - comissão afiliado
-        // A comissão do afiliado e o custo Treeal saem da taxa fixa
-        $lucroAplicacao = max(0, $taxaTotal - $custoTreeal - $comissaoAfiliado);
+        // Lucro líquido da aplicação = taxa fixa - custo HeartPay - comissão afiliado
+        $lucroAplicacao = max(0, $taxaTotal - $custoHeartpay - $comissaoAfiliado);
 
         Log::info('TaxaSaqueHelper: Taxas calculadas', [
             'user_id' => $user->user_id ?? 'N/A',
             'isInterfaceWeb' => $isInterfaceWeb,
             'taxa_total' => $taxaTotal,
             'comissao_afiliado' => $comissaoAfiliado,
-            'custo_treeal' => $custoTreeal,
+            'custo_heartpay' => $custoHeartpay,
             'lucro_aplicacao' => $lucroAplicacao,
             'descricao' => $descricao
         ]);
@@ -166,7 +165,7 @@ class TaxaSaqueHelper
             [
                 'amount_solicitado' => $amount,
                 'taxa_total' => $taxaTotal,
-                'custo_treeal' => $custoTreeal,
+                'custo_heartpay' => $custoHeartpay,
                 'lucro_aplicacao' => $lucroAplicacao,
                 'valor_total_descontar' => $valor_total_descontar,
                 'is_interface_web' => $isInterfaceWeb,
@@ -182,14 +181,14 @@ class TaxaSaqueHelper
                 'saque_liquido' => $saque_liquido,
                 'valor_total_descontar' => $valor_total_descontar,
                 'lucro_aplicacao' => $lucroAplicacao,
-                'custo_treeal' => $custoTreeal
+                'custo_heartpay' => $custoHeartpay
             ]
         ]);
 
         return [
             'taxa_cash_out' => $taxa_cash_out,       // Taxa fixa cobrada do cliente (NÃO muda com afiliado)
-            'taxa_aplicacao' => $lucroAplicacao,    // Lucro Orizon (taxa - Treeal - afiliado)
-            'taxa_adquirente' => $custoTreeal,      // Custo da TREEAL (R$ 0,04)
+            'taxa_aplicacao' => $lucroAplicacao,    // Lucro Orizon (taxa - HeartPay - afiliado)
+            'taxa_adquirente' => $custoHeartpay,
             'comissao_afiliado' => $comissaoAfiliado, // Comissão do pai afiliado (R$ 0,50 se houver)
             'saque_liquido' => $saque_liquido,       // Valor que o cliente recebe (sempre o valor solicitado)
             'descricao' => $descricao,

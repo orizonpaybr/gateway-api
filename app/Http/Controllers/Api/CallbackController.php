@@ -14,563 +14,173 @@ use App\Models\App;
 use App\Helpers\SecureLog;
 use App\Helpers\WebhookClientMessages;
 use App\Jobs\ClientWebhookDispatchJob;
-use App\Jobs\ProcessTreealCashInJob;
-use App\Jobs\ProcessTreealCashInRefundJob;
-use App\Jobs\ProcessTreealCashOutJob;
-use App\Jobs\ProcessTreealInfractionJob;
+use App\Jobs\ProcessHeartPayCashInJob;
+use App\Jobs\ProcessHeartPayCashOutJob;
+use App\Jobs\ProcessHeartPayDisputeJob;
+use App\Jobs\ProcessHeartPayRefundJob;
 use App\Services\PaymentProcessingService;
 
 class CallbackController extends Controller
 {
+    // ═══════════════════════════════════════════════════════════════════
+    //  HeartPay Webhook
+    // ═══════════════════════════════════════════════════════════════════
+
     /**
-     * Webhook da Treeal/ONZ para depósitos PIX (Cash In) e saques (Cash Out).
+     * Webhook da HeartPay para todos os eventos PIX.
      *
      * Fluxo assíncrono:
-     * 1. WebhookService cria WebhookLog (QUEUED) — ~2 queries.
-     * 2. Job é despachado para a fila.
-     * 3. Responde 200 à Treeal em ~50–100 ms.
-     * 4. Job processa pagamento/saque em background e marca PROCESSED/FAILED.
-     *
-     * @param Request $request
-     * @return \Illuminate\Http\JsonResponse
+     * 1. WebhookService cria WebhookLog (QUEUED).
+     * 2. Job é despachado para a fila conforme o tipo de evento.
+     * 3. Responde 200 à HeartPay em ~50–100 ms.
+     * 4. Job processa em background e marca PROCESSED/FAILED.
      */
-    public function webhookTreeal(Request $request)
+    public function webhookHeartPay(Request $request)
     {
         $start          = microtime(true);
         $webhookService = app(\App\Services\WebhookService::class);
 
-        return $webhookService->processWebhook($request, 'treeal', function ($webhookLog) use ($request, $start) {
-            $data = $request->all();
-            SecureLog::webhook('TREEAL', 'WEBHOOK', $data);
+        return $webhookService->processWebhook($request, 'heartpay', function ($webhookLog) use ($request, $start) {
+            $data  = $request->all();
+            SecureLog::webhook('HEARTPAY', 'WEBHOOK', $data);
 
-            $inner       = isset($data['data']) && is_array($data['data']) ? $data['data'] : null;
-            $webhookType = $inner['webhookType'] ?? $data['type'] ?? null;
+            $event = $data['event']
+                ?? $data['data']['event']
+                ?? $request->header('X-HeartPay-Event')
+                ?? null;
 
-            if ($inner && $webhookType === 'TRANSFER') {
-                $endToEndId = $inner['endToEndId'] ?? null;
-                $onzId      = isset($inner['id']) ? (string) $inner['id'] : null;
-                $cashOutId  = $endToEndId ?? $onzId;
-                $status     = $inner['status'] ?? null;
-
-                if (!$cashOutId) {
-                    Log::warning('[TREEAL] Webhook TRANSFER sem endToEndId/id', ['data' => $data]);
-                    return response()->json(['status' => false, 'message' => 'ID não encontrado no webhook TRANSFER'], 400);
-                }
-
-                return $this->handleTreealCashOutWebhook((string) $cashOutId, $status, $inner, $webhookLog, $start);
+            if (!$event) {
+                Log::warning('[HEARTPAY] Webhook sem campo event', ['data' => $data]);
+                return response()->json(['status' => false, 'message' => 'Campo event ausente'], 400);
             }
 
-            // ── Estorno (webhookType: REFUND) — Treeal: mesmo webhook para cash-in e cash-out; txid preenchido = cash-in
-            if ($inner && $webhookType === 'REFUND') {
-                $txid = $inner['txid'] ?? $inner['txId'] ?? null;
-                $txid = $txid !== null && $txid !== '' ? (string) $txid : null;
+            Log::info('[HEARTPAY] Webhook recebido', [
+                'event'  => $event,
+                'is_test' => $request->header('X-HeartPay-Test') === 'true',
+            ]);
 
-                if ($txid !== null) {
-                    ProcessTreealCashInRefundJob::dispatch($txid, $webhookLog->id)->onQueue('webhooks');
-                    $durationMs = round((microtime(true) - $start) * 1000, 2);
-                    Log::info('[TREEAL] Cash In Refund enfileirado', ['txid' => $txid, 'duration_ms' => $durationMs]);
-                    return ['async' => true, 'response' => response()->json(['status' => true, 'message' => 'Webhook aceito'])];
-                }
+            $innerData = $data['data'] ?? $data;
 
-                $cashOutId = $inner['transactionId'] ?? $inner['endToEndId'] ?? $inner['id'] ?? null;
-                if ($cashOutId !== null && $cashOutId !== '') {
-                    return $this->handleTreealCashOutWebhook((string) $cashOutId, 'REFUNDED', $inner, $webhookLog, $start);
-                }
+            return match ($event) {
+                'PayInCreated'     => $this->heartPayDispatchCashIn($event, $innerData, $webhookLog, $start),
+                'PayInCompleted'   => $this->heartPayDispatchCashIn($event, $innerData, $webhookLog, $start),
+                'PayInCancelled'   => $this->heartPayDispatchCashIn($event, $innerData, $webhookLog, $start),
+                'charge.paid'      => $this->heartPayDispatchCashIn('PayInCompleted', $innerData, $webhookLog, $start),
+                'charge.expired'   => $this->heartPayDispatchCashIn('PayInCancelled', $innerData, $webhookLog, $start),
+                'charge.refunded'  => $this->heartPayDispatchRefund('PayInRefunded', $innerData, $webhookLog, $start),
 
-                Log::warning('[TREEAL] Webhook REFUND sem txid nem transactionId', ['data' => $data]);
-                return response()->json(['status' => false, 'message' => 'REFUND sem identificador'], 400);
-            }
+                'PayInRefunded'    => $this->heartPayDispatchRefund($event, $innerData, $webhookLog, $start),
+                'PayOutRefunded'   => $this->heartPayDispatchRefund($event, $innerData, $webhookLog, $start),
 
-            // ── Infração PIX (webhookType: INFRACTION) ─────────────────────────
-            if ($inner && $webhookType === 'INFRACTION') {
-                return $this->handleTreealInfractionWebhook($inner, $webhookLog, $start);
-            }
+                'PayOutCompleted', 'PAYOUT_COMPLETED',
+                'payout.completed' => $this->heartPayDispatchCashOut('PayOutCompleted', $innerData, $webhookLog, $start),
 
-            // ── Cash Out direto (webhookType: CASHOUT) — Treeal notifica REJECTED/CANCELED/etc.
-            if ($inner && $webhookType === 'CASHOUT') {
-                $endToEndId = $inner['endToEndId'] ?? null;
-                $idempotencyKey = $inner['idempotencyKey'] ?? $data['transaction']['reference'] ?? null;
-                $onzId = isset($inner['id']) ? (string) $inner['id'] : null;
-                $cashOutId = $endToEndId ?? $idempotencyKey ?? $onzId;
-                $status = $inner['status'] ?? $data['transaction']['status'] ?? null;
+                'PayOutFailed', 'PAYOUT_FAILED',
+                'payout.failed'    => $this->heartPayDispatchCashOut('PayOutFailed', $innerData, $webhookLog, $start),
 
-                if ($cashOutId) {
-                    return $this->handleTreealCashOutWebhook((string) $cashOutId, $status, $inner, $webhookLog, $start);
-                }
+                'PAYOUT_CREATED'   => $this->heartPayDispatchCashOut($event, $innerData, $webhookLog, $start),
+                'PAYOUT_APPROVED'  => $this->heartPayDispatchCashOut($event, $innerData, $webhookLog, $start),
+                'PAYOUT_REJECTED'  => $this->heartPayDispatchCashOut($event, $innerData, $webhookLog, $start),
 
-                Log::warning('[TREEAL] Webhook CASHOUT sem identificador', ['data' => $data]);
-                return response()->json(['status' => false, 'message' => 'CASHOUT sem identificador'], 400);
-            }
+                'DisputeCreated'   => $this->heartPayDispatchDispute($event, $innerData, $webhookLog, $start),
+                'DisputeCanceled'  => $this->heartPayDispatchDispute($event, $innerData, $webhookLog, $start),
 
-            if ($inner && in_array($webhookType, ['PIX', 'RECEIVING', 'CHARGE', 'RECEIVE'])) {
-                $txid   = $inner['txid'] ?? $inner['txId'] ?? null;
-                $status = $inner['status'] ?? null;
-                return $this->handleTreealCashInWebhook($txid, $status, $inner, $webhookLog, $start);
-            }
-
-            // ── Fallback: payload plano sem wrapper "data" (QRCodes API / legado) ─
-            // O webhook de Cash In da QRCodes API vem plano e inclui txid + endToEndId.
-            // txid SEMPRE indica Cash In — verificar antes de checar endToEndId/transactionId.
-            $txid       = $data['txid'] ?? $data['txId'] ?? null;
-            $status     = $data['status'] ?? $data['paymentStatus'] ?? null;
-            $endToEndId = $data['endToEndId'] ?? $data['end_to_end_id'] ?? null;
-
-            if (isset($data['txid']) || isset($data['txId'])) {
-                return $this->handleTreealCashInWebhook($txid, $status, $data, $webhookLog, $start);
-            }
-
-            // Sem txid → pode ser Cash Out plano (legado)
-            if (isset($data['transactionId']) || isset($data['endToEndId']) || isset($data['end_to_end_id'])) {
-                $cashOutId = $data['transactionId'] ?? $endToEndId ?? $data['id'] ?? null;
-                if ($cashOutId !== null && $cashOutId !== '') {
-                    return $this->handleTreealCashOutWebhook((string) $cashOutId, $status, $data, $webhookLog, $start);
-                }
-                Log::warning('[TREEAL] Webhook Cash Out plano sem identificador', ['data' => $data]);
-                return response()->json(['status' => false, 'message' => 'transactionId ou endToEndId não encontrado'], 400);
-            }
-
-            Log::warning('[TREEAL] Webhook com formato desconhecido', ['data' => $data, 'webhookType' => $webhookType]);
-
-            return response()->json(['status' => true, 'message' => 'Webhook recebido']);
+                default => $this->heartPayUnknownEvent($event, $data, $start),
+            };
         });
     }
 
-    /**
-     * Processa webhook de depósito PIX (Cash In) da Treeal — modo assíncrono.
-     *
-     * Verifica se o pagamento é confirmado; se sim, despacha ProcessTreealCashInJob
-     * e retorna 200 imediatamente. O crédito ao saldo ocorre via job worker.
-     */
-    private function handleTreealCashInWebhook($txid, $status, $data, $webhookLog, float $start)
+    private function heartPayExtractCorrelation(array $inner): string
     {
-        if (!$txid) {
-            Log::warning('[TREEAL] Webhook Cash In sem txid', ['data' => $data]);
-            return response()->json(['status' => false, 'message' => 'txid não encontrado'], 400);
-        }
+        $nested = $inner['data'] ?? $inner;
+        return $nested['correlationID']
+            ?? $nested['correlation_id']
+            ?? $nested['txid']
+            ?? $nested['referenceCode']
+            ?? $nested['reference_code']
+            ?? 'unknown';
+    }
 
-        // Treeal pode enviar webhook sem campo "status" → considerar CONCLUIDA
-        $statusNormalized   = $status !== null && $status !== '' ? strtoupper((string) $status) : 'CONCLUIDA';
-        $isPaymentConfirmed = in_array($statusNormalized, ['CONCLUIDA', 'ATIVA', 'PAID', 'COMPLETED', 'LIQUIDATED', 'PAID_OUT']);
-        $isRefund = in_array($statusNormalized, ['REFUNDED', 'PARTIALLY_REFUNDED']);
+    private function heartPayExtractTransactionRef(array $inner): string
+    {
+        $nested = $inner['data'] ?? $inner;
+        return $nested['correlationID']
+            ?? $nested['referenceCode']
+            ?? $nested['reference_code']
+            ?? $nested['txid']
+            ?? $nested['endToEndId']
+            ?? 'unknown';
+    }
 
-        if ($isRefund) {
-            ProcessTreealCashInRefundJob::dispatch($txid, $webhookLog->id)->onQueue('webhooks');
-            $durationMs = round((microtime(true) - $start) * 1000, 2);
-            Log::info('[TREEAL] Cash In Refund (status no payload) enfileirado', ['txid' => $txid, 'duration_ms' => $durationMs]);
-            return ['async' => true, 'response' => response()->json(['status' => true, 'message' => 'Webhook aceito'])];
-        }
+    private function heartPayDispatchCashIn(string $event, array $innerData, $webhookLog, float $start): array
+    {
+        $correlationID = $this->heartPayExtractCorrelation($innerData);
 
-        if ($isPaymentConfirmed) {
-            // Enfileirar processamento assíncrono
-            ProcessTreealCashInJob::dispatch($txid, $webhookLog->id)->onQueue('webhooks');
+        ProcessHeartPayCashInJob::dispatch($event, $correlationID, $innerData, $webhookLog->id)
+            ->onQueue('webhooks');
 
-            $durationMs = round((microtime(true) - $start) * 1000, 2);
-            Log::info('[TREEAL] Cash In enfileirado', [
-                'txid'        => $txid,
-                'status'      => $status,
-                'duration_ms' => $durationMs,
-            ]);
-
-            return ['async' => true, 'response' => response()->json(['status' => true, 'message' => 'Webhook aceito'])];
-        }
-
-        // Status não confirmado (FAILED, CANCELLED, PROCESSING, etc.) → atualizar e notificar cliente
-        $internalStatus = $this->mapTreealStatusToInternal($status);
-        $cashin = Solicitacoes::where('idTransaction', $txid)
-            ->orWhere('externalreference', $txid)
-            ->first();
-
-        if ($cashin && $cashin->status !== $internalStatus) {
-            $cashin->update(['status' => $internalStatus]);
-
-            if (!empty($cashin->callback) && $cashin->callback !== 'web') {
-                $endToEndId = $data['endToEndId'] ?? $data['end_to_end_id'] ?? null;
-                $extra = [
-                    'typeTransaction' => 'PIX_IN',
-                    'txid'            => $txid,
-                    'endToEndId'      => $endToEndId,
-                    'payer' => [
-                        'name'     => $cashin->payer_name ?? $cashin->client_name ?? null,
-                        'document' => $cashin->payer_document ?? $cashin->client_document ?? null,
-                    ],
-                    'receiver' => [
-                        'user_id' => $cashin->user_id ?? null,
-                    ],
-                ];
-                $message = WebhookClientMessages::getMessageForStatus($internalStatus, 'PIX_IN', $data);
-                ClientWebhookDispatchJob::dispatch(
-                    $cashin->callback,
-                    $cashin->idTransaction ?? (string) $cashin->id,
-                    $internalStatus,
-                    (float) $cashin->amount,
-                    now()->toIso8601String(),
-                    $extra,
-                    $message
-                )->onQueue('webhooks');
-
-                Log::info('[TREEAL] Cash In webhook repassado ao cliente', [
-                    'txid'   => $txid,
-                    'status' => $internalStatus,
-                ]);
-            }
-        }
-
-        Log::info('[TREEAL] Cash In status intermediário', [
-            'txid'        => $txid,
-            'status'      => $status,
-            'internal'    => $internalStatus,
+        Log::info('[HEARTPAY] CashIn enfileirado', [
+            'event' => $event,
+            'correlationID' => $correlationID,
             'duration_ms' => round((microtime(true) - $start) * 1000, 2),
         ]);
 
-        return response()->json(['status' => true, 'message' => 'Webhook processado']);
+        return ['async' => true, 'response' => response()->json(['received' => true])];
     }
 
-    /**
-     * Processa webhook de saque PIX (Cash Out) da Treeal
-     * 
-     * Status possíveis da TREEAL (API ONZ):
-     * - PROCESSING: Em processamento
-     * - LIQUIDATED: Transação liquidada com sucesso
-     * - CANCELED: Transação cancelada
-     * - REFUNDED: Transação estornada
-     * - PARTIALLY_REFUNDED: Parcialmente estornada
-     */
-    /**
-     * Processa webhook de Cash Out (saque) da Treeal — modo assíncrono.
-     *
-     * Despacha ProcessTreealCashOutJob para a fila e responde 200 imediatamente.
-     * O processamento de saldo (débito, cancelamento, estorno) ocorre via job worker.
-     */
-    private function handleTreealCashOutWebhook($transactionId, $status, $data, $webhookLog, float $start)
+    private function heartPayDispatchCashOut(string $event, array $innerData, $webhookLog, float $start): array
     {
-        if (!$transactionId) {
-            Log::warning('[TREEAL] Webhook Cash Out sem transactionId', ['data' => $data]);
-            return response()->json(['status' => false, 'message' => 'transactionId não encontrado'], 400);
-        }
+        $transactionRef = $this->heartPayExtractTransactionRef($innerData);
 
-        // Enfileirar processamento assíncrono
-        ProcessTreealCashOutJob::dispatch($transactionId, $status, $data, $webhookLog->id)->onQueue('webhooks');
+        ProcessHeartPayCashOutJob::dispatch($event, $transactionRef, $innerData, $webhookLog->id)
+            ->onQueue('webhooks');
 
-        $durationMs = round((microtime(true) - $start) * 1000, 2);
-        Log::info('[TREEAL] Cash Out enfileirado', [
-            'transaction_id' => $transactionId,
-            'status'         => $status,
-            'duration_ms'    => $durationMs,
+        Log::info('[HEARTPAY] CashOut enfileirado', [
+            'event' => $event,
+            'transactionRef' => $transactionRef,
+            'duration_ms' => round((microtime(true) - $start) * 1000, 2),
         ]);
 
-        return ['async' => true, 'response' => response()->json(['status' => true, 'message' => 'Webhook aceito'])];
+        return ['async' => true, 'response' => response()->json(['received' => true])];
     }
 
-    /**
-     * Processa webhook de Infração PIX da Treeal — modo assíncrono.
-     *
-     * Despacha ProcessTreealInfractionJob para a fila e responde 200 imediatamente.
-     */
-    private function handleTreealInfractionWebhook(array $data, $webhookLog, float $start)
+    private function heartPayDispatchRefund(string $event, array $innerData, $webhookLog, float $start): array
     {
-        ProcessTreealInfractionJob::dispatch($data, $webhookLog->id)->onQueue('webhooks');
+        $correlationID = $this->heartPayExtractCorrelation($innerData);
 
-        $durationMs = round((microtime(true) - $start) * 1000, 2);
-        Log::info('[TREEAL] Infraction enfileirado', [
-            'transaction_id' => $data['transactionId'] ?? null,
-            'duration_ms'    => $durationMs,
+        ProcessHeartPayRefundJob::dispatch($event, $correlationID, $innerData, $webhookLog->id)
+            ->onQueue('webhooks');
+
+        Log::info('[HEARTPAY] Refund enfileirado', [
+            'event' => $event,
+            'correlationID' => $correlationID,
+            'duration_ms' => round((microtime(true) - $start) * 1000, 2),
         ]);
 
-        return ['async' => true, 'response' => response()->json(['status' => true, 'message' => 'Webhook aceito'])];
+        return ['async' => true, 'response' => response()->json(['received' => true])];
     }
 
-    /**
-     * Lógica completa de Cash Out — mantida para referência, agora executada via ProcessTreealCashOutJob.
-     *
-     * @deprecated Use ProcessTreealCashOutJob
-     */
-    private function handleTreealCashOutWebhookSync($transactionId, $status, $data)
+    private function heartPayDispatchDispute(string $event, array $innerData, $webhookLog, float $start): array
     {
-        if (!$transactionId) {
-            Log::warning('[TREEAL] Webhook Cash Out sem transactionId', ['data' => $data]);
-            return response()->json(['status' => false, 'message' => 'transactionId não encontrado'], 400);
-        }
+        ProcessHeartPayDisputeJob::dispatch($event, $innerData, $webhookLog->id)
+            ->onQueue('webhooks');
 
-        // Tentar buscar também pelo endToEndId se disponível
-        $endToEndId = $data['endToEndId'] ?? $data['end_to_end_id'] ?? null;
-        
-        $cashOut = SolicitacoesCashOut::where('idTransaction', $transactionId)
-            ->orWhere('externalreference', $transactionId)
-            ->when($endToEndId, function($query) use ($endToEndId) {
-                $query->orWhere('end_to_end', $endToEndId);
-            })
-            ->first();
-
-        if (!$cashOut) {
-            Log::warning('[TREEAL] Saque não encontrado', [
-                'transaction_id' => $transactionId,
-                'end_to_end_id' => $endToEndId
-            ]);
-            return response()->json(['status' => false, 'message' => 'Saque não encontrado'], 404);
-        }
-
-        Log::info('[TREEAL] Processando webhook Cash Out', [
-            'transaction_id' => $transactionId,
-            'status' => $status,
-            'current_status' => $cashOut->status,
-            'end_to_end_id' => $endToEndId
+        Log::info('[HEARTPAY] Dispute enfileirado', [
+            'event' => $event,
+            'duration_ms' => round((microtime(true) - $start) * 1000, 2),
         ]);
 
-        // Mapear status da Treeal para status interno
-        $internalStatus = $this->mapTreealStatusToInternal($status);
-        $statusUpper = strtoupper($status ?? '');
-
-        // Status que indicam saque confirmado/liquidado
-        $statusConfirmado = ['LIQUIDATED', 'COMPLETED', 'PAID', 'CONCLUIDO'];
-        // Status que indicam saque cancelado
-        $statusCancelado = ['CANCELED', 'CANCELLED', 'FAILED'];
-        // Status que indicam saque estornado
-        $statusEstornado = ['REFUNDED', 'PARTIALLY_REFUNDED'];
-        
-        // Preparar dados para atualização
-        $updateData = [];
-        
-        // Salvar endToEndId se disponível
-        if ($endToEndId && empty($cashOut->end_to_end)) {
-            $updateData['end_to_end'] = $endToEndId;
-        }
-
-        // ========================================
-        // PROCESSAMENTO DE SAQUE CONFIRMADO
-        // ========================================
-        if (in_array($statusUpper, $statusConfirmado)) {
-            // Verificar se já foi processado (idempotência)
-            if (in_array($cashOut->status, ['PAID_OUT', 'COMPLETED'])) {
-                Log::info('[TREEAL] Saque já processado anteriormente', [
-                    'transaction_id' => $transactionId,
-                    'status' => $cashOut->status
-                ]);
-                
-                // Atualizar end_to_end se necessário
-                if (!empty($updateData)) {
-                    $cashOut->update($updateData);
-                }
-                
-                return response()->json(['status' => true, 'message' => 'Já processado']);
-            }
-            
-            try {
-                // Usar PaymentProcessingService para processar de forma atômica
-                $paymentService = app(PaymentProcessingService::class);
-                $paymentService->processWithdrawal($cashOut);
-                
-                // Atualizar executor_ordem para indicar que foi processado pela Treeal
-                $cashOut->update([
-                    'executor_ordem' => 'Treeal',
-                    'end_to_end' => $endToEndId ?? $cashOut->end_to_end
-                ]);
-                
-                Log::info('[TREEAL] Saque confirmado e processado com sucesso', [
-                    'transaction_id' => $transactionId,
-                    'amount' => $cashOut->amount,
-                    'user_id' => $cashOut->user_id
-                ]);
-                
-                return response()->json(['status' => true, 'message' => 'Saque processado']);
-                
-            } catch (\Exception $e) {
-                // Verificar se já foi processado (idempotência - pode ter sido processado por outra requisição)
-                $cashOut->refresh();
-                if (in_array($cashOut->status, ['PAID_OUT', 'COMPLETED'])) {
-                    Log::info('[TREEAL] Saque processado por outra requisição', [
-                        'transaction_id' => $transactionId
-                    ]);
-                    return response()->json(['status' => true, 'message' => 'Já processado']);
-                }
-                
-                Log::error('[TREEAL] Erro ao processar saque confirmado', [
-                    'transaction_id' => $transactionId,
-                    'error' => $e->getMessage()
-                ]);
-                
-                return response()->json([
-                    'status' => false, 
-                    'message' => 'Erro ao processar saque: ' . $e->getMessage()
-                ], 500);
-            }
-        }
-        
-        // ========================================
-        // PROCESSAMENTO DE SAQUE CANCELADO
-        // ========================================
-        if (in_array($statusUpper, $statusCancelado)) {
-            Log::warning('[TREEAL] Saque cancelado', [
-                'transaction_id' => $transactionId,
-                'reason'         => PixErrorCodes::getMessageFromPayload($data, 'Não informado'),
-                'current_status' => $cashOut->status,
-            ]);
-            
-            if (in_array($cashOut->status, ['PENDING', 'PROCESSING', 'PAID_OUT', 'COMPLETED'])) {
-                try {
-                    $this->reverterSaldoSaque($cashOut, $transactionId, 'cancelamento');
-                } catch (\Exception $e) {
-                    Log::error('[TREEAL] Erro ao reverter saldo por cancelamento', [
-                        'transaction_id' => $transactionId,
-                        'error' => $e->getMessage()
-                    ]);
-                }
-            }
-            
-            // Atualizar status para cancelado
-            $cashOut->update([
-                'status' => 'CANCELLED',
-                'end_to_end' => $endToEndId ?? $cashOut->end_to_end
-            ]);
-            
-            return response()->json(['status' => true, 'message' => 'Saque cancelado processado']);
-        }
-        
-        // ========================================
-        // PROCESSAMENTO DE SAQUE ESTORNADO
-        // ========================================
-        if (in_array($statusUpper, $statusEstornado)) {
-            Log::warning('[TREEAL] Saque estornado', [
-                'transaction_id' => $transactionId,
-                'status' => $status,
-                'end_to_end_id' => $endToEndId,
-                'data' => $data
-            ]);
-            
-            // Se o saque foi pago/completado, reverter o saldo
-            if (in_array($cashOut->status, ['PAID_OUT', 'COMPLETED'])) {
-                try {
-                    $isPartial = $statusUpper === 'PARTIALLY_REFUNDED';
-                    $refundAmount = $isPartial ? ($data['refundAmount'] ?? $data['amount'] ?? $cashOut->amount) : $cashOut->amount;
-                    
-                    $this->reverterSaldoSaque($cashOut, $transactionId, 'estorno', $refundAmount);
-                } catch (\Exception $e) {
-                    Log::error('[TREEAL] Erro ao reverter saldo por estorno', [
-                        'transaction_id' => $transactionId,
-                        'error' => $e->getMessage()
-                    ]);
-                }
-            }
-            
-            // Atualizar status para estornado
-            $cashOut->update([
-                'status' => $internalStatus,
-                'end_to_end' => $endToEndId ?? $cashOut->end_to_end
-            ]);
-            
-            return response()->json(['status' => true, 'message' => 'Saque estornado processado']);
-        }
-
-        // ========================================
-        // OUTROS STATUS (PROCESSING, etc.)
-        // ========================================
-        if ($cashOut->status !== $internalStatus) {
-            $updateData['status'] = $internalStatus;
-        }
-        
-        // Aplicar atualizações se houver
-        if (!empty($updateData)) {
-            $cashOut->update($updateData);
-            
-            Log::info('[TREEAL] Saque atualizado', [
-                'transaction_id' => $transactionId,
-                'updates' => array_keys($updateData)
-            ]);
-        }
-
-        return response()->json(['status' => true, 'message' => 'Webhook processado']);
+        return ['async' => true, 'response' => response()->json(['received' => true])];
     }
 
-    /**
-     * Reverte o saldo de um saque cancelado ou estornado
-     * 
-     * @param SolicitacoesCashOut $cashOut
-     * @param string $transactionId
-     * @param string $motivo 'cancelamento' ou 'estorno'
-     * @param float|null $valorEstornado Valor a reverter (para estornos parciais)
-     */
-    private function reverterSaldoSaque(SolicitacoesCashOut $cashOut, string $transactionId, string $motivo, ?float $valorEstornado = null)
+    private function heartPayUnknownEvent(string $event, array $data, float $start)
     {
-        $user = User::where('user_id', $cashOut->user_id)->first();
-        
-        if (!$user) {
-            Log::warning("[TREEAL] Usuário não encontrado para reverter saldo de {$motivo}", [
-                'transaction_id' => $transactionId,
-                'user_id' => $cashOut->user_id
-            ]);
-            return;
-        }
-        
-        // Calcular valor a reverter
-        $valorPrincipal = $valorEstornado ?? $cashOut->amount;
-        $valorTaxas = $cashOut->taxa_cash_out ?? 0;
-        $valorTotalReverter = $valorPrincipal + $valorTaxas;
-        
-        // Reverter saldo
-        $balanceService = app(\App\Services\BalanceService::class);
-        $balanceService->incrementBalance($user, $valorTotalReverter, 'saldo');
-        
-        // Recalcular saldo líquido
-        Helper::calculaSaldoLiquido($user->user_id);
-        
-        Log::info("[TREEAL] Saldo revertido por {$motivo}", [
-            'transaction_id' => $transactionId,
-            'user_id' => $user->user_id,
-            'valor_principal' => $valorPrincipal,
-            'valor_taxas' => $valorTaxas,
-            'valor_total_revertido' => $valorTotalReverter,
-            'saldo_atualizado' => $user->fresh()->saldo
+        Log::warning('[HEARTPAY] Evento desconhecido', [
+            'event' => $event,
+            'duration_ms' => round((microtime(true) - $start) * 1000, 2),
         ]);
-    }
 
-    /**
-     * Mapeia status da Treeal para status interno
-     * 
-     * Status TREEAL (Cash In - API QRCodes):
-     * - ATIVA: Cobrança ativa aguardando pagamento
-     * - CONCLUIDA: Cobrança paga
-     * - REMOVIDA_PELO_USUARIO_RECEBEDOR: Cobrança removida/cancelada pelo recebedor
-     * - REMOVIDA_PELO_PSP: Cobrança removida/cancelada pela Onz (ex.: expirada)
-     * - EM_PROCESSAMENTO: Em processamento
-     * - NAO_REALIZADO: Não realizado/falhou
-     * 
-     * Status TREEAL (Cash Out - API ONZ):
-     * - PROCESSING: Em processamento
-     * - LIQUIDATED: Liquidado com sucesso
-     * - CANCELED: Cancelado
-     * - REFUNDED: Estornado
-     */
-    private function mapTreealStatusToInternal(?string $status): string
-    {
-        if ($status === null || $status === '') {
-            return 'WAITING_FOR_APPROVAL';
-        }
-
-        $statusUpper = strtoupper($status);
-        
-        $statusMap = [
-            // Cash In - Status de cobrança
-            'ATIVA' => 'WAITING_FOR_APPROVAL',
-            'CONCLUIDA' => 'PAID_OUT',
-            'REMOVIDA_PELO_USUARIO_RECEBEDOR' => 'CANCELLED',
-            'REMOVIDA_PELO_PSP' => 'CANCELLED',
-            'EM_PROCESSAMENTO' => 'PROCESSING',
-            'NAO_REALIZADO' => 'FAILED',
-            
-            // Status genéricos (Cash In e Cash Out)
-            'PAID' => 'PAID_OUT',
-            'COMPLETED' => 'PAID_OUT',
-            'PROCESSING' => 'PROCESSING',
-            'FAILED' => 'FAILED',
-            'CANCELLED' => 'CANCELLED',
-            'CANCELED' => 'CANCELLED',
-            
-            // Cash Out - Status específicos
-            'LIQUIDATED' => 'PAID_OUT',
-            'REFUNDED' => 'REFUNDED',
-            'PARTIALLY_REFUNDED' => 'PARTIALLY_REFUNDED',
-        ];
-
-        return $statusMap[$statusUpper] ?? 'PENDING';
+        return response()->json(['received' => true, 'message' => 'Evento não mapeado']);
     }
 
 }

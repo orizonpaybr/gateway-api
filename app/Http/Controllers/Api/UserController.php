@@ -1022,7 +1022,7 @@ class UserController extends Controller
 
     /**
      * Obter status legível para transações.
-     * Para saques: na Treeal, PROCESSING já indica PIX enviado, então exibimos como "Concluída".
+     * Para saques: PROCESSING no adquirente indica PIX enviado, exibimos como "Concluída".
      *
      * @param string $status Status interno (COMPLETED, PROCESSING, etc.)
      * @param string|null $tipo 'saque' ou 'deposito' (ou null para usar só o mapa padrão)
@@ -1044,7 +1044,7 @@ class UserController extends Controller
             'DISPUTE' => 'Disputa',
         ];
 
-        // Saque com PROCESSING na Treeal = PIX já enviado; normalizar para exibição como concluído
+        // Saque com PROCESSING = PIX já enviado; normalizar para exibição como concluído
         if ($tipo === 'saque' && $status === 'PROCESSING') {
             return 'Concluída';
         }

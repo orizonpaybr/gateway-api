@@ -5,10 +5,9 @@ use Illuminate\Support\Facades\Route;
 
 /*
 |--------------------------------------------------------------------------
-| Rotas da Adquirente Treeal/ONZ
+| Rotas da Adquirente HeartPay
 |--------------------------------------------------------------------------
 */
 
-// Webhook para receber notificações da Treeal/ONZ
-Route::post('treeal/webhook', [CallbackController::class, 'webhookTreeal'])
+Route::post('heartpay/webhook', [CallbackController::class, 'webhookHeartPay'])
     ->middleware(['ensure.webhook.https', 'validate.webhook', 'throttle:500,1']);

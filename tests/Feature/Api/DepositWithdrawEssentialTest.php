@@ -13,7 +13,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 /**
  * Testes mínimos para rotas de depósito e saque (API externa).
  *
- * Não dependem de adquirente (Treeal ou outros), certificados ou ambiente.
+ * Não dependem de adquirente específico (HeartPay, etc.), certificados ou ambiente.
  * Garantem apenas: autenticação (token+secret) e validação de campos.
  * No futuro, outras adquirentes usarão as mesmas rotas e middlewares.
  */
@@ -30,16 +30,16 @@ class DepositWithdrawEssentialTest extends TestCase
 
         App::factory()->create();
         Adquirente::firstOrCreate(
-            ['referencia' => 'treeal'],
+            ['referencia' => 'heartpay'],
             [
-                'adquirente' => 'Treeal',
+                'adquirente' => 'HeartPay',
                 'status' => 1,
                 'url' => 'https://api.example.com',
                 'is_default' => 1,
                 'is_default_card_billet' => 0,
             ]
         );
-        Adquirente::where('referencia', 'treeal')->update(['is_default' => 1, 'status' => 1]);
+        Adquirente::where('referencia', 'heartpay')->update(['is_default' => 1, 'status' => 1]);
 
         $this->user = User::factory()->create([
             'username' => 'apiuser',

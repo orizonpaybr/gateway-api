@@ -156,7 +156,7 @@ class SolicitacoesCashOut extends Model
 
     /**
      * Label do status para exibição.
-     * PROCESSING na Treeal = PIX já enviado, exibir como concluído.
+     * PROCESSING = PIX já enviado, exibir como concluído.
      */
     public function getStatusLabel(): string
     {
@@ -166,7 +166,7 @@ class SolicitacoesCashOut extends Model
             'PAID_OUT' => 'Pago',
             'CANCELLED' => 'Cancelado',
             'FAILED' => 'Falhou',
-            'PROCESSING' => 'Concluído', // Treeal: PROCESSING = PIX enviado
+            'PROCESSING' => 'Concluído', // PIX enviado
         ];
 
         return $labels[$this->status] ?? $this->status;

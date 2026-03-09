@@ -15,8 +15,8 @@ use App\Helpers\Helper;
 use App\Helpers\ApiResponseStandardizer;
 use App\Services\PagarMeService;
 use App\DTO\PagarMeDTO\CardDepositDTO;
-use App\Services\TreealService;
-use App\Models\Treeal;
+use App\Services\HeartPayService;
+use App\Models\HeartPay;
 
 /**
  * @OA\Info(
@@ -94,14 +94,12 @@ class DepositController extends Controller
                 Log::info('DepositController - Executando PagarMeTrait', []);
                 $response = PagarMeTrait::requestDepositPagarme($request);
                 break;
-            case 'treeal':
-                Log::info('DepositController - Processando depósito Treeal', [
+            case 'heartpay':
+                Log::info('DepositController - Processando depósito HeartPay', [
                     'user_id' => $user->user_id ?? 'N/A',
                     'amount' => $request->amount ?? 'N/A',
-                    'taxas_personalizadas_ativas' => $user->taxas_personalizadas_ativas ?? false,
-                    'taxa_fixa_deposito' => $user->taxa_fixa_deposito ?? 'N/A',
                 ]);
-                $response = $this->processTreealDeposit($request, $user, $setting);
+                $response = $this->processHeartPayDeposit($request, $user, $setting);
                 break;
             default:
                 Log::info('DepositController - Adquirente não suportado', ['adquirente' => $default]);
@@ -525,174 +523,139 @@ class DepositController extends Controller
     }
 
     /**
-     * Processa depósito PIX usando Treeal/ONZ
-     * 
-     * Implementação limpa e moderna que serve como referência para futuras integrações
-     * 
+     * Processa depósito PIX usando HeartPay (Banking as a Service).
+     *
      * @param Request $request
      * @param \App\Models\User $user
      * @param \App\Models\App $setting
      * @return array
      */
-    private function processTreealDeposit(Request $request, $user, $setting): array
+    private function processHeartPayDeposit(Request $request, $user, $setting): array
     {
         try {
-            $treealService = app(TreealService::class);
-            $treealConfig = Treeal::first();
+            $heartPayService = app(HeartPayService::class);
 
-            // Validar se Treeal está configurado e ativo
-            if (!$treealConfig || !$treealService->isActive()) {
-                Log::error('DepositController::processTreealDeposit - Treeal não configurado ou inativo');
+            if (!$heartPayService->isActive()) {
+                Log::error('DepositController::processHeartPayDeposit - HeartPay não configurado ou inativo');
                 return [
                     'status' => 500,
-                    'data' => [
-                        'status' => 'error',
-                        'message' => 'Serviço de pagamento PIX indisponível no momento.'
-                    ]
+                    'data' => ['status' => 'error', 'message' => 'Serviço de pagamento PIX indisponível no momento.']
                 ];
             }
 
             $amount = (float) $request->amount;
-            $description = $request->input('description', 'Depósito via PIX');
-            
-            // IMPORTANTE: Recarregar usuário novamente antes de calcular taxa (garantia extra)
+
             if ($user && isset($user->user_id)) {
                 $user = \App\Models\User::where('user_id', $user->user_id)->first();
             }
-            
-            // Preencher CPF/CNPJ do usuário logado se não for fornecido no request (evita erro de NOT NULL na primeira tentativa)
+
             $debtorDocument = $request->debtor_document_number ?? $user->cpf_cnpj ?? null;
-            $debtorName = $request->debtor_name ?? $user->name ?? 'Cliente';
-            $debtorEmail = $request->email ?? $user->email ?? null;
-            $debtorPhone = $request->phone ?? $user->telefone ?? null;
-            
-            Log::info('DepositController::processTreealDeposit - Dados antes do cálculo de taxa', [
-                'user_id' => $user->user_id ?? 'N/A',
-                'amount' => $amount,
-                'debtor_document' => $debtorDocument ? substr($debtorDocument, 0, 3) . '***' : 'N/A',
-                'taxas_personalizadas_ativas' => $user->taxas_personalizadas_ativas ?? false,
-                'taxa_fixa_deposito' => $user->taxa_fixa_deposito ?? 'N/A',
-                'taxa_fixa_padrao_global' => $setting->taxa_fixa_padrao ?? 'N/A',
-            ]);
-            
-            // Calcular taxas usando o Helper centralizado
-            // O helper obtém o custo da TREEAL automaticamente do config
-            $taxaCalculada = \App\Helpers\TaxaFlexivelHelper::calcularTaxaDeposito($amount, $setting, $user);
+            $debtorName     = $request->debtor_name ?? $user->name ?? 'Cliente';
+            $debtorEmail    = $request->email ?? $user->email ?? null;
+            $debtorPhone    = $request->phone ?? $user->telefone ?? null;
+
+            $taxaCalculada   = \App\Helpers\TaxaFlexivelHelper::calcularTaxaDeposito($amount, $setting, $user);
             $depositoLiquido = $taxaCalculada['deposito_liquido'];
-            $taxaTotal = $taxaCalculada['taxa_cash_in'];          // Taxa total cobrada do cliente
-            $taxaAplicacao = $taxaCalculada['taxa_aplicacao'];    // Lucro líquido da aplicação
-            $taxaAdquirente = $taxaCalculada['taxa_adquirente'];  // Custo da TREEAL
-            $descricaoTaxa = $taxaCalculada['descricao'];
-            
-            Log::info('DepositController::processTreealDeposit - Taxa calculada', [
-                'amount' => $amount,
-                'taxa_cash_in' => $taxaTotal,
+            $taxaTotal       = $taxaCalculada['taxa_cash_in'];
+            $taxaAplicacao   = $taxaCalculada['taxa_aplicacao'];
+            $taxaAdquirente  = $taxaCalculada['taxa_adquirente'];
+            $descricaoTaxa   = $taxaCalculada['descricao'];
+
+            Log::info('DepositController::processHeartPayDeposit - Taxa calculada', [
+                'amount' => $amount, 'taxa_cash_in' => $taxaTotal,
                 'deposito_liquido' => $depositoLiquido,
-                'taxa_aplicacao' => $taxaAplicacao,
-                'taxa_adquirente' => $taxaAdquirente,
-                'descricao' => $descricaoTaxa,
-                'verificacao' => 'deposito_liquido = ' . $amount . ' - ' . $taxaTotal . ' = ' . $depositoLiquido,
             ]);
 
-            // Montar devedor para a API de cobrança (doc Onz: nome, cpf/cnpj opcionais)
-            $devedor = [];
-            if (!empty($debtorName)) {
-                $devedor['nome'] = $debtorName;
+            $customer = ['name' => $debtorName];
+            $docDigits = $debtorDocument ? preg_replace('/\D/', '', $debtorDocument) : null;
+            if ($docDigits) {
+                $customer['taxID'] = $docDigits;
             }
-            if (!empty($debtorDocument)) {
-                $docDigits = preg_replace('/\D/', '', $debtorDocument);
-                if (strlen($docDigits) === 11) {
-                    $devedor['cpf'] = $docDigits;
-                } elseif (strlen($docDigits) === 14) {
-                    $devedor['cnpj'] = $docDigits;
-                }
+            if ($debtorEmail) {
+                $customer['email'] = $debtorEmail;
+            }
+            if ($debtorPhone) {
+                $customer['phone'] = preg_replace('/\D/', '', $debtorPhone);
             }
 
-            // Gerar QR Code usando TreealService (POST /cob quando txid null; opcionais devedor)
-            $qrCodeResult = $treealService->generateQRCode(
+            $correlationID = preg_replace('/[^a-zA-Z0-9]/', '', str()->uuid()->toString());
+            $description   = $request->input('description', 'Depósito via PIX');
+
+            $chargeResult = $heartPayService->createCharge(
                 $amount,
+                $customer,
+                $correlationID,
                 $description,
-                null, // txid null = POST /cob (API retorna txid)
-                3600, // 1 hora de expiração
-                0,    // modalidadeAlteracao: 0 = valor fixo
-                $devedor,
-                []    // infoAdicionais
+                now()->addHour()->toIso8601String()
             );
 
-            if (!$qrCodeResult['success']) {
-                Log::error('DepositController::processTreealDeposit - Erro ao gerar QR Code', [
-                    'error' => $qrCodeResult['message'] ?? 'Erro desconhecido'
+            if (!$chargeResult['success']) {
+                Log::error('DepositController::processHeartPayDeposit - Erro ao criar cobrança', [
+                    'error' => $chargeResult['message'] ?? 'Erro desconhecido',
                 ]);
                 return [
                     'status' => 500,
-                    'data' => [
-                        'status' => 'error',
-                        'message' => $qrCodeResult['message'] ?? 'Erro ao gerar QR Code PIX'
-                    ]
+                    'data' => ['status' => 'error', 'message' => $chargeResult['message'] ?? 'Erro ao gerar QR Code PIX']
                 ];
             }
 
-            $txid = $qrCodeResult['txid'];
-            $qrCode = $qrCodeResult['qr_code'] ?? $qrCodeResult['pixCopiaECola'] ?? null;
+            $hpCorrelationID = $chargeResult['correlationID'];
+            $brCode          = $chargeResult['brCode'];
+            $qrCodeImage     = $chargeResult['qrCodeImage'];
+            $expiresDate     = $chargeResult['expiresDate'];
 
-            // Criar registro na tabela Solicitacoes
             $solicitacao = Solicitacoes::create([
-                'user_id' => $user->username,
-                'externalreference' => $txid,
-                'amount' => $amount,
-                'client_name' => $debtorName,
-                'client_document' => $debtorDocument,
-                'client_email' => $debtorEmail,
-                'client_telefone' => $debtorPhone,
-                'date' => Carbon::now(),
-                'status' => 'WAITING_FOR_APPROVAL',
-                'idTransaction' => $txid,
-                'deposito_liquido' => $depositoLiquido,
-                'qrcode_pix' => $qrCode,
-                'paymentcode' => $qrCode,
-                'paymentCodeBase64' => $qrCode,
-                'adquirente_ref' => 'Treeal',
-                'executor_ordem' => 'Treeal',
-                'taxa_cash_in' => $taxaTotal, // Total de todas as taxas (aplicação + TREEAL)
-                'taxa_pix_cash_in_adquirente' => $taxaAdquirente, // Taxa da TREEAL (valor calculado)
-                'taxa_pix_cash_in_valor_fixo' => $user->taxa_fixa_deposito ?? 0,
-                'descricao_transacao' => $descricaoTaxa,
-                'callback' => $request->postback ?? null,
-                'split_email' => $request->split_email ?? null,
-                'split_percentage' => $request->split_percentage ?? null,
+                'user_id'                       => $user->username,
+                'externalreference'             => $hpCorrelationID,
+                'amount'                        => $amount,
+                'client_name'                   => $debtorName,
+                'client_document'               => $debtorDocument,
+                'client_email'                  => $debtorEmail,
+                'client_telefone'               => $debtorPhone,
+                'date'                          => Carbon::now(),
+                'status'                        => 'WAITING_FOR_APPROVAL',
+                'idTransaction'                 => $hpCorrelationID,
+                'deposito_liquido'              => $depositoLiquido,
+                'qrcode_pix'                    => $brCode,
+                'paymentcode'                   => $brCode,
+                'paymentCodeBase64'             => $qrCodeImage,
+                'adquirente_ref'                => 'HeartPay',
+                'executor_ordem'                => 'HeartPay',
+                'taxa_cash_in'                  => $taxaTotal,
+                'taxa_pix_cash_in_adquirente'   => $taxaAdquirente,
+                'taxa_pix_cash_in_valor_fixo'   => $user->taxa_fixa_deposito ?? 0,
+                'descricao_transacao'           => $descricaoTaxa,
+                'callback'                      => $request->postback ?? null,
+                'split_email'                   => $request->split_email ?? null,
+                'split_percentage'              => $request->split_percentage ?? null,
             ]);
 
-            Log::info('DepositController::processTreealDeposit - Depósito criado com sucesso', [
-                'txid' => $txid,
+            Log::info('DepositController::processHeartPayDeposit - Depósito criado', [
+                'correlationID' => $hpCorrelationID,
                 'amount' => $amount,
-                'deposito_liquido' => $depositoLiquido,
-                'solicitacao_id' => $solicitacao->id
+                'solicitacao_id' => $solicitacao->id,
             ]);
 
-            // Retornar resposta no formato esperado
             return [
                 'status' => 200,
                 'data' => [
-                    'idTransaction' => $txid,
-                    'qrcode' => $qrCode,
-                    'status' => 'WAITING_FOR_APPROVAL',
-                    'amount' => $amount,
-                    'expires_at' => now()->addHour()->toIso8601String(),
+                    'idTransaction' => $hpCorrelationID,
+                    'qrcode'        => $brCode,
+                    'status'        => 'WAITING_FOR_APPROVAL',
+                    'amount'        => $amount,
+                    'expires_at'    => $expiresDate ?? now()->addHour()->toIso8601String(),
                 ]
             ];
 
         } catch (\Exception $e) {
-            Log::error('DepositController::processTreealDeposit - Exceção', [
+            Log::error('DepositController::processHeartPayDeposit - Exceção', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return [
                 'status' => 500,
-                'data' => [
-                    'status' => 'error',
-                    'message' => 'Erro ao processar depósito PIX: ' . $e->getMessage()
-                ]
+                'data' => ['status' => 'error', 'message' => 'Erro ao processar depósito PIX: ' . $e->getMessage()]
             ];
         }
     }
