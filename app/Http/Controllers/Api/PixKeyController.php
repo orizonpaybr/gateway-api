@@ -397,14 +397,17 @@ class PixKeyController extends Controller
                 'key_id' => 'nullable|exists:pix_keys,id',
                 'key_type' => 'required_without:key_id|in:cpf,cnpj,telefone,email,aleatoria',
                 'key_value' => 'required_without:key_id|string',
-                'amount' => 'required|numeric|min:0.01',
+                'amount' => 'required|numeric|min:1',
                 'description' => 'nullable|string|max:255'
+            ], [
+                'amount.min' => 'Valor mínimo para saque é R$ 1,00 (100 centavos)',
             ]);
 
             if ($validator->fails()) {
+                $message = $validator->errors()->first('amount') ?: 'Dados inválidos';
                 return response()->json([
                     'success' => false,
-                    'message' => 'Dados inválidos',
+                    'message' => $message,
                     'errors' => $validator->errors()
                 ], 400)->header('Access-Control-Allow-Origin', '*');
             }
@@ -596,7 +599,13 @@ class PixKeyController extends Controller
                     $description = $request->description ?? 'Saque via PIX';
                     $payoutResult = $heartPay->createPayout((float) $amount, $keyValue, $keyType, $description, $correlationID);
                     if (!$payoutResult['success']) {
-                        throw new \Exception($payoutResult['message'] ?? 'Erro ao criar saque no adquirente');
+                        $msg = $payoutResult['message'] ?? 'Erro ao criar saque no adquirente';
+                        $statusCode = $payoutResult['status_code'] ?? 500;
+                        $httpStatus = ($statusCode >= 400 && $statusCode < 500) ? 400 : 500;
+                        return response()->json([
+                            'success' => false,
+                            'message' => $msg,
+                        ], $httpStatus)->header('Access-Control-Allow-Origin', '*');
                     }
                     $idTxn = $payoutResult['referenceCode'] ?? $correlationID;
                     $statusMapped = \App\Services\HeartPayService::mapPayoutStatus($payoutResult['status'] ?? 'pending');
