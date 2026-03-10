@@ -120,7 +120,7 @@ class ValidateWebhook
 
         $webhookSecret = config('heartpay.webhook_secret');
 
-        if (!empty($webhookSecret)) {
+        if (!empty($webhookSecret)) {                                                                                                                                                                   
             $tokenHeader = $request->header('x-webhook-token');
             if ($tokenHeader !== null && hash_equals($webhookSecret, trim($tokenHeader))) {
                 Log::debug('ValidateHeartPayWebhook - Token x-webhook-token válido');

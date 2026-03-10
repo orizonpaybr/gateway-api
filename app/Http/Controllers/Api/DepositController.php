@@ -566,11 +566,17 @@ class DepositController extends Controller
                 'deposito_liquido' => $depositoLiquido,
             ]);
 
-            $customer = ['name' => $debtorName];
             $docDigits = $debtorDocument ? preg_replace('/\D/', '', $debtorDocument) : null;
-            if ($docDigits) {
-                $customer['taxID'] = $docDigits;
+            if (!$docDigits || (strlen($docDigits) !== 11 && strlen($docDigits) !== 14)) {
+                return [
+                    'status' => 400,
+                    'data'   => ['status' => 'error', 'message' => 'CPF ou CNPJ do pagador é obrigatório para gerar cobrança PIX (11 ou 14 dígitos).']
+                ];
             }
+            $customer = [
+                'name'  => $debtorName,
+                'taxID' => $docDigits,
+            ];
             if ($debtorEmail) {
                 $customer['email'] = $debtorEmail;
             }
