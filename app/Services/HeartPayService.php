@@ -358,10 +358,15 @@ class HeartPayService
         ?string $description = null,
         ?string $correlationID = null
     ): array {
+        $normalizedType = $this->normalizePixKeyType($pixKeyType);
+        $keyForApi = $normalizedType === 'phone'
+            ? $this->normalizePixKeyPhone($pixKey)
+            : $pixKey;
+
         $body = [
             'value'      => self::toCents($amountReais),
-            'pixKey'     => $pixKey,
-            'pixKeyType' => $this->normalizePixKeyType($pixKeyType),
+            'pixKey'     => $keyForApi,
+            'pixKeyType' => $normalizedType,
         ];
 
         if ($description !== null) {
@@ -384,6 +389,9 @@ class HeartPayService
             'referenceCode' => $data['referenceCode'] ?? $data['reference_code'] ?? null,
             'status'        => $data['status'] ?? 'pending',
             'amount_cents'  => $data['amount'] ?? $data['value'] ?? self::toCents($amountReais),
+            'net_amount'    => $data['net_amount'] ?? $data['netAmount'] ?? null,
+            'fee'           => $data['fee'] ?? null,
+            'message'       => $result['data']['message'] ?? null,
             'raw'           => $result['data'],
         ];
     }
@@ -589,6 +597,26 @@ class HeartPayService
             'aleatoria', 'random', 'evp' => 'random',
             default                      => $type,
         };
+    }
+
+    /**
+     * Normaliza chave PIX do tipo telefone para o formato HeartPay: +55 + DDD + número.
+     * Aceita entradas como (84) 9995-18869, 84999518869, 5584999518869 ou +5584999518869.
+     */
+    private function normalizePixKeyPhone(string $pixKey): string
+    {
+        $digits = preg_replace('/\D/', '', $pixKey);
+        if ($digits === '') {
+            return $pixKey;
+        }
+        $len = strlen($digits);
+        if ($len === 10 || $len === 11) {
+            return '+55' . $digits;
+        }
+        if (($len === 12 || $len === 13) && str_starts_with($digits, '55')) {
+            return '+' . $digits;
+        }
+        return $pixKey;
     }
 
     // ─────────────────────────────────────────────────────────────────
