@@ -210,11 +210,19 @@ class ProcessHeartPayCashOutJob implements ShouldQueue
 
         $message = WebhookClientMessages::getMessageForStatus($status, 'PIX_OUT');
 
+        // Nome e documento do beneficiário: opcionais. Dados vêm do webhook HeartPay (quando preenchido) ou do nosso registro (saque).
+        // HeartPay pode devolver recipientDocument "[VAZIO]" — tratamos como ausente para não enviar no webhook ao cliente.
+        $recipientName = $inner['recipientName'] ?? $saque->beneficiaryname ?? null;
+        $recipientDoc  = $inner['recipientDocument'] ?? $saque->beneficiarydocument ?? null;
+        if ($recipientDoc === '[VAZIO]' || $recipientDoc === '') {
+            $recipientDoc = null;
+        }
+
         $extra = [
             'typeTransaction' => 'PIX_OUT',
             'beneficiary' => [
-                'name'     => $inner['recipientName'] ?? $saque->beneficiaryname ?? null,
-                'document' => $inner['recipientDocument'] ?? $saque->beneficiarydocument ?? null,
+                'name'     => $recipientName,
+                'document' => $recipientDoc,
                 'pixKey'   => $saque->pix ?? null,
             ],
             'sender' => [

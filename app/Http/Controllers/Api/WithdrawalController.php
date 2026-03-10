@@ -371,12 +371,19 @@ class WithdrawalController extends Controller
                 'amount' => $saque->amount,
             ]);
 
+            $recipientName = $saque->beneficiaryname ?: null;
+            $recipientDocument = $saque->beneficiarydocument ? preg_replace('/\D/', '', $saque->beneficiarydocument) : null;
+            if ($recipientDocument === '') {
+                $recipientDocument = null;
+            }
             $payoutResult = $heartPayService->createPayout(
                 (float) $saque->amount,
                 $saque->pix,
                 $saque->pixkey,
                 'Saque aprovado manualmente - ID: ' . $saque->id,
-                $correlationID
+                $correlationID,
+                $recipientName,
+                $recipientDocument
             );
 
             if (!$payoutResult['success']) {

@@ -236,12 +236,24 @@ class SaqueController extends Controller
             if ($isAutomatico) {
                 $correlationID = preg_replace('/[^a-zA-Z0-9]/', '', str()->uuid()->toString());
 
+                // Nome e documento do beneficiário: opcionais na request; senão usamos titular e chave (CPF/CNPJ) para reduzir rejeição da HeartPay
+                $recipientName = $request->input('beneficiary_name') ?: ($user->name ?? $user->username);
+                $recipientDocument = $request->input('beneficiary_document');
+                if ($recipientDocument === null || $recipientDocument === '') {
+                    $normalizedType = strtolower($pixKeyType);
+                    if ($normalizedType === 'cpf' || $normalizedType === 'cnpj') {
+                        $recipientDocument = preg_replace('/\D/', '', $pixKey);
+                    }
+                }
+
                 $payoutResult = $heartPayService->createPayout(
                     $amount,
                     $pixKey,
                     $pixKeyType,
                     $description,
-                    $correlationID
+                    $correlationID,
+                    $recipientName,
+                    $recipientDocument !== '' ? $recipientDocument : null
                 );
 
                 if (!$payoutResult['success']) {
@@ -265,8 +277,8 @@ class SaqueController extends Controller
                     'user_id'            => $user->username,
                     'externalreference'  => $referenceCode,
                     'amount'             => $amount,
-                    'beneficiaryname'    => $user->name ?? $user->username,
-                    'beneficiarydocument' => $pixKey,
+                    'beneficiaryname'    => $recipientName,
+                    'beneficiarydocument' => $recipientDocument ?? $pixKey,
                     'pix'                => $pixKey,
                     'pixkey'             => $pixKeyType,
                     'date'               => Carbon::now(),
