@@ -393,7 +393,7 @@ class AdminDashboardController extends Controller
                     $withdrawsQuery = SolicitacoesCashOut::with(['user' => function ($query) {
                         $query->select('id', 'user_id', 'name', 'username');
                     }])
-                        ->when($status, fn($q) => $q->where('status', $status), fn($q) => $q->where('status', 'COMPLETED'))
+                        ->when($status, fn($q) => $q->where('status', $status), fn($q) => $q->whereIn('status', ['COMPLETED', 'PAID_OUT']))
                         ->orderBy('created_at', 'desc')
                         ->limit($limit);
                     
@@ -479,7 +479,7 @@ class AdminDashboardController extends Controller
         $solicitacoes = Solicitacoes::where('status', 'PAID_OUT')
             ->whereBetween('date', [$dataInicio, $dataFim]);
 
-        $saques = SolicitacoesCashOut::where('status', 'COMPLETED')
+        $saques = SolicitacoesCashOut::whereIn('status', ['COMPLETED', 'PAID_OUT'])
             ->whereBetween('date', [$dataInicio, $dataFim]);
 
         // Calcular lucros com uma única query usando aggregates
@@ -550,7 +550,7 @@ class AdminDashboardController extends Controller
         $solicitacoes = Solicitacoes::where('status', 'PAID_OUT')
             ->whereBetween('date', [$dataInicio, $dataFim]);
 
-        $saques = SolicitacoesCashOut::where('status', 'COMPLETED')
+        $saques = SolicitacoesCashOut::whereIn('status', ['COMPLETED', 'PAID_OUT'])
             ->whereBetween('date', [$dataInicio, $dataFim]);
 
         $depositStats = (clone $solicitacoes)
@@ -674,7 +674,7 @@ class AdminDashboardController extends Controller
             ->pluck('id');
 
         // Buscar IDs das transações de saque no período
-        $withdrawIds = SolicitacoesCashOut::where('status', 'COMPLETED')
+        $withdrawIds = SolicitacoesCashOut::whereIn('status', ['COMPLETED', 'PAID_OUT'])
             ->whereBetween('date', [$dataInicio, $dataFim])
             ->pluck('id');
 
