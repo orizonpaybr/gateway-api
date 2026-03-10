@@ -54,10 +54,13 @@ Não necessários para o fluxo atual do gateway (depósito, saque, reembolso, we
 
 ## 4. Rate Limiting
 
-| Item | Documentação | Implementação | Status |
-|------|--------------|----------------|--------|
-| Limite | 10.000 req / 15 min | `bootstrap/app.php` → throttle 10000/15 min para pix-in, pix-out, status-check | OK |
-| Headers resposta | RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset | `logRateLimitHeaders()` usa esses headers | OK |
+**Doc HeartPay (API Gateway):** 10.000 req / 15 min. Headers: `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`.
+
+| Item | Documentação HeartPay | Implementação Orizon | Status |
+|------|------------------------|----------------------|--------|
+| Limite API Gateway | 10.000 req / 15 min | `bootstrap/app.php` → throttle 10000/15 min para pix-in, pix-out, status-check (alinhado à doc HeartPay) | OK |
+| Webhook (entrada) | — | `heartpay.php` → throttle 2000/min (~33 req/s) para evitar 429 em picos | OK |
+| Headers resposta | RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset | `logRateLimitHeaders()` loga esses headers nas respostas da HeartPay | OK |
 | 429 | Retry-After | `handleResponse()` loga `Retry-After` (e fallback para RateLimit-Reset) | OK |
 
 ---

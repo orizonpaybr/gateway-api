@@ -23,8 +23,8 @@ class ClientWebhookDispatchJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 3;
-
-    public int $backoff = 5;
+    /** Backoff exponencial (s): 1ª retry 10s, 2ª 30s, 3ª 90s */
+    public array $backoff = [10, 30, 90];
 
     /**
      * @param array<string, mixed> $extraPayload Campos adicionais (ex.: typeTransaction, payer, beneficiary, receiver, sender). Apenas chaves com valor não vazio são enviadas.

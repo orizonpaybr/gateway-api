@@ -27,7 +27,8 @@ class ProcessHeartPayDisputeJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $tries = 3;
-    public int $backoff = 5;
+    /** Backoff exponencial (s): 1ª retry 10s, 2ª 30s, 3ª 90s */
+    public array $backoff = [10, 30, 90];
 
     public function __construct(
         public string $event,
