@@ -536,7 +536,10 @@ class DepositController extends Controller
             $heartPayService = app(HeartPayService::class);
 
             if (!$heartPayService->isActive()) {
-                Log::error('DepositController::processHeartPayDeposit - HeartPay não configurado ou inativo');
+                Log::error('DepositController::processHeartPayDeposit - HeartPay não configurado ou inativo', [
+                    'api_key_set' => !empty(config('heartpay.api_key')),
+                    'status_env'  => config('heartpay.status'),
+                ]);
                 return [
                     'status' => 500,
                     'data' => ['status' => 'error', 'message' => 'Serviço de pagamento PIX indisponível no momento.']
