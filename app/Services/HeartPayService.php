@@ -50,7 +50,9 @@ class HeartPayService
 
     public function isActive(): bool
     {
-        return $this->config->status && $this->isConfigured();
+        $status = $this->config->status ?? config('heartpay.status', false);
+        $status = filter_var($status, FILTER_VALIDATE_BOOLEAN);
+        return $status && $this->isConfigured();
     }
 
     public function reloadConfig(): void
