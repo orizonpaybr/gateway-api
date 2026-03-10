@@ -597,7 +597,12 @@ class PixKeyController extends Controller
                     }
                     $correlationID = preg_replace('/[^a-zA-Z0-9]/', '', \Illuminate\Support\Str::uuid()->toString());
                     $description = $request->description ?? 'Saque via PIX';
-                    $payoutResult = $heartPay->createPayout((float) $amount, $keyValue, $keyType, $description, $correlationID);
+                    $recipientName = $user->name ?? 'Não informado';
+                    $recipientDocument = null;
+                    if (in_array(strtolower($keyType), ['cpf', 'cnpj'], true)) {
+                        $recipientDocument = preg_replace('/\D/', '', $keyValue);
+                    }
+                    $payoutResult = $heartPay->createPayout((float) $amount, $keyValue, $keyType, $description, $correlationID, $recipientName, $recipientDocument);
                     if (!$payoutResult['success']) {
                         $msg = $payoutResult['message'] ?? 'Erro ao criar saque no adquirente';
                         $statusCode = $payoutResult['status_code'] ?? 500;

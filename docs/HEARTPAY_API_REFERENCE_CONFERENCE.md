@@ -93,6 +93,29 @@ Formato de erro padrão (error, message, code, details): corpo completo é logad
 | Resposta | HTTP 2xx para confirmar | 200 imediato; processamento assíncrono via Jobs | OK |
 | Retentativas | 1ª imediata, 2ª 1 min, 3ª 5 min | Idempotência por WebhookLog; 200 evita reenvio desnecessário | OK |
 
+### 6.1 Eventos e payload (doc HeartPay)
+
+Referência única: documentação oficial HeartPay. O gateway aceita os nomes de evento em ambos os formatos (ex.: `PayOutCompleted` e `payout.completed`) para compatibilidade.
+
+| Evento HeartPay | Descrição | Job Orizon |
+|-----------------|-----------|------------|
+| PayInCreated | Cobrança PIX criada, aguardando pagamento | ProcessHeartPayCashInJob |
+| PayInCompleted / charge.paid | Pagamento confirmado, creditado | ProcessHeartPayCashInJob |
+| PayInCancelled / charge.expired | Cobrança cancelada ou expirada | ProcessHeartPayCashInJob |
+| PayInRefunded / charge.refunded | Reembolso processado | ProcessHeartPayRefundJob |
+| PAYOUT_CREATED | Nova solicitação de saque criada | ProcessHeartPayCashOutJob (log) |
+| PayOutCompleted / PAYOUT_COMPLETED / payout.completed | Saque concluído com sucesso | ProcessHeartPayCashOutJob |
+| PayOutFailed / PAYOUT_FAILED / payout.failed | Falha na transferência (valor devolvido ao saldo) | ProcessHeartPayCashOutJob |
+| PAYOUT_APPROVED | Saque aprovado pelo admin (modo manual) | ProcessHeartPayCashOutJob |
+| PAYOUT_REJECTED | Saque rejeitado pelo admin | ProcessHeartPayCashOutJob |
+| PayOutRefunded | Destinatário devolveu o PIX; valor creditado de volta | ProcessHeartPayRefundJob |
+| DisputeCreated | Disputa/MED aberta; valor bloqueado | ProcessHeartPayDisputeJob |
+| DisputeCanceled | Disputa resolvida a favor do seller | ProcessHeartPayDisputeJob |
+
+**Estrutura do payload:** o evento vem em `event` (raiz) e os dados em `data.data` (aninhado). O controller passa `data` para o job; o job usa `$inner = $this->data['data'] ?? $this->data` para ler os campos (correlationID, referenceCode, value em centavos, amount em reais, recipientName, recipientDocument, errorMessage em PayOutFailed, etc.).
+
+**Headers:** `X-HeartPay-Signature`, `X-HeartPay-Timestamp`, `X-HeartPay-Algorithm`, `X-HeartPay-Event`, `Content-Type: application/json`. Resposta esperada: HTTP 2xx em até 5 segundos.
+
 ---
 
 ## 7. Reembolsos (POST /refunds)

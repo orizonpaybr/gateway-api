@@ -350,13 +350,17 @@ class HeartPayService
      * @param string $pixKeyType   cpf | cnpj | email | phone | random
      * @param string|null $description  Descrição interna
      * @param string|null $correlationID  Para deduplicação
+     * @param string|null $recipientName  Nome do beneficiário (opcional; reduz rejeição por política do processador)
+     * @param string|null $recipientDocument  CPF/CNPJ do beneficiário, só dígitos (opcional)
      */
     public function createPayout(
         float $amountReais,
         string $pixKey,
         string $pixKeyType,
         ?string $description = null,
-        ?string $correlationID = null
+        ?string $correlationID = null,
+        ?string $recipientName = null,
+        ?string $recipientDocument = null
     ): array {
         $normalizedType = $this->normalizePixKeyType($pixKeyType);
         $keyForApi = $normalizedType === 'phone'
@@ -374,6 +378,12 @@ class HeartPayService
         }
         if ($correlationID !== null) {
             $body['correlationID'] = $correlationID;
+        }
+        if ($recipientName !== null && $recipientName !== '') {
+            $body['recipientName'] = $recipientName;
+        }
+        if ($recipientDocument !== null && $recipientDocument !== '') {
+            $body['recipientDocument'] = preg_replace('/\D/', '', $recipientDocument);
         }
 
         $result = $this->post('payouts', $body);
