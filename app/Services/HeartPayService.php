@@ -279,15 +279,16 @@ class HeartPayService
         $data = $result['data']['data'] ?? $result['data'] ?? [];
 
         return [
-            'success'       => true,
-            'correlationID' => $data['correlationID'] ?? $result['data']['correlationID'] ?? null,
-            'brCode'        => $data['brCode'] ?? $result['data']['brCode'] ?? null,
-            'qrCodeImage'   => $data['qrCodeImage'] ?? null,
-            'status'        => $data['status'] ?? 'ACTIVE',
-            'expiresDate'   => $data['expiresDate'] ?? $data['expiresAt'] ?? null,
-            'value_cents'   => $data['value'] ?? self::toCents($amountReais),
-            'deduplicated'  => $result['data']['deduplicated'] ?? false,
-            'raw'           => $result['data'],
+            'success'         => true,
+            'correlationID'   => $data['correlationID'] ?? $result['data']['correlationID'] ?? null,
+            'brCode'          => $data['brCode'] ?? $result['data']['brCode'] ?? null,
+            'qrCodeImage'     => $data['qrCodeImage'] ?? $result['data']['qrCodeImage'] ?? null,
+            'paymentLinkUrl'  => $data['paymentLinkUrl'] ?? $result['data']['paymentLinkUrl'] ?? null,
+            'status'          => $data['status'] ?? 'ACTIVE',
+            'expiresDate'     => $data['expiresDate'] ?? $data['expiresAt'] ?? $result['data']['expiresDate'] ?? null,
+            'value_cents'     => $data['value'] ?? self::toCents($amountReais),
+            'deduplicated'    => $result['data']['deduplicated'] ?? false,
+            'raw'             => $result['data'],
         ];
     }
 
