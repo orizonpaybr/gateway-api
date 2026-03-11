@@ -131,7 +131,7 @@ class DepositController extends Controller
             ->first();
 
         if ($deposit) {
-            return response()->json(['status' => $deposit->status]);
+            return response()->json($this->buildStatusResponse($deposit));
         }
 
         $cashOut = SolicitacoesCashOut::where('idTransaction', $request->idTransaction)
@@ -139,10 +139,35 @@ class DepositController extends Controller
             ->first();
 
         if ($cashOut) {
-            return response()->json(['status' => $cashOut->status]);
+            return response()->json($this->buildStatusResponse($cashOut));
         }
 
         return response()->json(['status' => 'NOT_FOUND']);
+    }
+
+    private function buildStatusResponse($transaction): array
+    {
+        $response = ['status' => $transaction->status];
+
+        if ($transaction->webhook_status !== null) {
+            $response['webhook'] = [
+                'delivery_status' => $transaction->webhook_status,
+                'sent_at'         => $transaction->webhook_sent_at,
+                'http_status'     => $transaction->webhook_http_status,
+                'attempts'        => $transaction->webhook_attempts ?? 0,
+            ];
+
+            if ($transaction->webhook_status !== 'delivered') {
+                $response['webhook']['error'] = $transaction->webhook_error;
+            }
+
+            if (! empty($transaction->webhook_request_body)) {
+                $decoded = json_decode($transaction->webhook_request_body, true);
+                $response['webhook']['request_body'] = $decoded !== null ? $decoded : $transaction->webhook_request_body;
+            }
+        }
+
+        return $response;
     }
 
     /**

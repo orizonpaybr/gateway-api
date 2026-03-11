@@ -46,7 +46,13 @@ class Solicitacoes extends Model
         "billet_download",
         "banking_billet",
         "days_availability",
-        "end_to_end"
+        "end_to_end",
+        "webhook_status",
+        "webhook_sent_at",
+        "webhook_http_status",
+        "webhook_error",
+        "webhook_attempts",
+        "webhook_request_body"
     ];
 
     public function user()

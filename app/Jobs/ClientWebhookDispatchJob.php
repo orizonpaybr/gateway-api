@@ -2,6 +2,8 @@
 
 namespace App\Jobs;
 
+use App\Models\Solicitacoes;
+use App\Models\SolicitacoesCashOut;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -78,14 +80,50 @@ class ClientWebhookDispatchJob implements ShouldQueue
 
             if ($response->successful()) {
                 Log::info('[ClientWebhook] Webhook entregue ao cliente', $logContext);
+                $this->recordDelivery('delivered', $response->status(), null, $payload);
             } elseif ($response->redirect()) {
                 Log::warning('[ClientWebhook] Cliente retornou redirect — verificar URL de callback', $logContext);
+                $this->recordDelivery('redirect', $response->status(), 'Servidor retornou redirect ' . $response->status(), $payload);
             } else {
                 Log::warning('[ClientWebhook] Cliente retornou erro ao receber webhook', $logContext);
+                $this->recordDelivery('error', $response->status(), "HTTP {$response->status()}: " . substr($responseBody, 0, 200), $payload);
             }
         } catch (\Throwable $e) {
             $logContext['error'] = $e->getMessage();
             Log::error('[ClientWebhook] Erro ao disparar webhook para o cliente', $logContext);
+            $this->recordDelivery('failed', null, substr($e->getMessage(), 0, 200), $payload);
+        }
+    }
+
+    /**
+     * Grava resultado da entrega do webhook na transação (Cash In ou Cash Out).
+     * Inclui o payload enviado para o cliente poder auditar "payload de entrada" na consulta de status.
+     */
+    private function recordDelivery(string $status, ?int $httpStatus, ?string $error = null, ?array $payload = null): void
+    {
+        $requestBodyJson = $payload !== null ? json_encode($payload, JSON_UNESCAPED_UNICODE) : null;
+        if ($requestBodyJson !== null && strlen($requestBodyJson) > 4000) {
+            $requestBodyJson = substr($requestBodyJson, 0, 4000);
+        }
+
+        $data = [
+            'webhook_status'        => $status,
+            'webhook_sent_at'       => now(),
+            'webhook_http_status'   => $httpStatus,
+            'webhook_error'         => $error,
+            'webhook_request_body'  => $requestBodyJson,
+        ];
+
+        $updated = SolicitacoesCashOut::where('idTransaction', $this->idTransaction)
+            ->update(array_merge($data, [
+                'webhook_attempts' => \Illuminate\Support\Facades\DB::raw('webhook_attempts + 1'),
+            ]));
+
+        if ($updated === 0) {
+            Solicitacoes::where('idTransaction', $this->idTransaction)
+                ->update(array_merge($data, [
+                    'webhook_attempts' => \Illuminate\Support\Facades\DB::raw('webhook_attempts + 1'),
+                ]));
         }
     }
 
