@@ -227,9 +227,7 @@ class SaqueController extends Controller
             if ($saldoTotalDisponivel < $valorTotalDescontar) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Saldo insuficiente. Disponível: R$ ' . number_format($saldoTotalDisponivel, 2, ',', '.') .
-                        ', Necessário: R$ ' . number_format($valorTotalDescontar, 2, ',', '.') .
-                        ' (incluindo taxa de R$ ' . number_format($taxaTotal, 2, ',', '.') . ')'
+                    'message' => 'Saldo insuficiente.'
                 ], 401);
             }
 
@@ -384,9 +382,14 @@ class SaqueController extends Controller
                 'trace' => $e->getTraceAsString(),
             ]);
 
+            // Não expor detalhes (ex.: saldo/valores) ao cliente
+            $mensagemCliente = str_contains(strtolower($e->getMessage()), 'saldo insuficiente')
+                ? 'Saldo insuficiente.'
+                : 'Erro ao processar saque PIX. Tente novamente.';
+
             return response()->json([
                 'status' => 'error',
-                'message' => 'Erro ao processar saque PIX: ' . $e->getMessage()
+                'message' => $mensagemCliente
             ], 500);
         }
     }
