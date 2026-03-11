@@ -33,7 +33,13 @@ class SolicitacoesCashOut extends Model
         "blockchainNetwork",
         "cryptocurrency",
         "callback",
-        "primepay7_id"
+        "primepay7_id",
+        "webhook_status",
+        "webhook_sent_at",
+        "webhook_http_status",
+        "webhook_error",
+        "webhook_attempts",
+        "webhook_request_body"
     ];
 
     public $casts = [
