@@ -59,35 +59,30 @@ class ClientWebhookDispatchJob implements ShouldQueue
             $payload['message'] = $this->message;
         }
 
+        $logContext = [
+            'method'        => 'POST',
+            'url'           => $this->callbackUrl,
+            'request_body'  => $payload,
+        ];
+
         try {
             $response = Http::timeout(10)
                 ->withHeaders(['Content-Type' => 'application/json'])
                 ->post($this->callbackUrl, $payload);
 
+            $responseBody = substr($response->body(), 0, 1000);
+
+            $logContext['http_status']   = $response->status();
+            $logContext['response_body'] = $responseBody;
+
             if ($response->successful()) {
-                Log::info('[ClientWebhook] Webhook entregue ao cliente', [
-                    'url'           => $this->callbackUrl,
-                    'idTransaction' => $this->idTransaction,
-                    'status'        => $this->status,
-                    'http_status'   => $response->status(),
-                ]);
+                Log::info('[ClientWebhook] Webhook entregue ao cliente', $logContext);
             } else {
-                Log::warning('[ClientWebhook] Cliente retornou erro ao receber webhook', [
-                    'url'           => $this->callbackUrl,
-                    'idTransaction' => $this->idTransaction,
-                    'status'        => $this->status,
-                    'http_status'   => $response->status(),
-                    'body'          => substr($response->body(), 0, 500),
-                ]);
+                Log::warning('[ClientWebhook] Cliente retornou erro ao receber webhook', $logContext);
             }
         } catch (\Throwable $e) {
-            Log::error('[ClientWebhook] Erro ao disparar webhook para o cliente', [
-                'url'           => $this->callbackUrl,
-                'idTransaction' => $this->idTransaction,
-                'status'        => $this->status,
-                'error'         => $e->getMessage(),
-            ]);
-            // Não relança: falha no webhook do cliente não deve interromper a fila interna.
+            $logContext['error'] = $e->getMessage();
+            Log::error('[ClientWebhook] Erro ao disparar webhook para o cliente', $logContext);
         }
     }
 

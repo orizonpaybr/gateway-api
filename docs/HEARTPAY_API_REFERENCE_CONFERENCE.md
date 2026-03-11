@@ -129,7 +129,24 @@ Referência única: documentação oficial HeartPay. O gateway aceita os nomes d
 
 ---
 
-## 8. Resumo
+## 8. Troubleshooting — PayOutFailed "saldo insuficiente"
+
+Quando o webhook **PayOutFailed** traz `errorMessage: "Não há saldo suficiente para efetuar este pagamento (HTTP 400)"` mas o painel HeartPay mostra **Saldo disponível** alto (ex.: R$ 65k), o débito do saque via API pode estar usando **outro saldo** que não o exibido na tela. Saques de R$ 1 podem concluir e de R$ 10 falhar se houver limite por transação ou contas diferentes.
+
+**O que conferir no painel HeartPay:**
+
+| Onde | O que verificar |
+|------|------------------|
+| **Carteira / Saldo** | Se existe mais de um saldo: "Saldo disponível" vs "Saldo para saque via API" ou "Conta operacional". O valor grande pode ser de uma conta; o payout pode debitar de outra (ex.: conta Woovi). |
+| **API / Integrações** | Se a API Key usada no gateway (`HEARTPAY_API_KEY`) é da **mesma conta** em que aparece o saldo. Contas diferentes = saldos separados. |
+| **Limites** | Se há "Limite por transação" ou "Limite para saque via API" (ex.: R$ 1 ou R$ 5) que expliquem R$ 1 passar e R$ 10 falhar. |
+| **Suporte HeartPay** | Enviar um payout ID que falhou (ex.: `PAYOUT_API_7uIN9vUvZkqkaNg05u`) e perguntar: *"Qual conta/saldo é debitado nos saques via API? O painel mostra R$ X disponível; por que o retorno é saldo insuficiente?"* |
+
+**No gateway:** o motivo exato vem no webhook (`data.data.errorMessage`). Para inspecionar na VPS: `webhook_logs.payload` do registro com `event = PayOutFailed` e `referenceCode` do saque.
+
+---
+
+## 9. Resumo
 
 - **URL base, autenticação, endpoints usados pelo gateway e valores em centavos** estão alinhados com a API Reference.
 - **Rate limit** (10k/15min) e tratamento de **429** (incl. Retry-After) estão cobertos.
