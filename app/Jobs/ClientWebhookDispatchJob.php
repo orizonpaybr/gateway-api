@@ -67,6 +67,7 @@ class ClientWebhookDispatchJob implements ShouldQueue
 
         try {
             $response = Http::timeout(10)
+                ->withoutRedirecting()
                 ->withHeaders(['Content-Type' => 'application/json'])
                 ->post($this->callbackUrl, $payload);
 
@@ -77,6 +78,8 @@ class ClientWebhookDispatchJob implements ShouldQueue
 
             if ($response->successful()) {
                 Log::info('[ClientWebhook] Webhook entregue ao cliente', $logContext);
+            } elseif ($response->redirect()) {
+                Log::warning('[ClientWebhook] Cliente retornou redirect — verificar URL de callback', $logContext);
             } else {
                 Log::warning('[ClientWebhook] Cliente retornou erro ao receber webhook', $logContext);
             }
