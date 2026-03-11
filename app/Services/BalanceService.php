@@ -76,7 +76,7 @@ class BalanceService
             
             // Verificar saldo suficiente (se for saldo)
             if ($field === 'saldo' && $user->saldo < $amount) {
-                throw new \Exception("Saldo insuficiente. Disponível: {$user->saldo}, Necessário: {$amount}");
+                throw new \Exception('Saldo insuficiente.');
             }
             
             // Decremento atômico no banco
@@ -201,10 +201,7 @@ class BalanceService
             
             // Verificar saldo total suficiente
             if ($totalDisponivel < $amount) {
-                throw new \Exception(
-                    "Saldo insuficiente. Disponível: R$ " . number_format($totalDisponivel, 2, ',', '.') . 
-                    ", Necessário: R$ " . number_format($amount, 2, ',', '.')
-                );
+                throw new \Exception('Saldo insuficiente.');
             }
             
             $saldoAfiliadoAntes = $user->saldo_afiliado;

@@ -55,9 +55,7 @@ class SaqueInterfaceHelper
         if (!$informacoes['pode_sacar']) {
             return [
                 'valido' => false,
-                'erro' => "Saldo insuficiente. Necessário: R$ " . number_format($informacoes['taxas_solicitadas']['valor_total_descontar'], 2, ',', '.') . 
-                         ", Disponível: R$ " . number_format($informacoes['saldo_disponivel'], 2, ',', '.') . 
-                         ". Valor máximo para saque: R$ " . number_format($informacoes['valor_maximo_saque'], 2, ',', '.'),
+                'erro' => 'Saldo insuficiente.',
                 'informacoes' => $informacoes
             ];
         }
@@ -65,7 +63,7 @@ class SaqueInterfaceHelper
         if ($valorSolicitado > $informacoes['valor_maximo_saque']) {
             return [
                 'valido' => false,
-                'erro' => "Valor solicitado excede o máximo permitido. Máximo: R$ " . number_format($informacoes['valor_maximo_saque'], 2, ',', '.'),
+                'erro' => 'Valor solicitado excede o limite permitido.',
                 'informacoes' => $informacoes
             ];
         }

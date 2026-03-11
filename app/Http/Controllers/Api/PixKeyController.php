@@ -454,7 +454,7 @@ class PixKeyController extends Controller
             if ($saldoTotalDisponivel < $valorTotalDescontar) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Saldo insuficiente. Disponível: R$ ' . number_format($saldoTotalDisponivel, 2, ',', '.') . ', Necessário: R$ ' . number_format($valorTotalDescontar, 2, ',', '.') . ' (valor R$ ' . number_format($amount, 2, ',', '.') . ' + taxa R$ ' . number_format($taxaCashOut, 2, ',', '.') . ')'
+                    'message' => 'Saldo insuficiente.'
                 ], 400)->header('Access-Control-Allow-Origin', '*');
             }
 
