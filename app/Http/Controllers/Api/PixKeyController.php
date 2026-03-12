@@ -454,7 +454,7 @@ class PixKeyController extends Controller
             if ($saldoTotalDisponivel < $valorTotalDescontar) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Saldo insuficiente.'
+                    'message' => 'Não foi possível sacar, entre em contato com o suporte.'
                 ], 400)->header('Access-Control-Allow-Origin', '*');
             }
 

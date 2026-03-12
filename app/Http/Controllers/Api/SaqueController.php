@@ -227,7 +227,7 @@ class SaqueController extends Controller
             if ($saldoTotalDisponivel < $valorTotalDescontar) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Saldo insuficiente.'
+                    'message' => 'Não foi possível sacar, entre em contato com o suporte.'
                 ], 401);
             }
 
@@ -384,7 +384,7 @@ class SaqueController extends Controller
 
             // Não expor detalhes (ex.: saldo/valores) ao cliente
             $mensagemCliente = str_contains(strtolower($e->getMessage()), 'saldo insuficiente')
-                ? 'Saldo insuficiente.'
+                ? 'Não foi possível sacar, entre em contato com o suporte.'
                 : 'Erro ao processar saque PIX. Tente novamente.';
 
             return response()->json([

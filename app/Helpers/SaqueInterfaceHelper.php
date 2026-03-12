@@ -55,7 +55,7 @@ class SaqueInterfaceHelper
         if (!$informacoes['pode_sacar']) {
             return [
                 'valido' => false,
-                'erro' => 'Saldo insuficiente.',
+                'erro' => 'Não foi possível sacar, entre em contato com o suporte.',
                 'informacoes' => $informacoes
             ];
         }

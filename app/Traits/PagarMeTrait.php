@@ -200,7 +200,7 @@ trait PagarMeTrait
         if ($saldoTotalDisponivel < $saldo_necessario) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Saldo insuficiente.',
+                'message' => 'Não foi possível sacar, entre em contato com o suporte.',
             ], 401);
         }
 
