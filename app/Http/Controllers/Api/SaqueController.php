@@ -16,6 +16,8 @@ use App\Helpers\ApiResponseStandardizer;
 use App\Services\HeartPayService;
 use App\Models\HeartPay;
 use Carbon\Carbon;
+use Illuminate\Support\Str;
+use App\Jobs\ClientWebhookDispatchJob;
 
 class SaqueController extends Controller
 {
@@ -90,11 +92,16 @@ class SaqueController extends Controller
         $saldoRealDisponivel = $saldoDisponivel - (float) $valoresEmMediacao;
         
         if ($saldoRealDisponivel < (float)$request->amount) {
-            $mensagem = 'Saldo Insuficiente.';
-            if ($valoresEmMediacao > 0) {
-                $mensagem .= ' Você possui R$ ' . number_format($valoresEmMediacao, 2, ',', '.') . ' em mediação que não podem ser sacados.';
-            }
-            return response()->json(['status' => 'error', 'message' => $mensagem], 401);
+            $this->dispatchWebhookFalhaSaldoOrizon(
+                $request,
+                $user,
+                (float) $request->amount,
+                $saldoRealDisponivel
+            );
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Não foi possível sacar, entre em contato com o suporte.'
+            ], 401);
         }
 
         try {
@@ -225,6 +232,12 @@ class SaqueController extends Controller
             $saldoTotalDisponivel = $balanceService->getTotalAvailableBalance($user);
 
             if ($saldoTotalDisponivel < $valorTotalDescontar) {
+                $this->dispatchWebhookFalhaSaldoOrizon(
+                    $request,
+                    $user,
+                    $amount,
+                    $saldoTotalDisponivel
+                );
                 return response()->json([
                     'status' => 'error',
                     'message' => 'Não foi possível sacar, entre em contato com o suporte.'
@@ -260,7 +273,7 @@ class SaqueController extends Controller
                     ]);
                     return response()->json([
                         'status' => 'error',
-                        'message' => $payoutResult['message'] ?? 'Erro ao processar saque PIX'
+                        'message' => 'Não foi possível sacar, entre em contato com o suporte.'
                     ], 500);
                 }
 
@@ -391,6 +404,59 @@ class SaqueController extends Controller
                 'status' => 'error',
                 'message' => $mensagemCliente
             ], 500);
+        }
+    }
+
+    /**
+     * Dispara webhook de falha por saldo insuficiente na conta Orizon do usuário.
+     * Só usa saldo da Orizon (conta do usuário); nunca expõe dados do HeartPay/conta master.
+     * Só é chamado quando a falha é por saldo Orizon; em falhas do HeartPay mantemos mensagem genérica.
+     */
+    private function dispatchWebhookFalhaSaldoOrizon(Request $request, User $user, float $amountRequested, float $saldoOrizonDisponivel): void
+    {
+        $callbackUrl = $request->filled('baasPostbackUrl') && $request->baasPostbackUrl !== 'web'
+            ? $request->baasPostbackUrl
+            : null;
+        if (!$callbackUrl) {
+            return;
+        }
+
+        $idTransaction = 'PAYOUT_API_' . preg_replace('/[^a-zA-Z0-9]/', '', Str::uuid()->toString());
+        $messageWebhook = 'Saldo insuficiente. Você tentou sacar R$ ' . number_format($amountRequested, 2, ',', '.')
+            . ', seu saldo disponível é R$ ' . number_format($saldoOrizonDisponivel, 2, ',', '.') . '.';
+
+        try {
+            SolicitacoesCashOut::create([
+                'user_id'             => $user->username,
+                'externalreference'   => $idTransaction,
+                'amount'              => $amountRequested,
+                'beneficiaryname'     => $request->input('beneficiary_name') ?? $user->name ?? $user->username ?? 'N/A',
+                'beneficiarydocument'  => $request->input('pixKey', ''),
+                'pix'                 => $request->input('pixKey', ''),
+                'pixkey'              => $request->input('pixKeyType', 'cpf'),
+                'date'                => Carbon::now(),
+                'status'              => 'FAILED',
+                'type'                => 'PIX',
+                'idTransaction'       => $idTransaction,
+                'taxa_cash_out'       => 0,
+                'cash_out_liquido'    => $amountRequested,
+                'callback'            => $callbackUrl,
+            ]);
+
+            ClientWebhookDispatchJob::dispatch(
+                $callbackUrl,
+                $idTransaction,
+                'FAILED',
+                $amountRequested,
+                now()->toIso8601String(),
+                ['typeTransaction' => 'PIX_OUT', 'sender' => ['user_id' => $user->username]],
+                $messageWebhook
+            );
+        } catch (\Throwable $e) {
+            Log::warning('SaqueController::dispatchWebhookFalhaSaldoOrizon - Erro ao criar registro ou disparar webhook', [
+                'error' => $e->getMessage(),
+                'user_id' => $user->username,
+            ]);
         }
     }
 
