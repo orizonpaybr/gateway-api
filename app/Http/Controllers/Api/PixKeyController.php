@@ -604,13 +604,16 @@ class PixKeyController extends Controller
                     }
                     $payoutResult = $heartPay->createPayout((float) $amount, $keyValue, $keyType, $description, $correlationID, $recipientName, $recipientDocument);
                     if (!$payoutResult['success']) {
-                        $msg = $payoutResult['message'] ?? 'Erro ao criar saque no adquirente';
-                        $statusCode = $payoutResult['status_code'] ?? 500;
-                        $httpStatus = ($statusCode >= 400 && $statusCode < 500) ? 400 : 500;
+                        Log::error('PixKeyController::withdraw - HeartPay recusou payout', [
+                            'message' => $payoutResult['message'] ?? 'N/A',
+                            'user_id' => $user->username,
+                            'amount' => $amount,
+                        ]);
+                        // Nunca expor mensagem do HeartPay (saldo/conta master) ao usuário.
                         return response()->json([
                             'success' => false,
-                            'message' => $msg,
-                        ], $httpStatus)->header('Access-Control-Allow-Origin', '*');
+                            'message' => 'Não foi possível sacar, entre em contato com o suporte.',
+                        ], 400)->header('Access-Control-Allow-Origin', '*');
                     }
                     $idTxn = $payoutResult['referenceCode'] ?? $correlationID;
                     $statusMapped = \App\Services\HeartPayService::mapPayoutStatus($payoutResult['status'] ?? 'pending');
@@ -670,7 +673,7 @@ class PixKeyController extends Controller
                     ]);
                     return response()->json([
                         'success' => false,
-                        'message' => 'Erro ao processar saque PIX: ' . $e->getMessage()
+                        'message' => 'Não foi possível sacar, entre em contato com o suporte.'
                     ], 500)->header('Access-Control-Allow-Origin', '*');
                 }
             }
