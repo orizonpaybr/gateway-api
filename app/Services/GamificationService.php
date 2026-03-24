@@ -38,7 +38,7 @@ class GamificationService
                 ->get();
 
             if ($niveis->isEmpty()) {
-                Log::warning('Tabela niveis vazia; usando níveis padrão da Jornada Orizon');
+                Log::warning('Tabela niveis vazia; usando níveis padrão da Jornada Coratri');
                 return $this->getDefaultNiveis();
             }
 

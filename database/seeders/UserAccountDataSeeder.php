@@ -134,7 +134,7 @@ class UserAccountDataSeeder extends Seeder
                 $updateData['affiliate_code'] = strtoupper($user->username) . '-AFF';
             }
             if ($schema->hasColumn('users', 'affiliate_link') && $isGerente) {
-                $updateData['affiliate_link'] = 'https://orizon.com/ref/' . strtoupper($user->username);
+                $updateData['affiliate_link'] = 'https://coratri.com/ref/' . strtoupper($user->username);
             }
             if ($schema->hasColumn('users', 'affiliate_percentage') && $isGerente) {
                 $updateData['affiliate_percentage'] = rand(5, 15) / 10;

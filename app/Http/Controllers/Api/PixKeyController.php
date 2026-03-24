@@ -438,11 +438,11 @@ class PixKeyController extends Controller
                 ], 500)->header('Access-Control-Allow-Origin', '*');
             }
 
-            // Calcular taxas (taxa Orizon + custo HeartPay)
+            // Calcular taxas (taxa Coratri + custo HeartPay)
             $isInterfaceWeb = true;
             $taxaCalculada = \App\Helpers\TaxaSaqueHelper::calcularTaxaSaque((float) $amount, $setting, $user, $isInterfaceWeb);
             $taxaCashOut = $taxaCalculada['taxa_cash_out'];           // Taxa total cobrada do cliente
-            $taxaAplicacao = $taxaCalculada['taxa_aplicacao'];        // Lucro Orizon
+            $taxaAplicacao = $taxaCalculada['taxa_aplicacao'];        // Lucro Coratri
             $taxaAdquirente = $taxaCalculada['taxa_adquirente'];      // Custo HeartPay
             $cashOutLiquido = $taxaCalculada['saque_liquido'];        // Valor que o cliente recebe
             $valorTotalDescontar = $taxaCalculada['valor_total_descontar']; // Total a debitar do saldo
@@ -609,7 +609,6 @@ class PixKeyController extends Controller
                             'user_id' => $user->username,
                             'amount' => $amount,
                         ]);
-                        // Nunca expor mensagem do HeartPay (saldo/conta master) ao usuário.
                         return response()->json([
                             'success' => false,
                             'message' => 'Não foi possível sacar, entre em contato com o suporte.',

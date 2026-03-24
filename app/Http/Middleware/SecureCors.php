@@ -15,9 +15,9 @@ use Symfony\Component\HttpFoundation\Response;
  * 
  * Configuração (.env):
  * FRONTEND_URL=http://localhost:3000 (desenvolvimento)
- * FRONTEND_URL=https://finance.orizonpay.com (produção)
+ * FRONTEND_URL=https://finance.coratri.com (produção)
  * CORS_ALLOWED_ORIGINS (opcional): lista separada por vírgula para múltiplas origens em produção.
- *   Ex.: https://finance.orizonpay.com,https://www.finance.orizonpay.com
+ *   Ex.: https://finance.coratri.com,https://www.finance.coratri.com
  *
  * IMPORTANTE: Em produção, NUNCA usar Access-Control-Allow-Origin: *
  */

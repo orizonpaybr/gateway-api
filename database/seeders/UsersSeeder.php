@@ -19,7 +19,7 @@ class UsersSeeder extends Seeder
             [
                 'username' => 'gerente1',
                 'name' => 'Carlos Eduardo Santos',
-                'email' => 'gerente1@orizon.com',
+                'email' => 'gerente1@coratri.com',
                 'password' => Hash::make('teste123'),
                 'permission' => 2, // Gerente
                 'status' => 1, // Ativo
@@ -53,7 +53,7 @@ class UsersSeeder extends Seeder
             [
                 'username' => 'gerente2',
                 'name' => 'Ana Paula Oliveira',
-                'email' => 'gerente2@orizon.com',
+                'email' => 'gerente2@coratri.com',
                 'password' => Hash::make('teste123'),
                 'permission' => 2, // Gerente
                 'status' => 1, // Ativo

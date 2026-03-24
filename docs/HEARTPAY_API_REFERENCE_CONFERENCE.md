@@ -1,4 +1,4 @@
-# Conferência Final — HeartPay API Reference vs Implementação Orizon
+# Conferência Final — HeartPay API Reference vs Implementação Coratri
 
 Referência: API Reference HeartPay BaaS (URL Base `https://app.heartpag.com/api/v1/client`).
 
@@ -56,7 +56,7 @@ Não necessários para o fluxo atual do gateway (depósito, saque, reembolso, we
 
 **Doc HeartPay (API Gateway):** 10.000 req / 15 min. Headers: `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`.
 
-| Item | Documentação HeartPay | Implementação Orizon | Status |
+| Item | Documentação HeartPay | Implementação Coratri | Status |
 |------|------------------------|----------------------|--------|
 | Limite API Gateway | 10.000 req / 15 min | `bootstrap/app.php` → throttle 10000/15 min para pix-in, pix-out, status-check (alinhado à doc HeartPay) | OK |
 | Webhook (entrada) | — | `heartpay.php` → throttle 2000/min (~33 req/s) para evitar 429 em picos | OK |
@@ -97,7 +97,7 @@ Formato de erro padrão (error, message, code, details): corpo completo é logad
 
 Referência única: documentação oficial HeartPay. O gateway aceita os nomes de evento em ambos os formatos (ex.: `PayOutCompleted` e `payout.completed`) para compatibilidade.
 
-| Evento HeartPay | Descrição | Job Orizon |
+| Evento HeartPay | Descrição | Job Coratri |
 |-----------------|-----------|------------|
 | PayInCreated | Cobrança PIX criada, aguardando pagamento | ProcessHeartPayCashInJob |
 | PayInCompleted / charge.paid | Pagamento confirmado, creditado | ProcessHeartPayCashInJob |
@@ -154,4 +154,4 @@ Quando o webhook **PayOutFailed** traz `errorMessage: "Não há saldo suficiente
 - **Reembolsos**: POST /refunds com correlationID, value opcional e comment opcional.
 - **Endpoints Woovi-only** (pix-keys, qr-codes, GET transactions/:id) não implementados de propósito; podem ser adicionados depois se necessário.
 
-Conferência final: **implementação compatível com a API Reference HeartPay** para o escopo utilizado (Gateway Orizon).
+Conferência final: **implementação compatível com a API Reference HeartPay** para o escopo utilizado (Gateway Coratri).

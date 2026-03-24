@@ -128,7 +128,7 @@ class GamificationSeeder extends Seeder
             ],
             'Diamante' => [
                 'title' => '💎 Nível Diamante - Topo!',
-                'body' => 'Parabéns! Você alcançou o ápice da Jornada Orizon! Sua dedicação é exemplar!',
+                'body' => 'Parabéns! Você alcançou o ápice da Jornada Coratri! Sua dedicação é exemplar!',
             ],
         ];
 

@@ -47,7 +47,7 @@ return [
     | Webhook
     |--------------------------------------------------------------------------
     |
-    | URL do webhook: https://api.orizonpay.com/heartpay/webhook
+    | URL do webhook: https://api.coratri.com.br/heartpay/webhook
     | Método: POST
     |
     | Segurança: HMAC-SHA256 com api_key para validação de assinatura.

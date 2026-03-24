@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\DB;
 class NiveisSeeder extends Seeder
 {
     /**
-     * Seed da tabela de níveis com dados padrão da Jornada Orizon
+     * Seed da tabela de níveis com dados padrão da Jornada Coratri
      * 
      * Cria ou atualiza os 5 níveis de gamificação:
      * - Bronze: R$ 0,00 - R$ 100.000,00

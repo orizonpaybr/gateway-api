@@ -12,21 +12,21 @@ use App\Models\App;
  * 1. Taxa global padrão: R$ 1,00 (taxa_fixa_padrao) para todos os usuários
  * 2. Taxa personalizada: pode ser definida por usuário (taxa_fixa_deposito)
  * 3. A taxa NÃO muda se houver afiliado - a comissão sai da taxa fixa
- * 4. Split da taxa: Adquirente PIX (R$ 0,025) → Afiliado (R$ 0,50 se houver) → Orizon (resto)
+ * 4. Split da taxa: Adquirente PIX (R$ 0,025) → Afiliado (R$ 0,50 se houver) → Coratri (resto)
  *
  * EXEMPLOS:
  * 
  * Caso 1: Taxa global R$ 1,00, sem afiliado, depósito R$ 5,00
  * - Usuário recebe: R$ 4,00
- * - Taxa: R$ 1,00 → Adquirente R$ 0,025 + Orizon R$ 0,975
+ * - Taxa: R$ 1,00 → Adquirente R$ 0,025 + Coratri R$ 0,975
  *
  * Caso 2: Taxa personalizada R$ 0,90, sem afiliado, depósito R$ 5,00
  * - Usuário recebe: R$ 4,10
- * - Taxa: R$ 0,90 → Adquirente R$ 0,025 + Orizon R$ 0,875
+ * - Taxa: R$ 0,90 → Adquirente R$ 0,025 + Coratri R$ 0,875
  *
  * Caso 3: Taxa personalizada R$ 0,90, COM afiliado, depósito R$ 5,00
  * - Usuário recebe: R$ 4,10 (taxa NÃO muda com afiliado)
- * - Taxa: R$ 0,90 → Adquirente R$ 0,025 + Afiliado R$ 0,50 + Orizon R$ 0,375
+ * - Taxa: R$ 0,90 → Adquirente R$ 0,025 + Afiliado R$ 0,50 + Coratri R$ 0,375
  */
 class TaxaFlexivelHelper
 {
@@ -101,7 +101,7 @@ class TaxaFlexivelHelper
         $taxaTotal = max(0, (float) $taxaTotal);
         
         // IMPORTANTE: A comissão do afiliado NÃO é adicionada à taxa total
-        // Ela sai da taxa fixa, reduzindo o lucro da Orizon
+        // Ela sai da taxa fixa, reduzindo o lucro da Coratri
         $comissaoAfiliado = 0.00;
         if ($user && $user->affiliate_id) {
             $affiliate = \App\Models\User::where('id', $user->affiliate_id)->first();

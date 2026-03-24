@@ -21,7 +21,7 @@ NC='\033[0m'
 # Verificar se o diretório existe
 if [ ! -d "$APP_DIR" ]; then
     echo -e "${RED}❌ Diretório $APP_DIR não encontrado!${NC}"
-    echo "Execute primeiro: git clone git@github-orizonpaybr:orizonpaybr/gateway-api.git $APP_DIR"
+    echo "Execute primeiro: git clone git@github-coratribr:coratribr/gateway-api.git $APP_DIR"
     exit 1
 fi
 

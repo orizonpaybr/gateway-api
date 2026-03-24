@@ -65,7 +65,7 @@ class NotificationsSeeder extends Seeder
                 ['title' => 'Manutenção Programada', 'body' => 'Sistema entrará em manutenção no dia 30/12 às 02h.'],
                 ['title' => 'Nova Funcionalidade', 'body' => 'Confira a nova funcionalidade de relatórios avançados!'],
                 ['title' => 'Atualização de Termos', 'body' => 'Nossos termos de uso foram atualizados. Revise as mudanças.'],
-                ['title' => 'Bem-vindo ao Orizon', 'body' => 'Obrigado por se cadastrar! Explore todas as funcionalidades.'],
+                ['title' => 'Bem-vindo ao Coratri', 'body' => 'Obrigado por se cadastrar! Explore todas as funcionalidades.'],
             ],
             'infraction' => [
                 ['title' => 'Nova Infração Registrada', 'body' => 'Uma infração foi registrada em sua conta. Protocolo: {protocol}'],

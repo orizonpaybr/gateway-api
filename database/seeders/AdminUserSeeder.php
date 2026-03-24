@@ -17,7 +17,7 @@ class AdminUserSeeder extends Seeder
         // Cria ou atualiza um usuário administrador padrão
         // Importante: o frontend exibe o menu de Administração quando permission === 3
         
-        // Configurações para ambiente local (gateway_orizon)
+        // Configurações para ambiente local (gateway_coratri)
         $adminEmail = env('ADMIN_EMAIL', 'admin@exemplo.com');
         $adminUsername = env('ADMIN_USERNAME', 'admin');
         $adminPassword = env('ADMIN_PASSWORD', 'teste123');
