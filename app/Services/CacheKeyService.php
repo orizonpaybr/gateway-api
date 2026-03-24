@@ -135,7 +135,7 @@ class CacheKeyService
         }
     }
 
-    // --- Gamificação (Jornada Orizon) - padrão namespace:entity:identifier ---
+    // --- Gamificação (Jornada Coratri) - padrão namespace:entity:identifier ---
 
     /** TTL em segundos: lista de níveis (muda raramente) */
     public const TTL_GAMIFICATION_NIVEIS = 3600;

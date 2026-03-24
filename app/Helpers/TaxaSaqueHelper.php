@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Log;
  * 1. Taxa global padrão: R$ 1,00 (taxa_fixa_pix) para todos os usuários
  * 2. Taxa personalizada: pode ser definida por usuário (taxa_fixa_pix do user)
  * 3. A taxa NÃO muda se houver afiliado - a comissão sai da taxa fixa
- * 4. Split da taxa: Adquirente PIX (R$ 0,025) → Afiliado (R$ 0,50 se houver) → Orizon (resto)
+ * 4. Split da taxa: Adquirente PIX (R$ 0,025) → Afiliado (R$ 0,50 se houver) → Coratri (resto)
  * 5. Cliente sempre recebe o valor solicitado; taxa é descontada do saldo
  *
  * EXEMPLOS (mesmo padrão do depósito):
@@ -22,17 +22,17 @@ use Illuminate\Support\Facades\Log;
  * Caso 1: Taxa global R$ 1,00, sem afiliado, saque R$ 5,00
  * - Cliente recebe: R$ 5,00
  * - Saldo descontado: R$ 6,00 (5 + 1)
- * - Taxa: R$ 1,00 → Adquirente R$ 0,025 + Orizon R$ 0,975
+ * - Taxa: R$ 1,00 → Adquirente R$ 0,025 + Coratri R$ 0,975
  *
  * Caso 2: Taxa personalizada R$ 0,90, sem afiliado, saque R$ 5,00
  * - Cliente recebe: R$ 5,00
  * - Saldo descontado: R$ 5,90 (5 + 0,90)
- * - Taxa: R$ 0,90 → Adquirente R$ 0,025 + Orizon R$ 0,875
+ * - Taxa: R$ 0,90 → Adquirente R$ 0,025 + Coratri R$ 0,875
  *
  * Caso 3: Taxa personalizada R$ 0,90, COM afiliado, saque R$ 5,00
  * - Cliente recebe: R$ 5,00 (taxa NÃO muda com afiliado)
  * - Saldo descontado: R$ 5,90 (5 + 0,90)
- * - Taxa: R$ 0,90 → Adquirente R$ 0,025 + Afiliado R$ 0,50 + Orizon R$ 0,375
+ * - Taxa: R$ 0,90 → Adquirente R$ 0,025 + Afiliado R$ 0,50 + Coratri R$ 0,375
  */
 class TaxaSaqueHelper
 {
@@ -105,7 +105,7 @@ class TaxaSaqueHelper
         $taxaTotal = max(0, (float) $taxaTotal);
         
         // IMPORTANTE: A comissão do afiliado NÃO é adicionada à taxa total
-        // Ela sai da taxa fixa, reduzindo o lucro da Orizon
+        // Ela sai da taxa fixa, reduzindo o lucro da Coratri
         $comissaoAfiliado = 0.00;
         if ($user && $user->affiliate_id) {
             $affiliate = \App\Models\User::where('id', $user->affiliate_id)->first();
@@ -187,7 +187,7 @@ class TaxaSaqueHelper
 
         return [
             'taxa_cash_out' => $taxa_cash_out,       // Taxa fixa cobrada do cliente (NÃO muda com afiliado)
-            'taxa_aplicacao' => $lucroAplicacao,    // Lucro Orizon (taxa - HeartPay - afiliado)
+            'taxa_aplicacao' => $lucroAplicacao,    // Lucro Coratri (taxa - HeartPay - afiliado)
             'taxa_adquirente' => $custoHeartpay,
             'comissao_afiliado' => $comissaoAfiliado, // Comissão do pai afiliado (R$ 0,50 se houver)
             'saque_liquido' => $saque_liquido,       // Valor que o cliente recebe (sempre o valor solicitado)

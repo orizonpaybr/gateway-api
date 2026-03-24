@@ -3,7 +3,7 @@
 ## Passo a Passo:
 
 1. **Acesse**: https://github.com/settings/keys
-   - Certifique-se de estar logado na conta **orizonpaybr**
+   - Certifique-se de estar logado na conta **coratribr**
 
 2. **Clique em**: "New SSH key" (botão verde)
 

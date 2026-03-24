@@ -74,7 +74,7 @@ ssh root@SEU_IP_VPS
 ```bash
 # Clonar repositório temporariamente para obter os scripts
 cd /tmp
-git clone git@github-orizonpaybr:orizonpaybr/gateway-api.git temp-repo
+git clone git@github-coratribr:coratribr/gateway-api.git temp-repo
 cd temp-repo
 
 # Tornar scripts executáveis
@@ -140,13 +140,13 @@ sudo ./scripts/setup-database.sh
 
 ```bash
 # Como usuário gateway
-sudo -u gateway git clone git@github-orizonpaybr:orizonpaybr/gateway-api.git /var/www/gateway-api
+sudo -u gateway git clone git@github-coratribr:coratribr/gateway-api.git /var/www/gateway-api
 ```
 
 **Se der erro de SSH:**
 - Configure a chave SSH no servidor ou use HTTPS:
 ```bash
-sudo -u gateway git clone https://github.com/orizonpaybr/gateway-api.git /var/www/gateway-api
+sudo -u gateway git clone https://github.com/coratribr/gateway-api.git /var/www/gateway-api
 ```
 
 ### 4.2. Configurar Arquivo .env

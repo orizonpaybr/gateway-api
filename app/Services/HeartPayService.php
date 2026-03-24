@@ -544,11 +544,11 @@ class HeartPayService
     }
 
     // ═════════════════════════════════════════════════════════════════
-    //  Mapeamento de status HeartPay → Orizon
+    //  Mapeamento de status HeartPay → Coratri
     // ═════════════════════════════════════════════════════════════════
 
     /**
-     * Mapeia status de cobrança (charge) HeartPay → status interno Orizon.
+     * Mapeia status de cobrança (charge) HeartPay → status interno Coratri.
      */
     public static function mapChargeStatus(string $heartPayStatus): string
     {
@@ -562,7 +562,7 @@ class HeartPayService
     }
 
     /**
-     * Mapeia status de saque (payout) HeartPay → status interno Orizon.
+     * Mapeia status de saque (payout) HeartPay → status interno Coratri.
      */
     public static function mapPayoutStatus(string $heartPayStatus): string
     {

@@ -291,7 +291,7 @@ class UserController extends Controller
                     'created_at' => $transaction->created_at ?? now()->format('Y-m-d H:i:s'),
                     'nome_cliente' => $transaction->nome_cliente ?? 'Cliente',
                     'documento' => $transaction->documento ?? '00000000000',
-                    'adquirente' => $transaction->adquirente ?? 'Orizon Pay',
+                    'adquirente' => $transaction->adquirente ?? 'Coratri',
                     'descricao' => $transaction->descricao ?? ($transaction->tipo === 'deposito' ? 'Pagamento Recebido' : 'Pagamento Enviado')
                 ];
             });
@@ -408,7 +408,7 @@ class UserController extends Controller
                             'nome' => $user->name ?? $user->username,
                             'documento' => $user->cpf_cnpj ?? '00000000000'
                         ],
-                        'adquirente' => $deposito->adquirente_ref ?? 'Orizon Pay',
+                        'adquirente' => $deposito->adquirente_ref ?? 'Coratri',
                         'codigo_autenticacao' => $deposito->idTransaction ?? $deposito->externalreference,
                         'qrcode' => $deposito->qrcode_pix ?? null,
                         'descricao' => $deposito->descricao_transacao ?? 'Pagamento Recebido'
@@ -464,7 +464,7 @@ class UserController extends Controller
                         ],
                         'pix_key' => $saque->pix ?? '',
                         'pix_key_type' => $saque->pixkey ?? 'Não informado',
-                        'adquirente' => $saque->executor_ordem ?? 'Orizon Pay',
+                        'adquirente' => $saque->executor_ordem ?? 'Coratri',
                         'codigo_autenticacao' => $saque->idTransaction ?? $saque->externalreference,
                         'end_to_end' => $saque->end_to_end ?? null,
                         'descricao' => $saque->descricao_transacao ?? 'Pagamento Enviado'
@@ -926,7 +926,7 @@ class UserController extends Controller
                         'created_at' => $entrada->created_at,
                         'nome_cliente' => $entrada->payer_name ?? $entrada->client_name ?? 'Cliente',
                         'documento' => $entrada->payer_document ?? $entrada->client_document ?? '00000000000',
-                        'adquirente' => $entrada->adquirente_ref ?? 'Orizon Pay',
+                        'adquirente' => $entrada->adquirente_ref ?? 'Coratri',
                         'end_to_end' => $entrada->end_to_end ?? null,
                     ]);
                 }
@@ -946,7 +946,7 @@ class UserController extends Controller
                         'created_at' => $saida->created_at,
                         'nome_cliente' => $saida->beneficiaryname ?? 'Cliente',
                         'documento' => $saida->beneficiarydocument ?? '00000000000',
-                        'adquirente' => $saida->executor_ordem ?? 'Orizon Pay',
+                        'adquirente' => $saida->executor_ordem ?? 'Coratri',
                         'end_to_end' => $saida->end_to_end ?? null,
                     ]);
                 }
@@ -1759,7 +1759,7 @@ class UserController extends Controller
                         ],
                         [
                             'level' => 'Diamante',
-                            'message' => 'Parabéns! Você alcançou o ápice da Jornada Orizon! Sua dedicação e excelência são verdadeiramente inspiradoras.',
+                            'message' => 'Parabéns! Você alcançou o ápice da Jornada Coratri! Sua dedicação e excelência são verdadeiramente inspiradoras.',
                             'icon' => '/icons8-diamante-64.png'
                         ]
                     ],
@@ -2164,7 +2164,7 @@ class UserController extends Controller
                     'data' => $entrada->date,
                     'nome' => $entrada->payer_name ?? $entrada->client_name ?? 'Cliente',
                     'documento' => $entrada->payer_document ?? $entrada->client_document ?? '00000000000',
-                    'adquirente' => $entrada->adquirente_ref ?? 'Orizon Pay'
+                    'adquirente' => $entrada->adquirente_ref ?? 'Coratri'
                 ]);
             }
 
@@ -2183,7 +2183,7 @@ class UserController extends Controller
                     'documento' => $saida->beneficiarydocument ?? '00000000000',
                     'pix_key' => $saida->pix ?? '',
                     'pix_key_type' => $saida->pixkey ?? '',
-                    'adquirente' => $saida->adquirente ?? 'Orizon Pay'
+                    'adquirente' => $saida->adquirente ?? 'Coratri'
                 ]);
             }
 

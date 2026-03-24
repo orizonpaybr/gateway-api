@@ -121,7 +121,7 @@ INSERT IGNORE INTO app (
     id, nome_aplicacao, created_at, updated_at
 ) VALUES (
     1,
-    'Gateway Orizon',
+    'Gateway Coratri',
     NOW(),
     NOW()
 );

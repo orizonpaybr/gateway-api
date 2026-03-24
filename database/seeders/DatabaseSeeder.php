@@ -63,7 +63,7 @@ class DatabaseSeeder extends Seeder
         $this->command->info('👥 USUÁRIOS:');
         $this->command->info('  • 1 Admin (admin@exemplo.com / teste123)');
         $this->command->info('  • 1 Usuário de teste (teste@exemplo.com / teste123)');
-        $this->command->info('  • 2 Gerentes (gerente1@orizon.com, gerente2@orizon.com / teste123)');
+        $this->command->info('  • 2 Gerentes (gerente1@coratri.com, gerente2@coratri.com / teste123)');
         $this->command->info('  • 2 Usuários comuns (usuario1@exemplo.com, usuario2@exemplo.com / teste123)');
         $this->command->info('');
         $this->command->info('💰 TRANSAÇÕES:');

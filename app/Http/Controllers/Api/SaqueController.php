@@ -92,7 +92,7 @@ class SaqueController extends Controller
         $saldoRealDisponivel = $saldoDisponivel - (float) $valoresEmMediacao;
         
         if ($saldoRealDisponivel < (float)$request->amount) {
-            $this->dispatchWebhookFalhaSaldoOrizon(
+            $this->dispatchWebhookFalhaSaldoCoratri(
                 $request,
                 $user,
                 (float) $request->amount,
@@ -232,7 +232,7 @@ class SaqueController extends Controller
             $saldoTotalDisponivel = $balanceService->getTotalAvailableBalance($user);
 
             if ($saldoTotalDisponivel < $valorTotalDescontar) {
-                $this->dispatchWebhookFalhaSaldoOrizon(
+                $this->dispatchWebhookFalhaSaldoCoratri(
                     $request,
                     $user,
                     $amount,
@@ -408,11 +408,11 @@ class SaqueController extends Controller
     }
 
     /**
-     * Dispara webhook de falha por saldo insuficiente na conta Orizon do usuário.
-     * Só usa saldo da Orizon (conta do usuário); nunca expõe dados do HeartPay/conta master.
-     * Só é chamado quando a falha é por saldo Orizon; em falhas do HeartPay mantemos mensagem genérica.
+     * Dispara webhook de falha por saldo insuficiente na conta Coratri do usuário.
+     * Só usa saldo da Coratri (conta do usuário); nunca expõe dados do HeartPay/conta master.
+     * Só é chamado quando a falha é por saldo Coratri; em falhas do HeartPay mantemos mensagem genérica.
      */
-    private function dispatchWebhookFalhaSaldoOrizon(Request $request, User $user, float $amountRequested, float $saldoOrizonDisponivel): void
+    private function dispatchWebhookFalhaSaldoCoratri(Request $request, User $user, float $amountRequested, float $saldoCoratriDisponivel): void
     {
         $callbackUrl = $request->filled('baasPostbackUrl') && $request->baasPostbackUrl !== 'web'
             ? $request->baasPostbackUrl
@@ -423,7 +423,7 @@ class SaqueController extends Controller
 
         $idTransaction = 'PAYOUT_API_' . preg_replace('/[^a-zA-Z0-9]/', '', Str::uuid()->toString());
         $messageWebhook = 'Saldo insuficiente. Você tentou sacar R$ ' . number_format($amountRequested, 2, ',', '.')
-            . ', seu saldo disponível é R$ ' . number_format($saldoOrizonDisponivel, 2, ',', '.') . '.';
+            . ', seu saldo disponível é R$ ' . number_format($saldoCoratriDisponivel, 2, ',', '.') . '.';
 
         try {
             SolicitacoesCashOut::create([
@@ -453,7 +453,7 @@ class SaqueController extends Controller
                 $messageWebhook
             );
         } catch (\Throwable $e) {
-            Log::warning('SaqueController::dispatchWebhookFalhaSaldoOrizon - Erro ao criar registro ou disparar webhook', [
+            Log::warning('SaqueController::dispatchWebhookFalhaSaldoCoratri - Erro ao criar registro ou disparar webhook', [
                 'error' => $e->getMessage(),
                 'user_id' => $user->username,
             ]);
