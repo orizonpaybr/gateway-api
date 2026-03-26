@@ -40,8 +40,8 @@ class TaxaFlexivelHelper
      *   'taxa_cash_in' => float,           // Taxa total cobrada do cliente (taxa fixa configurada)
      *   'deposito_liquido' => float,       // Valor que o cliente recebe (amount - taxa_cash_in)
      *   'descricao' => string,             // Descrição do tipo de taxa
-     *   'taxa_aplicacao' => float,         // Lucro líquido da aplicação (taxa - custo HeartPay)
-     *   'taxa_adquirente' => float,        // Custo do adquirente PIX (HeartPay)
+     *   'taxa_aplicacao' => float,         // Lucro líquido da aplicação (taxa - custo Adquirente PIX)
+     *   'taxa_adquirente' => float,        // Custo do adquirente PIX (Adquirente PIX)
      *   'valor_recebido_adquirente' => float   // Valor líquido após custo adquirente (informativo)
      * ]
      */
@@ -121,16 +121,16 @@ class TaxaFlexivelHelper
             ]);
         }
         
-        // Custo fixo HeartPay por transação (R$ 0,025). Futuras adquirentes: cada uma com seu nome (ex: custoOutroAdquirente).
-        $custoHeartpay = (float) config('heartpay.custo_fixo_por_transacao', 0.025);
+        // Custo fixo Adquirente PIX por transação (R$ 0,025). Futuras adquirentes: cada uma com seu nome (ex: custoOutroAdquirente).
+        $custoHeartpay = (float) config('app.custo_fixo_adquirente_pix', 0.025);
         
-        // Lucro líquido da aplicação = taxa fixa - custo HeartPay - comissão afiliado
+        // Lucro líquido da aplicação = taxa fixa - custo Adquirente PIX - comissão afiliado
         $lucroAplicacao = max(0, $taxaTotal - $custoHeartpay - $comissaoAfiliado);
         
         // Depósito líquido para o cliente = valor bruto - taxa fixa (NÃO muda com afiliado)
         $depositoLiquido = max(0, $amount - $taxaTotal);
         
-        // Valor líquido após custo HeartPay (informativo)
+        // Valor líquido após custo Adquirente PIX (informativo)
         $valorRecebidoHeartpay = max(0, $amount - $custoHeartpay);
         
         return [

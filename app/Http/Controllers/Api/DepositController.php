@@ -14,9 +14,8 @@ use App\Models\Pagarme;
 use App\Helpers\Helper;
 use App\Helpers\ApiResponseStandardizer;
 use App\Services\PagarMeService;
+use App\Services\PixAcquirer\PixAcquirerManager;
 use App\DTO\PagarMeDTO\CardDepositDTO;
-use App\Services\HeartPayService;
-use App\Models\HeartPay;
 
 /**
  * @OA\Info(
@@ -94,16 +93,9 @@ class DepositController extends Controller
                 Log::info('DepositController - Executando PagarMeTrait', []);
                 $response = PagarMeTrait::requestDepositPagarme($request);
                 break;
-            case 'heartpay':
-                Log::info('DepositController - Processando depósito HeartPay', [
-                    'user_id' => $user->user_id ?? 'N/A',
-                    'amount' => $request->amount ?? 'N/A',
-                ]);
-                $response = $this->processHeartPayDeposit($request, $user, $setting);
-                break;
             default:
-                Log::info('DepositController - Adquirente não suportado', ['adquirente' => $default]);
-                return response()->json(['status' => 'error', 'message' => 'Adquirente não suportado.'], 500);
+                $response = $this->processPixDepositUsingAcquirer($request, $user, $setting, (string) $default);
+                break;
         }
         
         // Verificar se a resposta foi definida
@@ -547,150 +539,23 @@ class DepositController extends Controller
         return $statusMap[strtolower($pagarmeStatus)] ?? 'PENDING';
     }
 
-    /**
-     * Processa depósito PIX usando HeartPay (Banking as a Service).
-     *
-     * @param Request $request
-     * @param \App\Models\User $user
-     * @param \App\Models\App $setting
-     * @return array
-     */
-    private function processHeartPayDeposit(Request $request, $user, $setting): array
+    private function processPixDepositUsingAcquirer(Request $request, $user, $setting, string $acquirerRef): array
     {
-        try {
-            $heartPayService = app(HeartPayService::class);
+        $acquirerManager = app(PixAcquirerManager::class);
+        $acquirerService = $acquirerManager->resolve($acquirerRef);
 
-            if (!$heartPayService->isActive()) {
-                Log::error('DepositController::processHeartPayDeposit - HeartPay não configurado ou inativo', [
-                    'api_key_set' => !empty(config('heartpay.api_key')),
-                    'status_env'  => config('heartpay.status'),
-                ]);
-                return [
-                    'status' => 500,
-                    'data' => ['status' => 'error', 'message' => 'Serviço de pagamento PIX indisponível no momento.']
-                ];
-            }
-
-            $amount = (float) $request->amount;
-
-            if ($user && isset($user->user_id)) {
-                $user = \App\Models\User::where('user_id', $user->user_id)->first();
-            }
-
-            $debtorDocument = $request->debtor_document_number ?? $user->cpf_cnpj ?? null;
-            $debtorName     = $request->debtor_name ?? $user->name ?? 'Cliente';
-            $debtorEmail    = $request->email ?? $user->email ?? null;
-            $debtorPhone    = $request->phone ?? $user->telefone ?? null;
-
-            $taxaCalculada   = \App\Helpers\TaxaFlexivelHelper::calcularTaxaDeposito($amount, $setting, $user);
-            $depositoLiquido = $taxaCalculada['deposito_liquido'];
-            $taxaTotal       = $taxaCalculada['taxa_cash_in'];
-            $taxaAplicacao   = $taxaCalculada['taxa_aplicacao'];
-            $taxaAdquirente  = $taxaCalculada['taxa_adquirente'];
-            $descricaoTaxa   = $taxaCalculada['descricao'];
-
-            Log::info('DepositController::processHeartPayDeposit - Taxa calculada', [
-                'amount' => $amount, 'taxa_cash_in' => $taxaTotal,
-                'deposito_liquido' => $depositoLiquido,
-            ]);
-
-            $docDigits = $debtorDocument ? preg_replace('/\D/', '', $debtorDocument) : null;
-            if (!$docDigits || (strlen($docDigits) !== 11 && strlen($docDigits) !== 14)) {
-                return [
-                    'status' => 400,
-                    'data'   => ['status' => 'error', 'message' => 'CPF ou CNPJ do pagador é obrigatório para gerar cobrança PIX (11 ou 14 dígitos).']
-                ];
-            }
-            $customer = [
-                'name'  => $debtorName,
-                'taxID' => $docDigits,
-            ];
-            if ($debtorEmail) {
-                $customer['email'] = $debtorEmail;
-            }
-            if ($debtorPhone) {
-                $customer['phone'] = preg_replace('/\D/', '', $debtorPhone);
-            }
-
-            $correlationID = preg_replace('/[^a-zA-Z0-9]/', '', str()->uuid()->toString());
-            $description   = $request->input('description', 'Depósito via PIX');
-
-            $chargeResult = $heartPayService->createCharge(
-                $amount,
-                $customer,
-                $correlationID,
-                $description,
-                now()->addHour()->toIso8601String()
-            );
-
-            if (!$chargeResult['success']) {
-                Log::error('DepositController::processHeartPayDeposit - Erro ao criar cobrança', [
-                    'error' => $chargeResult['message'] ?? 'Erro desconhecido',
-                ]);
-                return [
-                    'status' => 500,
-                    'data' => ['status' => 'error', 'message' => $chargeResult['message'] ?? 'Erro ao gerar QR Code PIX']
-                ];
-            }
-
-            $hpCorrelationID = $chargeResult['correlationID'];
-            $brCode          = $chargeResult['brCode'];
-            $qrCodeImage     = $chargeResult['qrCodeImage'];
-            $expiresDate     = $chargeResult['expiresDate'];
-
-            $solicitacao = Solicitacoes::create([
-                'user_id'                       => $user->username,
-                'externalreference'             => $hpCorrelationID,
-                'amount'                        => $amount,
-                'client_name'                   => $debtorName,
-                'client_document'               => $debtorDocument,
-                'client_email'                  => $debtorEmail,
-                'client_telefone'               => $debtorPhone,
-                'date'                          => Carbon::now(),
-                'status'                        => 'WAITING_FOR_APPROVAL',
-                'idTransaction'                 => $hpCorrelationID,
-                'deposito_liquido'              => $depositoLiquido,
-                'qrcode_pix'                    => $brCode,
-                'paymentcode'                   => $brCode,
-                'paymentCodeBase64'             => $qrCodeImage,
-                'adquirente_ref'                => 'HeartPay',
-                'executor_ordem'                => 'HeartPay',
-                'taxa_cash_in'                  => $taxaTotal,
-                'taxa_pix_cash_in_adquirente'   => $taxaAdquirente,
-                'taxa_pix_cash_in_valor_fixo'   => $user->taxa_fixa_deposito ?? 0,
-                'descricao_transacao'           => $descricaoTaxa,
-                'callback'                      => $request->postback ?? null,
-                'split_email'                   => $request->split_email ?? null,
-                'split_percentage'              => $request->split_percentage ?? null,
-            ]);
-
-            Log::info('DepositController::processHeartPayDeposit - Depósito criado', [
-                'correlationID' => $hpCorrelationID,
-                'amount' => $amount,
-                'solicitacao_id' => $solicitacao->id,
-            ]);
-
+        if (!$acquirerService->isActive()) {
             return [
-                'status' => 200,
-                'data' => [
-                    'idTransaction' => $hpCorrelationID,
-                    'qrcode'        => $brCode,
-                    'status'        => 'WAITING_FOR_APPROVAL',
-                    'amount'        => $amount,
-                    'expires_at'    => $expiresDate ?? now()->addHour()->toIso8601String(),
-                ]
-            ];
-
-        } catch (\Exception $e) {
-            Log::error('DepositController::processHeartPayDeposit - Exceção', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-
-            return [
-                'status' => 500,
-                'data' => ['status' => 'error', 'message' => 'Erro ao processar depósito PIX: ' . $e->getMessage()]
+                'status' => 503,
+                'data' => ['status' => 'error', 'message' => 'Integração PIX temporariamente indisponível.']
             ];
         }
+
+        // Contrato pronto para a próxima adquirente: implementar createCharge no service concreto.
+        return [
+            'status' => 503,
+            'data' => ['status' => 'error', 'message' => 'Integração PIX temporariamente indisponível.']
+        ];
     }
 }
+

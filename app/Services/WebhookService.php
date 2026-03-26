@@ -177,17 +177,17 @@ class WebhookService
     }
 
     /**
-     * Extrai transaction_id do request (suporta HeartPay e genérico).
+     * Extrai transaction_id do request (suporta Adquirente PIX e genérico).
      *
-     * HeartPay: payload com { "event": "...", "data": { "data": { "correlationID": "..." } } }
-     * HeartPay: { "event": "...", "data": { ... } }
+     * Adquirente PIX: payload com { "event": "...", "data": { "data": { "correlationID": "..." } } }
+     * Adquirente PIX: { "event": "...", "data": { ... } }
      */
     private function extractTransactionId(Request $request): ?string
     {
         $data  = $request->all();
         $inner = isset($data['data']) && is_array($data['data']) ? $data['data'] : null;
 
-        // HeartPay: evento top-level + data.data com correlationID
+        // Adquirente PIX: evento top-level + data.data com correlationID
         $event = $data['event'] ?? null;
         if ($event && $inner) {
             $nested = isset($inner['data']) && is_array($inner['data']) ? $inner['data'] : $inner;

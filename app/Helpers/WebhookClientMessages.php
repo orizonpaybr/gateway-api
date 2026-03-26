@@ -6,7 +6,7 @@ namespace App\Helpers;
  * Mensagens amigáveis para o webhook enviado ao cliente (Coratri → cliente final).
  * Usado quando notificamos o cliente sobre status de depósito PIX (Cash In) ou saque (Cash Out).
  *
- * Fluxo: Adquirente (HeartPay) → Coratri (webhook interno) → processamento → este payload → URL do cliente.
+ * Fluxo: Adquirente PIX → Coratri (webhook interno) → processamento → este payload → URL do cliente.
  */
 class WebhookClientMessages
 {

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\PixKeyResource;
 use App\Models\App;
 use App\Models\PixKey;
+use App\Services\PixAcquirer\PixAcquirerManager;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
@@ -438,12 +439,12 @@ class PixKeyController extends Controller
                 ], 500)->header('Access-Control-Allow-Origin', '*');
             }
 
-            // Calcular taxas (taxa Coratri + custo HeartPay)
+            // Calcular taxas (taxa Coratri + custo do adquirente)
             $isInterfaceWeb = true;
             $taxaCalculada = \App\Helpers\TaxaSaqueHelper::calcularTaxaSaque((float) $amount, $setting, $user, $isInterfaceWeb);
             $taxaCashOut = $taxaCalculada['taxa_cash_out'];           // Taxa total cobrada do cliente
             $taxaAplicacao = $taxaCalculada['taxa_aplicacao'];        // Lucro Coratri
-            $taxaAdquirente = $taxaCalculada['taxa_adquirente'];      // Custo HeartPay
+            $taxaAdquirente = $taxaCalculada['taxa_adquirente'];      // Custo AdquirentePIX
             $cashOutLiquido = $taxaCalculada['saque_liquido'];        // Valor que o cliente recebe
             $valorTotalDescontar = $taxaCalculada['valor_total_descontar']; // Total a debitar do saldo
 
@@ -513,7 +514,7 @@ class PixKeyController extends Controller
             ]);
 
             // Regra abaixo: APENAS saque MANUAL. Débito na criação; em rejeição, valor + taxa são devolvidos.
-            // Saque automático é processado na hora no bloco seguinte (HeartPay + débito, sem aprovação).
+            // Saque automático é processado na hora no bloco seguinte (AdquirentePIX + débito, sem aprovação).
             if (!$processarAutomatico) {
                 $idempotencyKey = uniqid('withdraw_manual_', true);
                 $description = $request->description ?? 'Saque via PIX';
@@ -588,93 +589,95 @@ class PixKeyController extends Controller
                 ])->header('Access-Control-Allow-Origin', '*');
             }
 
-            // Saque AUTOMÁTICO: processado na hora (HeartPay + débito), sem aprovação.
-            if ($adquirenteDefault === 'heartpay') {
-                try {
-                    $heartPay = app(\App\Services\HeartPayService::class);
-                    if (!$heartPay->isActive()) {
-                        throw new \Exception('Adquirente HeartPay não está configurada ou ativa');
-                    }
-                    $correlationID = preg_replace('/[^a-zA-Z0-9]/', '', \Illuminate\Support\Str::uuid()->toString());
-                    $description = $request->description ?? 'Saque via PIX';
-                    $recipientName = $user->name ?? 'Não informado';
-                    $recipientDocument = null;
-                    if (in_array(strtolower($keyType), ['cpf', 'cnpj'], true)) {
-                        $recipientDocument = preg_replace('/\D/', '', $keyValue);
-                    }
-                    $payoutResult = $heartPay->createPayout((float) $amount, $keyValue, $keyType, $description, $correlationID, $recipientName, $recipientDocument);
-                    if (!$payoutResult['success']) {
-                        Log::error('PixKeyController::withdraw - HeartPay recusou payout', [
-                            'message' => $payoutResult['message'] ?? 'N/A',
-                            'user_id' => $user->username,
-                            'amount' => $amount,
-                        ]);
-                        return response()->json([
-                            'success' => false,
-                            'message' => 'Não foi possível sacar, entre em contato com o suporte.',
-                        ], 400)->header('Access-Control-Allow-Origin', '*');
-                    }
-                    $idTxn = $payoutResult['referenceCode'] ?? $correlationID;
-                    $statusMapped = \App\Services\HeartPayService::mapPayoutStatus($payoutResult['status'] ?? 'pending');
-                    $withdrawal = \App\Models\SolicitacoesCashOut::create([
-                        'user_id' => $user->user_id ?? $user->username,
-                        'externalreference' => $idTxn,
-                        'amount' => $amount,
-                        'beneficiaryname' => $user->name ?? 'Não informado',
-                        'beneficiarydocument' => $user->cpf_cnpj ?? '',
-                        'pix' => $keyValue,
-                        'pixkey' => $keyType,
-                        'idTransaction' => $idTxn,
-                        'status' => $statusMapped,
-                        'type' => 'PIX',
-                        'date' => now(),
-                        'taxa_cash_out' => $taxaCashOut,
-                        'cash_out_liquido' => $cashOutLiquido,
-                        'descricao_transacao' => 'AUTOMATICO',
-                        'executor_ordem' => 'HeartPay',
-                        'descricao_externa' => $correlationID,
-                    ]);
-                    $balanceService = app(\App\Services\BalanceService::class);
-                    $balanceService->decrementCombinedBalance($user, $valorTotalDescontar);
-                    \App\Helpers\Helper::calculaSaldoLiquido($user->user_id ?? $user->username);
-                    app(\App\Services\PaymentProcessingService::class)->invalidateCachesAfterPayment($withdrawal->user_id);
-                    Log::info('Saque PIX automático criado com sucesso via HeartPay', [
-                        'withdrawal_id' => $withdrawal->id,
-                        'transaction_id' => $idTxn,
-                        'user_id' => $user->username
-                    ]);
-                    return response()->json([
-                        'success' => true,
-                        'message' => 'Saque PIX realizado com sucesso',
-                        'data' => [
-                            'transaction_id' => $idTxn,
-                            'amount' => $amount,
-                            'key_type' => $keyType,
-                            'key_value' => $keyValue,
-                            'description' => $description,
-                            'status' => $statusMapped,
-                            'tipo_processamento' => 'Automático',
-                            'estimated_time' => '5-10 minutos',
-                            'created_at' => now()->toISOString(),
-                            'adquirente' => 'heartpay',
-                            'taxa_cash_out' => round($taxaCashOut, 2),
-                            'taxa_adquirente' => round($taxaAdquirente, 2),
-                            'taxa_aplicacao' => round($taxaAplicacao, 2),
-                            'valor_liquido' => round($cashOutLiquido, 2),
-                            'valor_total_descontado' => round($valorTotalDescontar, 2)
-                        ]
-                    ])->header('Access-Control-Allow-Origin', '*');
-                } catch (\Exception $e) {
-                    Log::error('Erro ao processar saque automático via HeartPay', [
-                        'error' => $e->getMessage(),
-                        'user_id' => $user->username,
-                        'amount' => $amount
-                    ]);
+            if ($processarAutomatico) {
+                $acquirerManager = app(PixAcquirerManager::class);
+                $acquirerService = $acquirerManager->resolve($adquirenteDefault);
+
+                if (!$acquirerService->isActive()) {
                     return response()->json([
                         'success' => false,
-                        'message' => 'Não foi possível sacar, entre em contato com o suporte.'
-                    ], 500)->header('Access-Control-Allow-Origin', '*');
+                        'message' => 'Integração PIX automática temporariamente indisponível.',
+                    ], 503)->header('Access-Control-Allow-Origin', '*');
                 }
+
+                $correlationID = preg_replace('/[^a-zA-Z0-9]/', '', \Illuminate\Support\Str::uuid()->toString());
+                $description = $request->description ?? 'Saque via PIX';
+                $recipientName = $user->name ?? 'Não informado';
+                $recipientDocument = in_array(strtolower($keyType), ['cpf', 'cnpj'], true)
+                    ? preg_replace('/\D/', '', $keyValue)
+                    : null;
+
+                $payoutResult = $acquirerService->createPayout(
+                    (float) $amount,
+                    $keyValue,
+                    $keyType,
+                    $description,
+                    $correlationID,
+                    $recipientName,
+                    $recipientDocument
+                );
+
+                if (!($payoutResult['success'] ?? false)) {
+                    Log::error('PixKeyController::withdraw - adquirente recusou payout', [
+                        'acquirer' => $acquirerService->getReference(),
+                        'message' => $payoutResult['message'] ?? 'N/A',
+                        'user_id' => $user->username,
+                        'amount' => $amount,
+                    ]);
+
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Não foi possível sacar, entre em contato com o suporte.',
+                    ], 400)->header('Access-Control-Allow-Origin', '*');
+                }
+
+                $idTxn = $payoutResult['referenceCode'] ?? $correlationID;
+                $statusMapped = $acquirerService->mapPayoutStatus((string) ($payoutResult['status'] ?? 'pending'));
+                $withdrawal = \App\Models\SolicitacoesCashOut::create([
+                    'user_id' => $user->user_id ?? $user->username,
+                    'externalreference' => $idTxn,
+                    'amount' => $amount,
+                    'beneficiaryname' => $user->name ?? 'Não informado',
+                    'beneficiarydocument' => $user->cpf_cnpj ?? '',
+                    'pix' => $keyValue,
+                    'pixkey' => $keyType,
+                    'idTransaction' => $idTxn,
+                    'status' => $statusMapped,
+                    'type' => 'PIX',
+                    'date' => now(),
+                    'taxa_cash_out' => $taxaCashOut,
+                    'cash_out_liquido' => $cashOutLiquido,
+                    'descricao_transacao' => 'AUTOMATICO',
+                    'executor_ordem' => $acquirerService->getReference(),
+                    'descricao_externa' => $correlationID,
+                ]);
+
+                $balanceService = app(\App\Services\BalanceService::class);
+                $balanceService->decrementCombinedBalance($user, $valorTotalDescontar);
+                \App\Helpers\Helper::calculaSaldoLiquido($user->user_id ?? $user->username);
+                app(\App\Services\PaymentProcessingService::class)->invalidateCachesAfterPayment($withdrawal->user_id);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Saque PIX realizado com sucesso',
+                    'data' => [
+                        'transaction_id' => $idTxn,
+                        'amount' => $amount,
+                        'key_type' => $keyType,
+                        'key_value' => $keyValue,
+                        'description' => $description,
+                        'status' => $statusMapped,
+                        'tipo_processamento' => 'Automático',
+                        'estimated_time' => '5-10 minutos',
+                        'created_at' => now()->toISOString(),
+                        'adquirente' => $acquirerService->getReference(),
+                        'taxa_cash_out' => round($taxaCashOut, 2),
+                        'taxa_adquirente' => round($taxaAdquirente, 2),
+                        'taxa_aplicacao' => round($taxaAplicacao, 2),
+                        'valor_liquido' => round($cashOutLiquido, 2),
+                        'valor_total_descontado' => round($valorTotalDescontar, 2),
+                    ]
+                ])->header('Access-Control-Allow-Origin', '*');
             }
 
         } catch (\Exception $e) {
