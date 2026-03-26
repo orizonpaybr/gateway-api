@@ -66,7 +66,6 @@ class ValidateWebhook
         $path = $request->path();
         
         if (str_contains($path, 'pagarme')) return 'pagarme';
-        if (str_contains($path, 'heartpay')) return 'heartpay';
         return 'unknown';
     }
 
@@ -75,99 +74,12 @@ class ValidateWebhook
         switch ($adquirente) {
             case 'pagarme':
                 return $this->validatePagarmeWebhook($request);
-            case 'heartpay':
-                return $this->validateHeartPayWebhook($request);
             default:
                 // Para adquirentes desconhecidos, rejeitar em produção
                 return !app()->environment('production');
         }
     }
     
-    /**
-     * Valida webhook da HeartPay.
-     *
-     * HeartPay utiliza HMAC-SHA256 com a API Key para assinar webhooks.
-     * Validação: IP whitelist → HMAC → estrutura do payload.
-     */
-    private function validateHeartPayWebhook(Request $request): bool
-    {
-        $whitelistedIps = config('heartpay.webhook_ips', []);
-
-        if (!empty($whitelistedIps)) {
-            $requestIp = $request->ip();
-            $ipValid = false;
-
-            foreach ($whitelistedIps as $allowedIp) {
-                if (str_contains($allowedIp, '/')) {
-                    if ($this->ipInRange($requestIp, $allowedIp)) {
-                        $ipValid = true;
-                        break;
-                    }
-                } elseif ($requestIp === trim($allowedIp)) {
-                    $ipValid = true;
-                    break;
-                }
-            }
-
-            if (!$ipValid) {
-                Log::warning('ValidateHeartPayWebhook - IP não autorizado', [
-                    'ip' => $requestIp,
-                    'allowed_ips' => $whitelistedIps,
-                ]);
-                return false;
-            }
-        }
-
-        $webhookSecret = config('heartpay.webhook_secret');
-
-        if (!empty($webhookSecret)) {                                                                                                                                                                   
-            $tokenHeader = $request->header('x-webhook-token');
-            if ($tokenHeader !== null && hash_equals($webhookSecret, trim($tokenHeader))) {
-                Log::debug('ValidateHeartPayWebhook - Token x-webhook-token válido');
-                return true;
-            }
-
-            $signature = $request->header('X-HeartPay-Signature');
-            $timestamp = $request->header('X-HeartPay-Timestamp');
-
-            if (!$signature) {
-                Log::warning('ValidateHeartPayWebhook - Header X-HeartPay-Signature ausente', [
-                    'headers' => array_keys($request->headers->all()),
-                ]);
-                return !app()->environment('production');
-            }
-
-            if ($timestamp) {
-                $age = time() - (int) $timestamp;
-                if ($age > 300) {
-                    Log::warning('ValidateHeartPayWebhook - Webhook expirado (> 5 min)', [
-                        'timestamp' => $timestamp,
-                        'age_seconds' => $age,
-                    ]);
-                    return false;
-                }
-            }
-
-            $rawBody = $request->getContent();
-            $signedPayload = $timestamp ? ($timestamp . '.' . $rawBody) : $rawBody;
-            $expected = hash_hmac('sha256', $signedPayload, $webhookSecret);
-
-            if (!hash_equals($expected, $signature)) {
-                Log::warning('ValidateHeartPayWebhook - Assinatura HMAC inválida');
-                return false;
-            }
-
-            Log::debug('ValidateHeartPayWebhook - Assinatura HMAC válida');
-            return true;
-        }
-
-        if (app()->environment('production') && empty($webhookSecret)) {
-            Log::warning('ValidateHeartPayWebhook - HEARTPAY_WEBHOOK_SECRET não configurado em produção');
-        }
-
-        return true;
-    }
-
     private function validatePagarmeWebhook(Request $request): bool
     {
         $pagarme = \App\Models\Pagarme::first();

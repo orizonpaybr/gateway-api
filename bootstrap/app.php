@@ -40,7 +40,6 @@ return Application::configure(basePath: dirname(__DIR__))
              '/callback/*',
              '/checkout/webhook/*',
              '/api/card/webhook',
-             '/heartpay/*',
         ]);
 
         $middleware->alias([

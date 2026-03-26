@@ -8,14 +8,13 @@ use App\Http\Requests\WithdrawalIndexRequest;
 use App\Http\Requests\WithdrawalStatsRequest;
 use App\Services\WithdrawalStatsService;
 use App\Services\FinancialService;
-use App\Services\HeartPayService;
 use App\Services\BalanceService;
 use App\Models\App;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
-use App\Models\HeartPay;
 use App\Helpers\Helper;
 use App\Constants\UserPermission;
+use App\Services\PixAcquirer\PixAcquirerManager;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -294,7 +293,7 @@ class WithdrawalController extends Controller
             // Determinar adquirente baseado no executor_ordem ou adquirente padrão
             $adquirente = $saque->executor_ordem ?? Helper::adquirenteDefault();
             
-            // Se não tem executor_ordem, usar adquirente padrão (HeartPay)
+            // Se não tem executor_ordem, usar adquirente padrão
             if (!$saque->executor_ordem) {
                 $adquirente = Helper::adquirenteDefault();
             }
@@ -306,30 +305,22 @@ class WithdrawalController extends Controller
                 ], 500);
             }
 
-            // Processar aprovação baseado no adquirente
-            switch (strtolower($adquirente)) {
-                case 'heartpay':
-                    $response = $this->approveWithHeartPay($saque, $userSaque, $taxaEfetiva);
-                    if ($response->getStatusCode() === 200) {
-                        $this->statsService->invalidateCache();
-                        $this->financialService->invalidateWalletsCache();
-                        $this->financialService->invalidateStatsCache();
-                        app(\App\Services\PaymentProcessingService::class)->invalidateCachesAfterPayment($saque->user_id);
-                    }
-                    return $response;
-
-                case 'pagarme':
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Este método de pagamento não suporta saques PIX.'
-                    ], 500);
-
-                default:
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Método de pagamento não suportado para aprovação de saques.'
-                    ], 500);
+            if (strtolower($adquirente) === 'pagarme') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Este método de pagamento não suporta saques PIX.'
+                ], 500);
             }
+
+            $response = $this->approveWithPixAcquirer($adquirente, $saque, $userSaque, $taxaEfetiva);
+            if ($response->getStatusCode() === 200) {
+                $this->statsService->invalidateCache();
+                $this->financialService->invalidateWalletsCache();
+                $this->financialService->invalidateStatsCache();
+                app(\App\Services\PaymentProcessingService::class)->invalidateCachesAfterPayment($saque->user_id);
+            }
+
+            return $response;
 
         } catch (\Exception $e) {
             Log::error('Erro ao aprovar saque', [
@@ -347,112 +338,82 @@ class WithdrawalController extends Controller
     }
 
     /**
-     * Aprovar saque usando HeartPay.
-     * Valor + taxa já foram debitados na criação; aqui criamos o payout na HeartPay e atualizamos o registro.
+     * Integração de aprovação automática por adquirente removida temporariamente.
      */
-    private function approveWithHeartPay(SolicitacoesCashOut $saque, User $userSaque, float $taxaCashOut)
+    private function approveWithPixAcquirer(
+        string $adquirente,
+        SolicitacoesCashOut $saque,
+        User $userSaque,
+        float $taxaCashOut
+    )
     {
-        try {
-            $heartPayService = app(HeartPayService::class);
+        $acquirerManager = app(PixAcquirerManager::class);
+        $acquirerService = $acquirerManager->resolve($adquirente);
 
-            if (!$heartPayService->isActive()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Serviço de saque PIX indisponível no momento.'
-                ], 500);
-            }
-
-            $correlationID = preg_replace('/[^a-zA-Z0-9]/', '', str()->uuid()->toString());
-
-            Log::info('WithdrawalController::approveWithHeartPay - Preparando aprovação', [
-                'saque_id' => $saque->id,
-                'pix_value' => $saque->pix,
-                'pix_type' => $saque->pixkey,
-                'amount' => $saque->amount,
-            ]);
-
-            $recipientName = $saque->beneficiaryname ?: null;
-            $recipientDocument = $saque->beneficiarydocument ? preg_replace('/\D/', '', $saque->beneficiarydocument) : null;
-            if ($recipientDocument === '') {
-                $recipientDocument = null;
-            }
-            $payoutResult = $heartPayService->createPayout(
-                (float) $saque->amount,
-                $saque->pix,
-                $saque->pixkey,
-                'Saque aprovado manualmente - ID: ' . $saque->id,
-                $correlationID,
-                $recipientName,
-                $recipientDocument
-            );
-
-            if (!$payoutResult['success']) {
-                Log::error('WithdrawalController::approveWithHeartPay - Erro ao criar payout', [
-                    'error' => $payoutResult['message'] ?? 'Erro desconhecido',
-                    'saque_id' => $saque->id,
-                ]);
-                return response()->json([
-                    'success' => false,
-                    'message' => $payoutResult['message'] ?? 'Erro ao processar saque PIX'
-                ], 500);
-            }
-
-            $referenceCode = $payoutResult['referenceCode'] ?? $correlationID;
-            $hpStatus      = $payoutResult['status'] ?? 'pending';
-            $statusInterno = HeartPayService::mapPayoutStatus($hpStatus);
-
-            DB::transaction(function () use ($saque, $referenceCode, $statusInterno, $taxaCashOut, $correlationID) {
-                $saqueAtualizado = SolicitacoesCashOut::where('id', $saque->id)
-                    ->lockForUpdate()
-                    ->first();
-
-                if (in_array($saqueAtualizado->status, ['COMPLETED', 'PAID_OUT'])) {
-                    Log::info('WithdrawalController::approveWithHeartPay - Saque já processado', [
-                        'saque_id' => $saque->id,
-                        'status' => $saqueAtualizado->status,
-                    ]);
-                    return;
-                }
-
-                $saqueAtualizado->update([
-                    'status'            => $statusInterno,
-                    'externalreference' => $referenceCode,
-                    'idTransaction'     => $referenceCode,
-                    'executor_ordem'    => 'HeartPay',
-                    'taxa_cash_out'     => $taxaCashOut,
-                    'descricao_externa' => $correlationID,
-                ]);
-            });
-
-            Helper::calculaSaldoLiquido($userSaque->user_id);
-
-            Log::info('WithdrawalController::approveWithHeartPay - Saque aprovado', [
-                'saque_id' => $saque->id,
-                'referenceCode' => $referenceCode,
-                'status' => $statusInterno,
-            ]);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Saque aprovado e processado com sucesso.',
-                'data' => [
-                    'transaction_id' => $referenceCode,
-                    'status' => $statusInterno,
-                ]
-            ], 200);
-
-        } catch (\Exception $e) {
-            Log::error('WithdrawalController::approveWithHeartPay - Exceção', [
-                'saque_id' => $saque->id,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-
+        if (!$acquirerService->isActive()) {
             return response()->json([
                 'success' => false,
-                'message' => 'Erro ao aprovar saque PIX: ' . $e->getMessage()
+                'message' => 'Integração PIX temporariamente indisponível.'
+            ], 503);
+        }
+
+        $correlationID = preg_replace('/[^a-zA-Z0-9]/', '', str()->uuid()->toString());
+        $recipientName = $saque->beneficiaryname ?: null;
+        $recipientDocument = $saque->beneficiarydocument ? preg_replace('/\D/', '', $saque->beneficiarydocument) : null;
+        if ($recipientDocument === '') {
+            $recipientDocument = null;
+        }
+
+        $payoutResult = $acquirerService->createPayout(
+            (float) $saque->amount,
+            $saque->pix,
+            $saque->pixkey,
+            'Saque aprovado manualmente - ID: ' . $saque->id,
+            $correlationID,
+            $recipientName,
+            $recipientDocument
+        );
+
+        if (!($payoutResult['success'] ?? false)) {
+            return response()->json([
+                'success' => false,
+                'message' => $payoutResult['message'] ?? 'Erro ao processar saque PIX'
             ], 500);
         }
+
+        $referenceCode = $payoutResult['referenceCode'] ?? $correlationID;
+        $providerStatus = (string) ($payoutResult['status'] ?? 'pending');
+        $statusInterno = $acquirerService->mapPayoutStatus($providerStatus);
+
+        DB::transaction(function () use ($saque, $referenceCode, $statusInterno, $taxaCashOut, $correlationID, $acquirerService) {
+            $saqueAtualizado = SolicitacoesCashOut::where('id', $saque->id)
+                ->lockForUpdate()
+                ->first();
+
+            if (in_array($saqueAtualizado->status, ['COMPLETED', 'PAID_OUT'], true)) {
+                return;
+            }
+
+            $saqueAtualizado->update([
+                'status'            => $statusInterno,
+                'externalreference' => $referenceCode,
+                'idTransaction'     => $referenceCode,
+                'executor_ordem'    => $acquirerService->getReference(),
+                'taxa_cash_out'     => $taxaCashOut,
+                'descricao_externa' => $correlationID,
+            ]);
+        });
+
+        Helper::calculaSaldoLiquido($userSaque->user_id);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Saque aprovado e processado com sucesso.',
+            'data' => [
+                'transaction_id' => $referenceCode,
+                'status' => $statusInterno,
+            ]
+        ], 200);
     }
 
     /**

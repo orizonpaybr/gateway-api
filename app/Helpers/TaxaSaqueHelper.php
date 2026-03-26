@@ -50,7 +50,7 @@ class TaxaSaqueHelper
      *   'descricao' => string,             // Descrição do tipo de taxa
      *   'valor_total_descontar' => float,  // Total a ser descontado do saldo
      *   'taxa_aplicacao' => float,         // Lucro líquido da aplicação (taxa - custo adquirente)
-     *   'taxa_adquirente' => float         // Custo do adquirente PIX (HeartPay)
+     *   'taxa_adquirente' => float         // Custo do adquirente PIX (Adquirente PIX)
      * ]
      */
     public static function calcularTaxaSaque($amount, $setting, $user, $isInterfaceWeb = false, $taxaPorFora = false)
@@ -125,10 +125,10 @@ class TaxaSaqueHelper
             ]);
         }
         
-        // Custo fixo HeartPay por transação (R$ 0,025). Futuras adquirentes: cada uma com seu nome.
-        $custoHeartpay = (float) config('heartpay.custo_fixo_por_transacao', 0.025);
+        // Custo fixo Adquirente PIX por transação (R$ 0,025). Futuras adquirentes: cada uma com seu nome.
+        $custoHeartpay = (float) config('app.custo_fixo_adquirente_pix', 0.025);
         
-        // Lucro líquido da aplicação = taxa fixa - custo HeartPay - comissão afiliado
+        // Lucro líquido da aplicação = taxa fixa - custo Adquirente PIX - comissão afiliado
         $lucroAplicacao = max(0, $taxaTotal - $custoHeartpay - $comissaoAfiliado);
 
         Log::info('TaxaSaqueHelper: Taxas calculadas', [
@@ -136,7 +136,7 @@ class TaxaSaqueHelper
             'isInterfaceWeb' => $isInterfaceWeb,
             'taxa_total' => $taxaTotal,
             'comissao_afiliado' => $comissaoAfiliado,
-            'custo_heartpay' => $custoHeartpay,
+            'custo_adquirente' => $custoHeartpay,
             'lucro_aplicacao' => $lucroAplicacao,
             'descricao' => $descricao
         ]);
@@ -165,7 +165,7 @@ class TaxaSaqueHelper
             [
                 'amount_solicitado' => $amount,
                 'taxa_total' => $taxaTotal,
-                'custo_heartpay' => $custoHeartpay,
+                'custo_adquirente' => $custoHeartpay,
                 'lucro_aplicacao' => $lucroAplicacao,
                 'valor_total_descontar' => $valor_total_descontar,
                 'is_interface_web' => $isInterfaceWeb,
@@ -181,13 +181,13 @@ class TaxaSaqueHelper
                 'saque_liquido' => $saque_liquido,
                 'valor_total_descontar' => $valor_total_descontar,
                 'lucro_aplicacao' => $lucroAplicacao,
-                'custo_heartpay' => $custoHeartpay
+                'custo_adquirente' => $custoHeartpay
             ]
         ]);
 
         return [
             'taxa_cash_out' => $taxa_cash_out,       // Taxa fixa cobrada do cliente (NÃO muda com afiliado)
-            'taxa_aplicacao' => $lucroAplicacao,    // Lucro Coratri (taxa - HeartPay - afiliado)
+            'taxa_aplicacao' => $lucroAplicacao,    // Lucro Coratri (taxa - Adquirente PIX - afiliado)
             'taxa_adquirente' => $custoHeartpay,
             'comissao_afiliado' => $comissaoAfiliado, // Comissão do pai afiliado (R$ 0,50 se houver)
             'saque_liquido' => $saque_liquido,       // Valor que o cliente recebe (sempre o valor solicitado)

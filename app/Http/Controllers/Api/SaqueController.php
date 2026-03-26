@@ -13,8 +13,7 @@ use App\Helpers\Helper;
 use App\Models\Adquirente;
 use App\Models\SolicitacoesCashOut;
 use App\Helpers\ApiResponseStandardizer;
-use App\Services\HeartPayService;
-use App\Models\HeartPay;
+use App\Services\PixAcquirer\PixAcquirerManager;
 use Carbon\Carbon;
 use Illuminate\Support\Str;
 use App\Jobs\ClientWebhookDispatchJob;
@@ -169,21 +168,23 @@ class SaqueController extends Controller
     private function processarSaque(Request $request, string $default, bool $isAutomatico = false)
     {
         try {
-            // Executar o pagamento baseado no adquirente
-            switch ($default) {
-                case 'pagarme':
-                    // Pagar.me não suporta saques PIX diretamente
-                    return response()->json(['status' => 'error', 'message' => 'Adquirente não suportado para saques.'], 500);
-                case 'heartpay':
-                    Log::info('SaqueController - Processando saque HeartPay', [
-                        'user_id' => $request->user()?->id,
-                        'amount' => $request->amount,
-                        'is_automatico' => $isAutomatico,
-                    ]);
-                    return $this->processHeartPayWithdrawal($request, $isAutomatico);
-                default:
-                    return response()->json(['status' => 'error', 'message' => 'Adquirente não suportado.'], 500);
+            if (strtolower($default) === 'pagarme') {
+                return response()->json(['status' => 'error', 'message' => 'Adquirente não suportado para saques.'], 500);
             }
+
+            $acquirerService = app(PixAcquirerManager::class)->resolve($default);
+            if (!$acquirerService->isActive()) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Integração PIX temporariamente indisponível.'
+                ], 503);
+            }
+
+            // Estrutura pronta para próxima adquirente: integração concreta será plugada no service.
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Integração da adquirente PIX ainda não implementada.'
+            ], 503);
         } catch (\Exception $e) {
             $tipo = $isAutomatico ? 'automático' : 'manual';
             Log::error("Erro no saque {$tipo}", [
@@ -200,217 +201,10 @@ class SaqueController extends Controller
         }
     }
 
-    private function processHeartPayWithdrawal(Request $request, bool $isAutomatico = false)
-    {
-        try {
-            $user = $request->user();
-            $heartPayService = app(HeartPayService::class);
-            $setting = App::first();
-
-            if (!$heartPayService->isActive()) {
-                Log::error('SaqueController::processHeartPayWithdrawal - HeartPay não configurado ou inativo');
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'Serviço de saque PIX indisponível no momento.'
-                ], 500);
-            }
-
-            $amount      = (float) $request->amount;
-            $pixKey      = $request->pixKey;
-            $pixKeyType  = $request->pixKeyType;
-            $description = $request->input('description', 'Saque via PIX');
-
-            $isInterfaceWeb = !$request->has('api_key');
-            $taxaCalculada     = \App\Helpers\TaxaSaqueHelper::calcularTaxaSaque($amount, $setting, $user, $isInterfaceWeb);
-            $taxaTotal         = $taxaCalculada['taxa_cash_out'];
-            $taxaAplicacao     = $taxaCalculada['taxa_aplicacao'];
-            $taxaAdquirente    = $taxaCalculada['taxa_adquirente'];
-            $cashOutLiquido    = $taxaCalculada['saque_liquido'];
-            $valorTotalDescontar = $taxaCalculada['valor_total_descontar'];
-
-            $balanceService = app(\App\Services\BalanceService::class);
-            $saldoTotalDisponivel = $balanceService->getTotalAvailableBalance($user);
-
-            if ($saldoTotalDisponivel < $valorTotalDescontar) {
-                $this->dispatchWebhookFalhaSaldoCoratri(
-                    $request,
-                    $user,
-                    $amount,
-                    $saldoTotalDisponivel
-                );
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'Não foi possível sacar, entre em contato com o suporte.'
-                ], 401);
-            }
-
-            if ($isAutomatico) {
-                $correlationID = preg_replace('/[^a-zA-Z0-9]/', '', str()->uuid()->toString());
-
-                // Nome e documento do beneficiário: opcionais na request; senão usamos titular e chave (CPF/CNPJ) para reduzir rejeição da HeartPay
-                $recipientName = $request->input('beneficiary_name') ?: ($user->name ?? $user->username);
-                $recipientDocument = $request->input('beneficiary_document');
-                if ($recipientDocument === null || $recipientDocument === '') {
-                    $normalizedType = strtolower($pixKeyType);
-                    if ($normalizedType === 'cpf' || $normalizedType === 'cnpj') {
-                        $recipientDocument = preg_replace('/\D/', '', $pixKey);
-                    }
-                }
-
-                $payoutResult = $heartPayService->createPayout(
-                    $amount,
-                    $pixKey,
-                    $pixKeyType,
-                    $description,
-                    $correlationID,
-                    $recipientName,
-                    $recipientDocument !== '' ? $recipientDocument : null
-                );
-
-                if (!$payoutResult['success']) {
-                    Log::error('SaqueController::processHeartPayWithdrawal - Erro ao criar payout', [
-                        'error' => $payoutResult['message'] ?? 'Erro desconhecido',
-                    ]);
-                    return response()->json([
-                        'status' => 'error',
-                        'message' => 'Não foi possível sacar, entre em contato com o suporte.'
-                    ], 500);
-                }
-
-                $referenceCode = $payoutResult['referenceCode'] ?? $correlationID;
-                $hpStatus      = $payoutResult['status'] ?? 'pending';
-
-                $callbackUrl = ($request->baasPostbackUrl && $request->baasPostbackUrl !== 'web')
-                    ? $request->baasPostbackUrl
-                    : null;
-
-                $cashOut = SolicitacoesCashOut::create([
-                    'user_id'            => $user->username,
-                    'externalreference'  => $referenceCode,
-                    'amount'             => $amount,
-                    'beneficiaryname'    => $recipientName,
-                    'beneficiarydocument' => $recipientDocument ?? $pixKey,
-                    'pix'                => $pixKey,
-                    'pixkey'             => $pixKeyType,
-                    'date'               => Carbon::now(),
-                    'status'             => HeartPayService::mapPayoutStatus($hpStatus),
-                    'type'               => 'PIX',
-                    'idTransaction'      => $referenceCode,
-                    'taxa_cash_out'      => $taxaTotal,
-                    'cash_out_liquido'   => $cashOutLiquido,
-                    'descricao_transacao' => 'AUTOMATICO',
-                    'executor_ordem'     => 'HeartPay',
-                    'callback'           => $callbackUrl,
-                    'descricao_externa'  => $correlationID,
-                ]);
-
-                $balanceService->decrementCombinedBalance($user, $valorTotalDescontar);
-                Helper::calculaSaldoLiquido($user->user_id);
-                app(\App\Services\PaymentProcessingService::class)->invalidateCachesAfterPayment($cashOut->user_id);
-
-                Log::info('SaqueController::processHeartPayWithdrawal - Saque automático criado', [
-                    'referenceCode' => $referenceCode,
-                    'amount' => $amount,
-                    'cash_out_id' => $cashOut->id,
-                ]);
-
-                $standardizedResponse = ApiResponseStandardizer::standardizeWithdrawResponse([
-                    'data' => [
-                        'id' => $referenceCode,
-                        'idTransaction' => $referenceCode,
-                        'status' => 'processing',
-                        'amount' => $amount,
-                        'pixKey' => $pixKey,
-                        'pixKeyType' => $pixKeyType,
-                        'withdrawStatusId' => 'Processing',
-                    ]
-                ], $amount);
-
-                return response()->json($standardizedResponse, 200);
-
-            } else {
-                $transactionId = preg_replace('/[^a-zA-Z0-9]/', '', str()->uuid()->toString());
-
-                $callbackUrl = ($request->baasPostbackUrl && $request->baasPostbackUrl !== 'web')
-                    ? $request->baasPostbackUrl
-                    : null;
-
-                $cashOut = \Illuminate\Support\Facades\DB::transaction(function () use (
-                    $user, $transactionId, $amount, $pixKey, $pixKeyType,
-                    $taxaTotal, $cashOutLiquido, $valorTotalDescontar, $callbackUrl
-                ) {
-                    $co = SolicitacoesCashOut::create([
-                        'user_id'            => $user->username,
-                        'externalreference'  => $transactionId,
-                        'amount'             => $amount,
-                        'beneficiaryname'    => $user->name ?? $user->username,
-                        'beneficiarydocument' => $pixKey,
-                        'pix'                => $pixKey,
-                        'pixkey'             => $pixKeyType,
-                        'date'               => Carbon::now(),
-                        'status'             => 'PENDING',
-                        'type'               => 'PIX',
-                        'idTransaction'      => $transactionId,
-                        'taxa_cash_out'      => $taxaTotal,
-                        'cash_out_liquido'   => $cashOutLiquido,
-                        'descricao_transacao' => 'MANUAL',
-                        'executor_ordem'     => null,
-                        'callback'           => $callbackUrl,
-                    ]);
-
-                    $balanceService = app(\App\Services\BalanceService::class);
-                    $balanceService->decrementCombinedBalance($user, $valorTotalDescontar);
-
-                    return $co;
-                });
-
-                Helper::calculaSaldoLiquido($user->user_id);
-                app(\App\Services\PaymentProcessingService::class)->invalidateCachesAfterPayment($cashOut->user_id);
-
-                Log::info('SaqueController::processHeartPayWithdrawal - Saque manual criado', [
-                    'transaction_id' => $transactionId,
-                    'amount' => $amount,
-                    'cash_out_id' => $cashOut->id,
-                ]);
-
-                $standardizedResponse = ApiResponseStandardizer::standardizeWithdrawResponse([
-                    'data' => [
-                        'id' => $transactionId,
-                        'idTransaction' => $transactionId,
-                        'status' => 'pending',
-                        'amount' => $amount,
-                        'pixKey' => $pixKey,
-                        'pixKeyType' => $pixKeyType,
-                        'withdrawStatusId' => 'PendingProcessing',
-                        'message' => 'Saque criado e aguardando aprovação manual'
-                    ]
-                ], $amount);
-
-                return response()->json($standardizedResponse, 200);
-            }
-
-        } catch (\Exception $e) {
-            Log::error('SaqueController::processHeartPayWithdrawal - Exceção', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-
-            // Não expor detalhes (ex.: saldo/valores) ao cliente
-            $mensagemCliente = str_contains(strtolower($e->getMessage()), 'saldo insuficiente')
-                ? 'Não foi possível sacar, entre em contato com o suporte.'
-                : 'Erro ao processar saque PIX. Tente novamente.';
-
-            return response()->json([
-                'status' => 'error',
-                'message' => $mensagemCliente
-            ], 500);
-        }
-    }
-
     /**
      * Dispara webhook de falha por saldo insuficiente na conta Coratri do usuário.
-     * Só usa saldo da Coratri (conta do usuário); nunca expõe dados do HeartPay/conta master.
-     * Só é chamado quando a falha é por saldo Coratri; em falhas do HeartPay mantemos mensagem genérica.
+     * Só usa saldo da Coratri (conta do usuário); nunca expõe dados do AdquirentePIX/conta master.
+     * Só é chamado quando a falha é por saldo Coratri; em falhas do AdquirentePIX mantemos mensagem genérica.
      */
     private function dispatchWebhookFalhaSaldoCoratri(Request $request, User $user, float $amountRequested, float $saldoCoratriDisponivel): void
     {

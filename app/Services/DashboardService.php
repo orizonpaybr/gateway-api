@@ -32,11 +32,11 @@ class DashboardService
         $cacheKey = sprintf('dashboard:stats:%s:%s', $username, now()->format('Y-m-d'));
         
         return Cache::remember($cacheKey, self::CACHE_TTL_STATS, function () use ($username, $startOfMonth, $endOfMonth) {
-            // Custo fixo HeartPay por transação
-            $custoHeartpayPorTransacao = (float) config('heartpay.custo_fixo_por_transacao', 0.025);
+            // Custo fixo Adquirente PIX por transação
+            $custoHeartpayPorTransacao = (float) config('app.custo_fixo_adquirente_pix', 0.025);
             
             // Query única otimizada usando UNION ALL
-            // Lucro líquido = taxa - custo adquirente (HeartPay). Legado: adquirente_ref/executor_ordem 'Treeal' tratado como HeartPay.
+            // Lucro líquido = taxa - custo adquirente (Adquirente PIX). Legado: adquirente_ref/executor_ordem 'Treeal' tratado como Adquirente PIX.
             $statsQuery = "
                 SELECT 
                     'deposito' as tipo,
@@ -44,7 +44,7 @@ class DashboardService
                     SUM(CASE WHEN status IN ('PAID_OUT', 'COMPLETED') THEN (
                         taxa_cash_in - 
                         CASE 
-                            WHEN (adquirente_ref IN ('Treeal', 'HeartPay') OR executor_ordem IN ('Treeal', 'HeartPay')) 
+                            WHEN (adquirente_ref IN ('Treeal') OR executor_ordem IN ('Treeal')) 
                                  AND (taxa_pix_cash_in_adquirente IS NULL OR taxa_pix_cash_in_adquirente = 0)
                             THEN {$custoHeartpayPorTransacao}
                             WHEN taxa_pix_cash_in_adquirente IS NOT NULL AND taxa_pix_cash_in_adquirente > 0
@@ -67,7 +67,7 @@ class DashboardService
 
             $results = DB::select($statsQuery, [
                 $username, $startOfMonth, $endOfMonth, // depósitos
-                $custoHeartpayPorTransacao, // custo HeartPay para saques
+                $custoHeartpayPorTransacao, // custo Adquirente PIX para saques
                 $username, $startOfMonth, $endOfMonth // saques
             ]);
 
