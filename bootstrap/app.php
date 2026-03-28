@@ -17,17 +17,20 @@ return Application::configure(basePath: dirname(__DIR__))
     ->booted(function () {
         RateLimiter::for('pix-out', function (Request $request) {
             $key = $request->input('token') ?? $request->ip();
-            return Limit::perMinutes(15, 10000)->by('pix-out|' . $key);
+
+            return Limit::perMinutes(15, 10000)->by('pix-out|'.$key);
         });
 
         RateLimiter::for('pix-in', function (Request $request) {
             $key = $request->input('token') ?? $request->ip();
-            return Limit::perMinutes(15, 10000)->by('pix-in|' . $key);
+
+            return Limit::perMinutes(15, 10000)->by('pix-in|'.$key);
         });
 
         RateLimiter::for('status-check', function (Request $request) {
             $key = $request->input('token') ?? $request->input('idTransaction') ?? $request->ip();
-            return Limit::perMinutes(15, 10000)->by('status|' . $key);
+
+            return Limit::perMinutes(15, 10000)->by('status|'.$key);
         });
     })
     ->withMiddleware(function (Middleware $middleware) {
@@ -35,11 +38,12 @@ return Application::configure(basePath: dirname(__DIR__))
             \App\Http\Middleware\AtualizarSaldosClientes::class,
         ]);
         $middleware->validateCsrfTokens([
-             '/pagarme/*',
-             '/callback',
-             '/callback/*',
-             '/checkout/webhook/*',
-             '/api/card/webhook',
+            '/pagarme/*',
+            '/magenpay/*',
+            '/callback',
+            '/callback/*',
+            '/checkout/webhook/*',
+            '/api/card/webhook',
         ]);
 
         $middleware->alias([
@@ -56,23 +60,23 @@ return Application::configure(basePath: dirname(__DIR__))
             'check.pin' => \App\Http\Middleware\CheckPin::class,
             'secure.cors' => \App\Http\Middleware\SecureCors::class,
         ]);
-        
+
         // Aplicar CORS seguro globalmente nas rotas API
         // IMPORTANTE: Nunca usar Access-Control-Allow-Origin: * em produção
         $middleware->prependToGroup('api', [
             \App\Http\Middleware\SecureCors::class,
         ]);
-        
+
         // Aplicar middleware de segurança globalmente
         $middleware->append([
             \App\Http\Middleware\SecurityMiddleware::class,
         ]);
-        
+
         // Middleware para logar queries lentas (monitoramento de performance)
         $middleware->append([
             \App\Http\Middleware\LogSlowQueries::class,
         ]);
-        
+
         // Aplicar middleware de otimização de assets globalmente (primeira execução)
         $middleware->prepend([
             \App\Http\Middleware\AssetOptimizerMiddleware::class,

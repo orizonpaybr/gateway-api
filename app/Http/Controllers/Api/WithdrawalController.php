@@ -2,21 +2,21 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Constants\UserPermission;
+use App\Helpers\Helper;
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
 use App\Http\Requests\WithdrawalIndexRequest;
 use App\Http\Requests\WithdrawalStatsRequest;
-use App\Services\WithdrawalStatsService;
-use App\Services\FinancialService;
-use App\Services\BalanceService;
 use App\Models\App;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
-use App\Helpers\Helper;
-use App\Constants\UserPermission;
+use App\Services\BalanceService;
+use App\Services\FinancialService;
 use App\Services\PixAcquirer\PixAcquirerManager;
-use Illuminate\Support\Facades\DB;
+use App\Services\WithdrawalStatsService;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class WithdrawalController extends Controller
@@ -27,8 +27,7 @@ class WithdrawalController extends Controller
     public function __construct(
         private readonly WithdrawalStatsService $statsService,
         private readonly FinancialService $financialService,
-    ) {
-    }
+    ) {}
 
     /**
      * Retorna a taxa efetiva de saque para o usuário do saque (respeita taxas customizadas pelo admin).
@@ -36,21 +35,25 @@ class WithdrawalController extends Controller
     private function getTaxaEfetivaSaque(SolicitacoesCashOut $saque, ?App $setting = null): float
     {
         $setting = $setting ?? Cache::remember('app_settings', 300, fn () => App::first());
-        if (!$setting) {
+        if (! $setting) {
             return self::TAXA_APLICACAO_CASH_OUT_PADRAO;
         }
         $user = $saque->relationLoaded('user') ? $saque->user : User::where('user_id', $saque->user_id)->first();
-        if (!$user) {
+        if (! $user) {
             return (float) ($setting->taxa_fixa_pix ?? self::TAXA_APLICACAO_CASH_OUT_PADRAO);
         }
         try {
-            $resultado = \App\Helpers\TaxaSaqueHelper::calcularTaxaSaque((float) $saque->amount, $setting, $user, true);
+            $adquirenteRef = $saque->executor_ordem
+                ?: Helper::adquirenteDefault($user->user_id, 'pix');
+            $resultado = \App\Helpers\TaxaSaqueHelper::calcularTaxaSaque((float) $saque->amount, $setting, $user, true, false, $adquirenteRef);
+
             return (float) $resultado['taxa_cash_out'];
         } catch (\Throwable $e) {
             Log::warning('WithdrawalController::getTaxaEfetivaSaque - fallback para taxa padrão', [
                 'saque_id' => $saque->id,
                 'error' => $e->getMessage(),
             ]);
+
             return self::TAXA_APLICACAO_CASH_OUT_PADRAO;
         }
     }
@@ -70,7 +73,7 @@ class WithdrawalController extends Controller
 
             // CORRIGIDO: Normalizar status antes de validar para tratar 'all' corretamente
             $statusInput = strtolower((string) ($validated['status'] ?? 'pending'));
-            $status = match($statusInput) {
+            $status = match ($statusInput) {
                 'pending' => 'PENDING',
                 'completed' => 'COMPLETED',
                 'paid_out' => 'PAID_OUT',
@@ -97,9 +100,9 @@ class WithdrawalController extends Controller
             $query = SolicitacoesCashOut::query()
                 ->with(['user:id,username,email,user_id'])
                 ->select([
-                    'id','user_id','externalreference','beneficiaryname','beneficiarydocument',
-                    'pix','pixkey','amount','taxa_cash_out','cash_out_liquido','status',
-                    'executor_ordem','descricao_transacao','date','created_at','updated_at'
+                    'id', 'user_id', 'externalreference', 'beneficiaryname', 'beneficiarydocument',
+                    'pix', 'pixkey', 'amount', 'taxa_cash_out', 'cash_out_liquido', 'status',
+                    'executor_ordem', 'descricao_transacao', 'date', 'created_at', 'updated_at',
                 ])
                 ->whereIn('descricao_transacao', ['WEB', 'MANUAL', 'AUTOMATICO']);
 
@@ -118,15 +121,15 @@ class WithdrawalController extends Controller
 
             // Filtro de busca (nome, documento, ID)
             if ($search !== '') {
-                $query->where(function($q) use ($search) {
+                $query->where(function ($q) use ($search) {
                     $q->where('beneficiaryname', 'LIKE', "%{$search}%")
-                      ->orWhere('beneficiarydocument', 'LIKE', "%{$search}%")
-                      ->orWhere('id', 'LIKE', "%{$search}%")
-                      ->orWhere('externalreference', 'LIKE', "%{$search}%")
-                      ->orWhereHas('user', function($userQuery) use ($search) {
-                          $userQuery->where('username', 'LIKE', "%{$search}%")
-                                    ->orWhere('email', 'LIKE', "%{$search}%");
-                      });
+                        ->orWhere('beneficiarydocument', 'LIKE', "%{$search}%")
+                        ->orWhere('id', 'LIKE', "%{$search}%")
+                        ->orWhere('externalreference', 'LIKE', "%{$search}%")
+                        ->orWhereHas('user', function ($userQuery) use ($search) {
+                            $userQuery->where('username', 'LIKE', "%{$search}%")
+                                ->orWhere('email', 'LIKE', "%{$search}%");
+                        });
                 });
             }
 
@@ -182,18 +185,18 @@ class WithdrawalController extends Controller
                     'total' => $saques->total(),
                     'from' => $saques->firstItem(),
                     'to' => $saques->lastItem(),
-                ]
+                ],
             ], 200);
         } catch (\Exception $e) {
             Log::error('Erro ao listar saques', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'success' => false,
                 'message' => 'Erro ao listar saques.',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -234,18 +237,18 @@ class WithdrawalController extends Controller
                     'descricao_externa' => $saque->descricao_externa ?? null,
                     'callback' => $saque->callback ?? null,
                     'user_balance' => $saque->user ? (float) $saque->user->saldo : 0,
-                ]
+                ],
             ], 200);
         } catch (\Exception $e) {
             Log::error('Erro ao buscar detalhes do saque', [
                 'id' => $id,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
 
             return response()->json([
                 'success' => false,
                 'message' => 'Saque não encontrado.',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 404);
         }
     }
@@ -260,10 +263,10 @@ class WithdrawalController extends Controller
         try {
             // Verificar se o usuário tem permissão (Admin ou Gerente)
             $user = $request->user();
-            if (!in_array($user->permission, [UserPermission::ADMIN, UserPermission::MANAGER], true)) {
+            if (! in_array($user->permission, [UserPermission::ADMIN, UserPermission::MANAGER], true)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Você não tem permissão para aprovar saques.'
+                    'message' => 'Você não tem permissão para aprovar saques.',
                 ], 403);
             }
 
@@ -274,16 +277,16 @@ class WithdrawalController extends Controller
             if ($saque->status !== 'PENDING') {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Este saque já foi processado.'
+                    'message' => 'Este saque já foi processado.',
                 ], 400);
             }
 
             // Buscar usuário do saque
             $userSaque = User::where('user_id', $saque->user_id)->first();
-            if (!$userSaque) {
+            if (! $userSaque) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Usuário do saque não encontrado.'
+                    'message' => 'Usuário do saque não encontrado.',
                 ], 404);
             }
 
@@ -292,23 +295,23 @@ class WithdrawalController extends Controller
 
             // Determinar adquirente baseado no executor_ordem ou adquirente padrão
             $adquirente = $saque->executor_ordem ?? Helper::adquirenteDefault();
-            
+
             // Se não tem executor_ordem, usar adquirente padrão
-            if (!$saque->executor_ordem) {
+            if (! $saque->executor_ordem) {
                 $adquirente = Helper::adquirenteDefault();
             }
 
-            if (!$adquirente) {
+            if (! $adquirente) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Nenhum adquirente configurado.'
+                    'message' => 'Nenhum adquirente configurado.',
                 ], 500);
             }
 
             if (strtolower($adquirente) === 'pagarme') {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Este método de pagamento não suporta saques PIX.'
+                    'message' => 'Este método de pagamento não suporta saques PIX.',
                 ], 500);
             }
 
@@ -326,13 +329,13 @@ class WithdrawalController extends Controller
             Log::error('Erro ao aprovar saque', [
                 'id' => $id,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Erro ao aprovar saque: ' . $e->getMessage(),
-                'error' => $e->getMessage()
+                'message' => 'Erro ao aprovar saque: '.$e->getMessage(),
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -345,15 +348,14 @@ class WithdrawalController extends Controller
         SolicitacoesCashOut $saque,
         User $userSaque,
         float $taxaCashOut
-    )
-    {
+    ) {
         $acquirerManager = app(PixAcquirerManager::class);
         $acquirerService = $acquirerManager->resolve($adquirente);
 
-        if (!$acquirerService->isActive()) {
+        if (! $acquirerService->isActive()) {
             return response()->json([
                 'success' => false,
-                'message' => 'Integração PIX temporariamente indisponível.'
+                'message' => 'Integração PIX temporariamente indisponível.',
             ], 503);
         }
 
@@ -368,16 +370,16 @@ class WithdrawalController extends Controller
             (float) $saque->amount,
             $saque->pix,
             $saque->pixkey,
-            'Saque aprovado manualmente - ID: ' . $saque->id,
+            'Saque aprovado manualmente - ID: '.$saque->id,
             $correlationID,
             $recipientName,
             $recipientDocument
         );
 
-        if (!($payoutResult['success'] ?? false)) {
+        if (! ($payoutResult['success'] ?? false)) {
             return response()->json([
                 'success' => false,
-                'message' => $payoutResult['message'] ?? 'Erro ao processar saque PIX'
+                'message' => $payoutResult['message'] ?? 'Erro ao processar saque PIX',
             ], 500);
         }
 
@@ -395,11 +397,11 @@ class WithdrawalController extends Controller
             }
 
             $saqueAtualizado->update([
-                'status'            => $statusInterno,
+                'status' => $statusInterno,
                 'externalreference' => $referenceCode,
-                'idTransaction'     => $referenceCode,
-                'executor_ordem'    => $acquirerService->getReference(),
-                'taxa_cash_out'     => $taxaCashOut,
+                'idTransaction' => $referenceCode,
+                'executor_ordem' => $acquirerService->getReference(),
+                'taxa_cash_out' => $taxaCashOut,
                 'descricao_externa' => $correlationID,
             ]);
         });
@@ -412,7 +414,7 @@ class WithdrawalController extends Controller
             'data' => [
                 'transaction_id' => $referenceCode,
                 'status' => $statusInterno,
-            ]
+            ],
         ], 200);
     }
 
@@ -426,10 +428,10 @@ class WithdrawalController extends Controller
         try {
             // Verificar se o usuário tem permissão (Admin ou Gerente)
             $user = $request->user();
-            if (!in_array($user->permission, [UserPermission::ADMIN, UserPermission::MANAGER], true)) {
+            if (! in_array($user->permission, [UserPermission::ADMIN, UserPermission::MANAGER], true)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Você não tem permissão para rejeitar saques.'
+                    'message' => 'Você não tem permissão para rejeitar saques.',
                 ], 403);
             }
 
@@ -440,7 +442,7 @@ class WithdrawalController extends Controller
             if ($saque->status !== 'PENDING') {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Este saque já foi processado.'
+                    'message' => 'Este saque já foi processado.',
                 ], 400);
             }
 
@@ -483,20 +485,20 @@ class WithdrawalController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Saque rejeitado com sucesso.'
+                'message' => 'Saque rejeitado com sucesso.',
             ], 200);
 
         } catch (\Exception $e) {
             Log::error('Erro ao rejeitar saque', [
                 'id' => $id,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'success' => false,
                 'message' => 'Erro ao rejeitar saque.',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -524,18 +526,18 @@ class WithdrawalController extends Controller
                     'valor_aprovado' => (float) $stats['valores']['aprovado'],
                     'saques_manuais' => $stats['tipos']['manuais'],
                     'saques_automaticos' => $stats['tipos']['automaticos'],
-                ]
+                ],
             ], 200);
 
         } catch (\Exception $e) {
             Log::error('Erro ao buscar estatísticas de saques', [
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
 
             return response()->json([
                 'success' => false,
                 'message' => 'Erro ao buscar estatísticas.',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -587,15 +589,15 @@ class WithdrawalController extends Controller
             $config = Cache::remember('app_settings', 300, function () {
                 return \App\Models\App::first();
             });
-            
+
             // Se não existir configuração, retornar valores padrão
-            if (!$config) {
+            if (! $config) {
                 return response()->json([
                     'success' => true,
                     'data' => [
                         'saque_automatico' => false,
                         'limite_saque_automatico' => null,
-                    ]
+                    ],
                 ], 200);
             }
 
@@ -607,17 +609,17 @@ class WithdrawalController extends Controller
                     'limite_saque_automatico' => ($config->limite_saque_automatico === 0 || $config->limite_saque_automatico === '0.00')
                         ? null
                         : (float) $config->limite_saque_automatico,
-                ]
+                ],
             ], 200);
         } catch (\Exception $e) {
             Log::error('Erro ao buscar configurações de saque', [
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
 
             return response()->json([
                 'success' => false,
                 'message' => 'Erro ao buscar configurações.',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -633,20 +635,20 @@ class WithdrawalController extends Controller
             if ($user->permission != UserPermission::ADMIN) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Você não tem permissão para atualizar configurações.'
+                    'message' => 'Você não tem permissão para atualizar configurações.',
                 ], 403);
             }
 
             $request->validate([
                 'saque_automatico' => 'required|boolean',
-                'limite_saque_automatico' => 'nullable|numeric|min:0'
+                'limite_saque_automatico' => 'nullable|numeric|min:0',
             ]);
 
             // Buscar configuração existente
             $config = \App\Models\App::first();
-            
+
             // Se não existir, criar registro básico
-            if (!$config) {
+            if (! $config) {
                 try {
                     $config = \App\Models\App::create([
                         'saque_automatico' => false,
@@ -654,12 +656,13 @@ class WithdrawalController extends Controller
                     ]);
                 } catch (\Exception $e) {
                     Log::error('Erro ao criar configuração de app', [
-                        'error' => $e->getMessage()
+                        'error' => $e->getMessage(),
                     ]);
+
                     return response()->json([
                         'success' => false,
                         'message' => 'Erro ao criar configurações. Verifique se a tabela app existe e tem os campos necessários.',
-                        'error' => $e->getMessage()
+                        'error' => $e->getMessage(),
                     ], 500);
                 }
             }
@@ -674,7 +677,7 @@ class WithdrawalController extends Controller
             // Algumas bases têm a coluna como NOT NULL. Usar 0.00 como 'sem limite' e mapear para null no GET.
             $config->update([
                 'saque_automatico' => $request->input('saque_automatico'),
-                'limite_saque_automatico' => $limite === null ? 0 : $limite
+                'limite_saque_automatico' => $limite === null ? 0 : $limite,
             ]);
 
             // Limpar cache de configurações
@@ -686,26 +689,25 @@ class WithdrawalController extends Controller
                 'data' => [
                     'saque_automatico' => (bool) $config->saque_automatico,
                     'limite_saque_automatico' => $config->limite_saque_automatico,
-                ]
+                ],
             ], 200);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Erro de validação',
-                'errors' => $e->errors()
+                'errors' => $e->errors(),
             ], 422);
         } catch (\Exception $e) {
             Log::error('Erro ao atualizar configurações de saque', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'success' => false,
                 'message' => 'Erro ao atualizar configurações.',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
 }
-
