@@ -80,6 +80,9 @@ jobs:
             echo "Deploy concluído com sucesso!"
           EOF
 
+      # Health check HTTPS: o certificado deve bater com o HOST da URL (SAN).
+      # - Defina o secret HEALTH_CHECK_URL (ex.: https://api.coratri.com/up) — recomendado após troca de domínio (orizonpay → coratri).
+      # - Se HEALTH_CHECK_URL estiver vazio, usa https://$SERVER_HOST/up — só funciona se SERVER_HOST for o mesmo FQDN do certificado (não use IP).
       - name: Health Check
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
@@ -89,6 +92,9 @@ jobs:
           sleep 5
           URL="${HEALTH_CHECK_URL:-https://$SERVER_HOST/up}"
           echo "URL do health check: $URL"
+          if [ -z "${HEALTH_CHECK_URL:-}" ] && echo "$SERVER_HOST" | grep -qE '^[0-9.]+$|^\[.*\]$'; then
+            echo "::warning::HEALTH_CHECK_URL não definido e SERVER_HOST parece IP. O TLS costuma falhar (curl 60). Configure o secret HEALTH_CHECK_URL com a URL pública HTTPS (ex.: https://api.coratri.com/up)."
+          fi
           curl -f --connect-timeout 15 --max-time 20 "$URL" || exit 1
           echo "Aplicação está respondendo!"
 
