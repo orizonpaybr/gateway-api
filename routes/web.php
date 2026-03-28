@@ -1,9 +1,9 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\UnifiedCallbackController;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Response;
+use Illuminate\Support\Facades\Route;
 
 // Callback unificado - redireciona para adquirente correta
 Route::post('/callback/', [UnifiedCallbackController::class, 'handleCallback']);
@@ -23,4 +23,5 @@ Route::get('/download-boleto', function () {
 });
 
 // Rotas de adquirentes (webhooks e callbacks específicos)
-require __DIR__ . '/groups/adquirentes/pagarme.php';
+require __DIR__.'/groups/adquirentes/pagarme.php';
+require __DIR__.'/groups/adquirentes/magenpay.php';

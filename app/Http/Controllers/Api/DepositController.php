@@ -2,20 +2,22 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\DTO\PagarMeDTO\CardDepositDTO;
+use App\Helpers\ApiResponseStandardizer;
+use App\Helpers\Helper;
+use App\Helpers\TaxaFlexivelHelper;
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
-use Carbon\Carbon;
-use App\Traits\PagarMeTrait;
-use App\Models\Solicitacoes;
-use App\Models\SolicitacoesCashOut;
 use App\Models\App;
 use App\Models\Pagarme;
-use App\Helpers\Helper;
-use App\Helpers\ApiResponseStandardizer;
+use App\Models\Solicitacoes;
+use App\Models\SolicitacoesCashOut;
 use App\Services\PagarMeService;
 use App\Services\PixAcquirer\PixAcquirerManager;
-use App\DTO\PagarMeDTO\CardDepositDTO;
+use App\Traits\PagarMeTrait;
+use Carbon\Carbon;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 /**
  * @OA\Info(
@@ -24,10 +26,8 @@ use App\DTO\PagarMeDTO\CardDepositDTO;
  *     description="Documentação"
  * )
  */
-
 class DepositController extends Controller
 {
-
     public function makeDeposit(Request $request)
     {
         // Verificar se o usuário está autenticado
@@ -35,22 +35,23 @@ class DepositController extends Controller
         Log::info('DepositController - Verificação de usuário', [
             'user_from_request' => $user ? 'Presente' : 'Ausente',
             'user_id' => $user ? $user->id : 'N/A',
-            'request_data' => $request->all()
+            'request_data' => $request->all(),
         ]);
-        
-        if (!$user) {
+
+        if (! $user) {
             return response()->json(['status' => 'error', 'message' => 'Usuário não autenticado'], 401);
         }
 
         $setting = App::first();
-        if (!$setting) {
+        if (! $setting) {
             return response()->json(['status' => 'error', 'message' => 'Configurações do aplicativo não encontradas.'], 500);
         }
 
         $default = Helper::adquirenteDefault($user->username ?? $user->user_id);
         Log::info('DepositController - Adquirente default', ['adquirente' => $default]);
-        if (!$default) {
+        if (! $default) {
             Log::info('DepositController - Nenhum adquirente configurado', []);
+
             return response()->json(['status' => 'error', 'message' => 'Nenhum adquirente configurado.'], 500);
         }
 
@@ -72,7 +73,7 @@ class DepositController extends Controller
             return response()->json([
                 'status' => 'error',
                 'message' => 'Erro de validação',
-                'errors' => $e->errors()
+                'errors' => $e->errors(),
             ], 422); // Status code 422 para erros de validação
         }
 
@@ -86,9 +87,9 @@ class DepositController extends Controller
                 'taxa_fixa_deposito' => $user->taxa_fixa_deposito ?? 'N/A',
             ]);
         }
-        
+
         Log::info('DepositController - Executando switch para adquirente', ['adquirente' => $default]);
-        switch($default){
+        switch ($default) {
             case 'pagarme':
                 Log::info('DepositController - Executando PagarMeTrait', []);
                 $response = PagarMeTrait::requestDepositPagarme($request);
@@ -97,22 +98,23 @@ class DepositController extends Controller
                 $response = $this->processPixDepositUsingAcquirer($request, $user, $setting, (string) $default);
                 break;
         }
-        
+
         // Verificar se a resposta foi definida
-        if (!isset($response)) {
+        if (! isset($response)) {
             return response()->json(['status' => 'error', 'message' => 'Erro ao processar depósito.'], 500);
         }
-        
+
         // Se passar pela validação, processar o depósito
         if ($response['status'] === 200) {
             // Padronizar a resposta usando o sistema de padronização
             $standardizedResponse = ApiResponseStandardizer::standardizeDepositResponse(
-                $response['data'], 
+                $response['data'],
                 $request->amount
             );
+
             return response()->json($standardizedResponse, 200);
         }
-        
+
         return response()->json($response['data'], $response['status']);
     }
 
@@ -144,9 +146,9 @@ class DepositController extends Controller
         if ($transaction->webhook_status !== null) {
             $response['webhook'] = [
                 'delivery_status' => $transaction->webhook_status,
-                'sent_at'         => $transaction->webhook_sent_at,
-                'http_status'     => $transaction->webhook_http_status,
-                'attempts'        => $transaction->webhook_attempts ?? 0,
+                'sent_at' => $transaction->webhook_sent_at,
+                'http_status' => $transaction->webhook_http_status,
+                'attempts' => $transaction->webhook_attempts ?? 0,
             ];
 
             if ($transaction->webhook_status !== 'delivered') {
@@ -164,15 +166,18 @@ class DepositController extends Controller
 
     /**
      * Processa depósito via cartão de crédito usando Pagar.me
-     * 
+     *
      * @OA\Post(
      *     path="/api/deposit/card",
      *     summary="Criar depósito via cartão de crédito",
      *     tags={"Depósitos"},
+     *
      *     @OA\RequestBody(
      *         required=true,
+     *
      *         @OA\JsonContent(
      *             required={"amount", "debtor_name", "email", "debtor_document"},
+     *
      *             @OA\Property(property="amount", type="number", example=100.00),
      *             @OA\Property(property="debtor_name", type="string", example="João Silva"),
      *             @OA\Property(property="email", type="string", example="joao@email.com"),
@@ -185,6 +190,7 @@ class DepositController extends Controller
      *             @OA\Property(property="callbackUrl", type="string", example="https://seu-site.com/callback")
      *         )
      *     ),
+     *
      *     @OA\Response(response=200, description="Depósito criado com sucesso"),
      *     @OA\Response(response=400, description="Dados inválidos"),
      *     @OA\Response(response=401, description="Não autorizado"),
@@ -196,24 +202,24 @@ class DepositController extends Controller
         try {
             // Verificar autenticação
             $user = $request->user_auth;
-            if (!$user) {
+            if (! $user) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Usuário não autenticado'
+                    'message' => 'Usuário não autenticado',
                 ], 401);
             }
 
             Log::info('DepositController::makeCardDeposit - Iniciando depósito com cartão', [
                 'user_id' => $user->id,
-                'amount' => $request->amount
+                'amount' => $request->amount,
             ]);
 
             // Verificar se Pagar.me está configurado para cartão
             $pagarmeConfig = Pagarme::first();
-            if (!$pagarmeConfig || !$pagarmeConfig->isCardEnabled()) {
+            if (! $pagarmeConfig || ! $pagarmeConfig->isCardEnabled()) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Pagamentos com cartão não estão habilitados'
+                    'message' => 'Pagamentos com cartão não estão habilitados',
                 ], 400);
             }
 
@@ -230,7 +236,7 @@ class DepositController extends Controller
                 'card.number' => ['required_with:card', 'string'],
                 'card.holder_name' => ['required_with:card', 'string'],
                 'card.exp_month' => ['required_with:card', 'integer', 'between:1,12'],
-                'card.exp_year' => ['required_with:card', 'integer', 'min:' . date('Y')],
+                'card.exp_year' => ['required_with:card', 'integer', 'min:'.date('Y')],
                 'card.cvv' => ['required_with:card', 'string', 'size:3'],
                 'installments' => ['nullable', 'integer', 'between:1,12'],
                 'use_3ds' => ['nullable', 'boolean'],
@@ -242,22 +248,22 @@ class DepositController extends Controller
 
             // Criar DTO
             $dto = CardDepositDTO::fromRequest($request);
-            
+
             // Validar DTO
-            if (!$dto->isValid()) {
+            if (! $dto->isValid()) {
                 return response()->json([
                     'status' => 'error',
                     'message' => 'Dados inválidos',
-                    'errors' => $dto->getValidationErrors()
+                    'errors' => $dto->getValidationErrors(),
                 ], 400);
             }
 
             // Processar depósito
-            $pagarmeService = new PagarMeService();
-            
+            $pagarmeService = new PagarMeService;
+
             // Usar 3DS conforme configuração
             $use3ds = $request->input('use_3ds', $pagarmeConfig->is3dsEnabled());
-            
+
             $serviceData = $dto->toServiceArray();
             $serviceData['use_3ds'] = $use3ds;
             $serviceData['statement_descriptor'] = $setting->gateway_name ?? 'GATEWAY';
@@ -265,20 +271,20 @@ class DepositController extends Controller
             // Chamar API Pagar.me
             $response = $pagarmeService->createCardOrder($serviceData);
 
-            if (!$response || isset($response['error'])) {
+            if (! $response || isset($response['error'])) {
                 Log::error('DepositController::makeCardDeposit - Erro na API Pagar.me', [
-                    'response' => $response
+                    'response' => $response,
                 ]);
-                
+
                 return response()->json([
                     'status' => 'error',
-                    'message' => $response['message'] ?? 'Erro ao processar pagamento com cartão'
+                    'message' => $response['message'] ?? 'Erro ao processar pagamento com cartão',
                 ], 400);
             }
 
             // Calcular taxas
             $fees = $pagarmeService->calculateCardFees($request->amount);
-            
+
             // Criar registro de solicitação
             $transactionId = $response['id'];
             $chargeId = $response['charges'][0]['id'] ?? null;
@@ -312,7 +318,7 @@ class DepositController extends Controller
             if (in_array($chargeStatus, ['paid', 'captured'])) {
                 // Buscar transação criada para processar de forma atômica
                 $solicitacao = Solicitacoes::where('idTransaction', $chargeId)->first();
-                
+
                 if ($solicitacao) {
                     try {
                         $paymentService = app(\App\Services\PaymentProcessingService::class);
@@ -346,7 +352,7 @@ class DepositController extends Controller
                 'transaction_id' => $transactionId,
                 'charge_status' => $chargeStatus,
                 'amount' => $request->amount,
-                'net_amount' => $fees['net_amount']
+                'net_amount' => $fees['net_amount'],
             ]);
 
             return response()->json([
@@ -363,24 +369,24 @@ class DepositController extends Controller
                     'days_availability' => $fees['days_availability'],
                     // Dados para 3DS se necessário
                     'authentication_url' => $response['charges'][0]['last_transaction']['threed_secure_url'] ?? null,
-                ]
+                ],
             ], 200);
 
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
                 'status' => 'error',
                 'message' => 'Erro de validação',
-                'errors' => $e->errors()
+                'errors' => $e->errors(),
             ], 422);
         } catch (\Exception $e) {
             Log::error('DepositController::makeCardDeposit - Exceção:', [
                 'message' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'status' => 'error',
-                'message' => 'Erro interno ao processar pagamento'
+                'message' => 'Erro interno ao processar pagamento',
             ], 500);
         }
     }
@@ -392,10 +398,10 @@ class DepositController extends Controller
     {
         try {
             $user = $request->user();
-            if (!$user) {
+            if (! $user) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Usuário não autenticado'
+                    'message' => 'Usuário não autenticado',
                 ], 401);
             }
 
@@ -405,21 +411,21 @@ class DepositController extends Controller
                 ->orderBy('is_default', 'desc')
                 ->orderBy('last_used_at', 'desc')
                 ->get()
-                ->map(fn($card) => $card->toDisplayArray());
+                ->map(fn ($card) => $card->toDisplayArray());
 
             return response()->json([
                 'status' => 'success',
-                'data' => $cards
+                'data' => $cards,
             ]);
 
         } catch (\Exception $e) {
             Log::error('DepositController::listSavedCards - Exceção:', [
-                'message' => $e->getMessage()
+                'message' => $e->getMessage(),
             ]);
 
             return response()->json([
                 'status' => 'error',
-                'message' => 'Erro ao listar cartões'
+                'message' => 'Erro ao listar cartões',
             ], 500);
         }
     }
@@ -431,10 +437,10 @@ class DepositController extends Controller
     {
         try {
             $user = $request->user();
-            if (!$user) {
+            if (! $user) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Usuário não autenticado'
+                    'message' => 'Usuário não autenticado',
                 ], 401);
             }
 
@@ -442,16 +448,16 @@ class DepositController extends Controller
                 ->where('id', $cardId)
                 ->first();
 
-            if (!$card) {
+            if (! $card) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Cartão não encontrado'
+                    'message' => 'Cartão não encontrado',
                 ], 404);
             }
 
             // Remover da Pagar.me se tiver customer_id
             if ($card->customer_id && $card->card_id) {
-                $pagarmeService = new PagarMeService();
+                $pagarmeService = new PagarMeService;
                 $pagarmeService->deleteCustomerCard($card->customer_id, $card->card_id);
             }
 
@@ -459,17 +465,17 @@ class DepositController extends Controller
 
             return response()->json([
                 'status' => 'success',
-                'message' => 'Cartão removido com sucesso'
+                'message' => 'Cartão removido com sucesso',
             ]);
 
         } catch (\Exception $e) {
             Log::error('DepositController::deleteSavedCard - Exceção:', [
-                'message' => $e->getMessage()
+                'message' => $e->getMessage(),
             ]);
 
             return response()->json([
                 'status' => 'error',
-                'message' => 'Erro ao remover cartão'
+                'message' => 'Erro ao remover cartão',
             ], 500);
         }
     }
@@ -481,10 +487,10 @@ class DepositController extends Controller
     {
         try {
             $user = $request->user();
-            if (!$user) {
+            if (! $user) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Usuário não autenticado'
+                    'message' => 'Usuário não autenticado',
                 ], 401);
             }
 
@@ -492,10 +498,10 @@ class DepositController extends Controller
                 ->where('id', $cardId)
                 ->first();
 
-            if (!$card) {
+            if (! $card) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Cartão não encontrado'
+                    'message' => 'Cartão não encontrado',
                 ], 404);
             }
 
@@ -503,17 +509,17 @@ class DepositController extends Controller
 
             return response()->json([
                 'status' => 'success',
-                'message' => 'Cartão definido como padrão'
+                'message' => 'Cartão definido como padrão',
             ]);
 
         } catch (\Exception $e) {
             Log::error('DepositController::setDefaultCard - Exceção:', [
-                'message' => $e->getMessage()
+                'message' => $e->getMessage(),
             ]);
 
             return response()->json([
                 'status' => 'error',
-                'message' => 'Erro ao definir cartão padrão'
+                'message' => 'Erro ao definir cartão padrão',
             ], 500);
         }
     }
@@ -544,18 +550,101 @@ class DepositController extends Controller
         $acquirerManager = app(PixAcquirerManager::class);
         $acquirerService = $acquirerManager->resolve($acquirerRef);
 
-        if (!$acquirerService->isActive()) {
+        if (! $acquirerService->isActive()) {
             return [
                 'status' => 503,
-                'data' => ['status' => 'error', 'message' => 'Integração PIX temporariamente indisponível.']
+                'data' => ['status' => 'error', 'message' => 'Integração PIX temporariamente indisponível.'],
             ];
         }
 
-        // Contrato pronto para a próxima adquirente: implementar createCharge no service concreto.
+        $correlationId = preg_replace('/[^a-zA-Z0-9]/', '', Str::uuid()->toString());
+        $customer = [
+            'name' => $request->debtor_name,
+            'email' => $request->email,
+            'document' => (string) ($request->debtor_document_number ?? ''),
+            'phone' => (string) ($request->phone ?? ''),
+        ];
+
+        $chargeResult = $acquirerService->createCharge(
+            (float) $request->amount,
+            $customer,
+            $correlationId,
+            $request->input('postback'),
+            null
+        );
+
+        if (! ($chargeResult['success'] ?? false)) {
+            return [
+                'status' => 503,
+                'data' => [
+                    'status' => 'error',
+                    'message' => $chargeResult['message'] ?? 'Não foi possível gerar cobrança PIX.',
+                ],
+            ];
+        }
+
+        try {
+            $fees = TaxaFlexivelHelper::calcularTaxaDeposito((float) $request->amount, $setting, $user, $acquirerRef);
+        } catch (\Throwable $e) {
+            Log::error('DepositController::processPixDepositUsingAcquirer — taxa', [
+                'message' => $e->getMessage(),
+            ]);
+
+            return [
+                'status' => 500,
+                'data' => ['status' => 'error', 'message' => 'Erro ao calcular taxas do depósito.'],
+            ];
+        }
+
+        $brCode = $chargeResult['brCode'] ?? $chargeResult['qr_code'] ?? null;
+        $idTxn = $chargeResult['correlationID'] ?? $correlationId;
+        $rawStatus = strtolower((string) ($chargeResult['status'] ?? ''));
+        $statusCharge = $rawStatus === 'created' || $rawStatus === 'pending'
+            ? 'WAITING_FOR_APPROVAL'
+            : ($chargeResult['status'] ?? 'WAITING_FOR_APPROVAL');
+
+        $cashin = [
+            'user_id' => $user->username,
+            'externalreference' => $idTxn,
+            'amount' => $request->amount,
+            'client_name' => $request->debtor_name,
+            'client_document' => $request->debtor_document_number,
+            'client_email' => $request->email,
+            'client_telefone' => $request->phone,
+            'date' => Carbon::now(),
+            'status' => $statusCharge,
+            'idTransaction' => $idTxn,
+            'deposito_liquido' => $fees['deposito_liquido'],
+            'qrcode_pix' => $brCode,
+            'paymentcode' => $brCode,
+            'paymentCodeBase64' => $brCode,
+            'adquirente_ref' => $acquirerRef === 'magenpay' ? 'Magen' : $acquirerRef,
+            'taxa_cash_in' => $fees['taxa_cash_in'],
+            'taxa_pix_cash_in_adquirente' => $fees['taxa_adquirente'],
+            'taxa_pix_cash_in_valor_fixo' => $fees['taxa_aplicacao'],
+            'executor_ordem' => $acquirerService->getReference(),
+            'descricao_transacao' => $fees['descricao'] ?? 'PIX',
+            'callback' => $request->postback,
+        ];
+
+        Solicitacoes::create($cashin);
+
         return [
-            'status' => 503,
-            'data' => ['status' => 'error', 'message' => 'Integração PIX temporariamente indisponível.']
+            'status' => 200,
+            'data' => [
+                'status' => 'success',
+                'message' => 'QR Code gerado com sucesso',
+                'data' => [
+                    'idTransaction' => $idTxn,
+                    'qrcode' => $brCode,
+                    'qr_code' => $brCode,
+                    'qr_code_image_url' => $chargeResult['qrCodeImage'] ?? null,
+                ],
+                'idTransaction' => $idTxn,
+                'qrcode' => $brCode,
+                'qr_code' => $brCode,
+                'qr_code_image_url' => $chargeResult['qrCodeImage'] ?? null,
+            ],
         ];
     }
 }
-

@@ -8,9 +8,9 @@ use App\Models\App;
 use App\Models\PixKey;
 use App\Services\PixAcquirer\PixAcquirerManager;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Facades\Cache;
 
 class PixKeyController extends Controller
 {
@@ -21,11 +21,11 @@ class PixKeyController extends Controller
     {
         try {
             $user = $request->user() ?? $request->user_auth;
-            
-            if (!$user) {
+
+            if (! $user) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Usuário não autenticado'
+                    'message' => 'Usuário não autenticado',
                 ], 401)->header('Access-Control-Allow-Origin', '*');
             }
 
@@ -34,18 +34,18 @@ class PixKeyController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => PixKeyResource::collection($keys)
+                'data' => PixKeyResource::collection($keys),
             ])->header('Access-Control-Allow-Origin', '*');
 
         } catch (\Exception $e) {
             Log::error('Erro ao listar chaves PIX', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Erro ao listar chaves PIX'
+                'message' => 'Erro ao listar chaves PIX',
             ], 500)->header('Access-Control-Allow-Origin', '*');
         }
     }
@@ -57,11 +57,11 @@ class PixKeyController extends Controller
     {
         try {
             $user = $request->user() ?? $request->user_auth;
-            
-            if (!$user) {
+
+            if (! $user) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Usuário não autenticado'
+                    'message' => 'Usuário não autenticado',
                 ], 401)->header('Access-Control-Allow-Origin', '*');
             }
 
@@ -70,14 +70,14 @@ class PixKeyController extends Controller
                 'key_type' => 'required|in:cpf,cnpj,telefone,email,aleatoria',
                 'key_value' => 'required|string',
                 'key_label' => 'nullable|string|max:100',
-                'is_default' => 'nullable|boolean'
+                'is_default' => 'nullable|boolean',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Dados inválidos',
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 400)->header('Access-Control-Allow-Origin', '*');
             }
 
@@ -88,10 +88,10 @@ class PixKeyController extends Controller
             $cleanKey = preg_replace('/[^0-9a-zA-Z@.-]/', '', $keyValue);
 
             // Validar formato da chave
-            if (!PixKey::validateKeyFormat($keyType, $keyValue)) {
+            if (! PixKey::validateKeyFormat($keyType, $keyValue)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Formato de chave PIX inválido para o tipo selecionado'
+                    'message' => 'Formato de chave PIX inválido para o tipo selecionado',
                 ], 400)->header('Access-Control-Allow-Origin', '*');
             }
 
@@ -103,7 +103,7 @@ class PixKeyController extends Controller
             if ($existingKey) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Esta chave PIX já está cadastrada'
+                    'message' => 'Esta chave PIX já está cadastrada',
                 ], 409)->header('Access-Control-Allow-Origin', '*');
             }
 
@@ -112,7 +112,7 @@ class PixKeyController extends Controller
             if ($userKeysCount >= 5) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Você atingiu o limite máximo de 5 chaves PIX cadastradas'
+                    'message' => 'Você atingiu o limite máximo de 5 chaves PIX cadastradas',
                 ], 400)->header('Access-Control-Allow-Origin', '*');
             }
 
@@ -128,30 +128,30 @@ class PixKeyController extends Controller
                 'key_label' => $request->key_label,
                 'is_active' => true,
                 'is_default' => $isDefault,
-                'verified_at' => now() // Auto-verificar por enquanto
+                'verified_at' => now(), // Auto-verificar por enquanto
             ]);
 
             Log::info('Chave PIX criada', [
                 'user_id' => $user->username,
                 'key_id' => $pixKey->id,
-                'key_type' => $keyType
+                'key_type' => $keyType,
             ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Chave PIX cadastrada com sucesso',
-                'data' => new PixKeyResource($pixKey)
+                'data' => new PixKeyResource($pixKey),
             ], 201)->header('Access-Control-Allow-Origin', '*');
 
         } catch (\Exception $e) {
             Log::error('Erro ao criar chave PIX', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Erro ao cadastrar chave PIX'
+                'message' => 'Erro ao cadastrar chave PIX',
             ], 500)->header('Access-Control-Allow-Origin', '*');
         }
     }
@@ -163,36 +163,36 @@ class PixKeyController extends Controller
     {
         try {
             $user = $request->user() ?? $request->user_auth;
-            
-            if (!$user) {
+
+            if (! $user) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Usuário não autenticado'
+                    'message' => 'Usuário não autenticado',
                 ], 401)->header('Access-Control-Allow-Origin', '*');
             }
 
             $pixKey = PixKey::forUser($user->username)->find($id);
 
-            if (!$pixKey) {
+            if (! $pixKey) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Chave PIX não encontrada'
+                    'message' => 'Chave PIX não encontrada',
                 ], 404)->header('Access-Control-Allow-Origin', '*');
             }
 
             return response()->json([
                 'success' => true,
-                'data' => new PixKeyResource($pixKey)
+                'data' => new PixKeyResource($pixKey),
             ])->header('Access-Control-Allow-Origin', '*');
 
         } catch (\Exception $e) {
             Log::error('Erro ao buscar chave PIX', [
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Erro ao buscar chave PIX'
+                'message' => 'Erro ao buscar chave PIX',
             ], 500)->header('Access-Control-Allow-Origin', '*');
         }
     }
@@ -204,20 +204,20 @@ class PixKeyController extends Controller
     {
         try {
             $user = $request->user() ?? $request->user_auth;
-            
-            if (!$user) {
+
+            if (! $user) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Usuário não autenticado'
+                    'message' => 'Usuário não autenticado',
                 ], 401)->header('Access-Control-Allow-Origin', '*');
             }
 
             $pixKey = PixKey::forUser($user->username)->find($id);
 
-            if (!$pixKey) {
+            if (! $pixKey) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Chave PIX não encontrada'
+                    'message' => 'Chave PIX não encontrada',
                 ], 404)->header('Access-Control-Allow-Origin', '*');
             }
 
@@ -225,14 +225,14 @@ class PixKeyController extends Controller
             $validator = Validator::make($request->all(), [
                 'key_label' => 'nullable|string|max:100',
                 'is_default' => 'nullable|boolean',
-                'is_active' => 'nullable|boolean'
+                'is_active' => 'nullable|boolean',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Dados inválidos',
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 400)->header('Access-Control-Allow-Origin', '*');
             }
 
@@ -253,23 +253,23 @@ class PixKeyController extends Controller
 
             Log::info('Chave PIX atualizada', [
                 'user_id' => $user->username,
-                'key_id' => $pixKey->id
+                'key_id' => $pixKey->id,
             ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Chave PIX atualizada com sucesso',
-                'data' => new PixKeyResource($pixKey)
+                'data' => new PixKeyResource($pixKey),
             ])->header('Access-Control-Allow-Origin', '*');
 
         } catch (\Exception $e) {
             Log::error('Erro ao atualizar chave PIX', [
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Erro ao atualizar chave PIX'
+                'message' => 'Erro ao atualizar chave PIX',
             ], 500)->header('Access-Control-Allow-Origin', '*');
         }
     }
@@ -281,20 +281,20 @@ class PixKeyController extends Controller
     {
         try {
             $user = $request->user() ?? $request->user_auth;
-            
-            if (!$user) {
+
+            if (! $user) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Usuário não autenticado'
+                    'message' => 'Usuário não autenticado',
                 ], 401)->header('Access-Control-Allow-Origin', '*');
             }
 
             $pixKey = PixKey::forUser($user->username)->find($id);
 
-            if (!$pixKey) {
+            if (! $pixKey) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Chave PIX não encontrada'
+                    'message' => 'Chave PIX não encontrada',
                 ], 404)->header('Access-Control-Allow-Origin', '*');
             }
 
@@ -315,22 +315,22 @@ class PixKeyController extends Controller
 
             Log::info('Chave PIX deletada', [
                 'user_id' => $user->username,
-                'key_id' => $id
+                'key_id' => $id,
             ]);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Chave PIX removida com sucesso'
+                'message' => 'Chave PIX removida com sucesso',
             ])->header('Access-Control-Allow-Origin', '*');
 
         } catch (\Exception $e) {
             Log::error('Erro ao deletar chave PIX', [
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Erro ao remover chave PIX'
+                'message' => 'Erro ao remover chave PIX',
             ], 500)->header('Access-Control-Allow-Origin', '*');
         }
     }
@@ -342,20 +342,20 @@ class PixKeyController extends Controller
     {
         try {
             $user = $request->user() ?? $request->user_auth;
-            
-            if (!$user) {
+
+            if (! $user) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Usuário não autenticado'
+                    'message' => 'Usuário não autenticado',
                 ], 401)->header('Access-Control-Allow-Origin', '*');
             }
 
             $pixKey = PixKey::forUser($user->username)->active()->find($id);
 
-            if (!$pixKey) {
+            if (! $pixKey) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Chave PIX não encontrada'
+                    'message' => 'Chave PIX não encontrada',
                 ], 404)->header('Access-Control-Allow-Origin', '*');
             }
 
@@ -364,17 +364,17 @@ class PixKeyController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Chave padrão definida com sucesso'
+                'message' => 'Chave padrão definida com sucesso',
             ])->header('Access-Control-Allow-Origin', '*');
 
         } catch (\Exception $e) {
             Log::error('Erro ao definir chave padrão', [
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Erro ao definir chave padrão'
+                'message' => 'Erro ao definir chave padrão',
             ], 500)->header('Access-Control-Allow-Origin', '*');
         }
     }
@@ -386,11 +386,11 @@ class PixKeyController extends Controller
     {
         try {
             $user = $request->user() ?? $request->user_auth;
-            
-            if (!$user) {
+
+            if (! $user) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Usuário não autenticado'
+                    'message' => 'Usuário não autenticado',
                 ], 401)->header('Access-Control-Allow-Origin', '*');
             }
 
@@ -399,17 +399,18 @@ class PixKeyController extends Controller
                 'key_type' => 'required_without:key_id|in:cpf,cnpj,telefone,email,aleatoria',
                 'key_value' => 'required_without:key_id|string',
                 'amount' => 'required|numeric|min:1',
-                'description' => 'nullable|string|max:255'
+                'description' => 'nullable|string|max:255',
             ], [
                 'amount.min' => 'Valor mínimo para saque é R$ 1,00 (100 centavos)',
             ]);
 
             if ($validator->fails()) {
                 $message = $validator->errors()->first('amount') ?: 'Dados inválidos';
+
                 return response()->json([
                     'success' => false,
                     'message' => $message,
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 400)->header('Access-Control-Allow-Origin', '*');
             }
 
@@ -420,11 +421,12 @@ class PixKeyController extends Controller
                 Log::warning('Tentativa de saque bloqueado via PixKeyController', [
                     'user_id' => $user->id,
                     'username' => $user->username,
-                    'ip' => $request->ip()
+                    'ip' => $request->ip(),
                 ]);
+
                 return response()->json([
                     'success' => false,
-                    'message' => 'Saque bloqueado para este usuário. Entre em contato com o suporte.'
+                    'message' => 'Saque bloqueado para este usuário. Entre em contato com o suporte.',
                 ], 403)->header('Access-Control-Allow-Origin', '*');
             }
 
@@ -432,16 +434,28 @@ class PixKeyController extends Controller
             $setting = \Illuminate\Support\Facades\Cache::remember('app_settings', 300, function () {
                 return App::first();
             });
-            if (!$setting) {
+            if (! $setting) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Configurações do aplicativo não encontradas.'
+                    'message' => 'Configurações do aplicativo não encontradas.',
                 ], 500)->header('Access-Control-Allow-Origin', '*');
+            }
+
+            $adquirenteDefault = \App\Helpers\Helper::adquirenteDefault($user->username ?? $user->user_id, 'pix');
+            if (! $adquirenteDefault) {
+                Log::error('Nenhum adquirente PIX configurado', [
+                    'user_id' => $user->username,
+                ]);
+
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Nenhum adquirente PIX configurado. Entre em contato com o suporte.',
+                ], 503)->header('Access-Control-Allow-Origin', '*');
             }
 
             // Calcular taxas (taxa Coratri + custo do adquirente)
             $isInterfaceWeb = true;
-            $taxaCalculada = \App\Helpers\TaxaSaqueHelper::calcularTaxaSaque((float) $amount, $setting, $user, $isInterfaceWeb);
+            $taxaCalculada = \App\Helpers\TaxaSaqueHelper::calcularTaxaSaque((float) $amount, $setting, $user, $isInterfaceWeb, false, $adquirenteDefault);
             $taxaCashOut = $taxaCalculada['taxa_cash_out'];           // Taxa total cobrada do cliente
             $taxaAplicacao = $taxaCalculada['taxa_aplicacao'];        // Lucro Coratri
             $taxaAdquirente = $taxaCalculada['taxa_adquirente'];      // Custo AdquirentePIX
@@ -451,22 +465,22 @@ class PixKeyController extends Controller
             // Verificar saldo total disponível (saldo principal + saldo de afiliados)
             $balanceService = app(\App\Services\BalanceService::class);
             $saldoTotalDisponivel = $balanceService->getTotalAvailableBalance($user);
-            
+
             if ($saldoTotalDisponivel < $valorTotalDescontar) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Não foi possível sacar, entre em contato com o suporte.'
+                    'message' => 'Não foi possível sacar, entre em contato com o suporte.',
                 ], 400)->header('Access-Control-Allow-Origin', '*');
             }
 
             // Obter chave PIX
             if ($request->has('key_id')) {
                 $pixKey = PixKey::forUser($user->username)->active()->find($request->key_id);
-                
-                if (!$pixKey) {
+
+                if (! $pixKey) {
                     return response()->json([
                         'success' => false,
-                        'message' => 'Chave PIX não encontrada'
+                        'message' => 'Chave PIX não encontrada',
                     ], 404)->header('Access-Control-Allow-Origin', '*');
                 }
 
@@ -478,30 +492,16 @@ class PixKeyController extends Controller
                 $keyType = $request->key_type;
 
                 // Validar formato
-                if (!PixKey::validateKeyFormat($keyType, $request->key_value)) {
+                if (! PixKey::validateKeyFormat($keyType, $request->key_value)) {
                     return response()->json([
                         'success' => false,
-                        'message' => 'Formato de chave PIX inválido'
+                        'message' => 'Formato de chave PIX inválido',
                     ], 400)->header('Access-Control-Allow-Origin', '*');
                 }
             }
 
-            // Obter adquirente padrão
-            $adquirenteDefault = \App\Helpers\Helper::adquirenteDefault($user->username ?? $user->user_id, 'pix');
-            
-            if (!$adquirenteDefault) {
-                Log::error('Nenhum adquirente PIX configurado', [
-                    'user_id' => $user->username
-                ]);
-                
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Nenhum adquirente PIX configurado. Entre em contato com o suporte.'
-                ], 503)->header('Access-Control-Allow-Origin', '*');
-            }
-            
             $processarAutomatico = \App\Helpers\WithdrawalConfigResolver::isAutomatico($user, $setting, (float) $amount);
-            
+
             Log::info('Realizando saque PIX com chave', [
                 'user_id' => $user->username,
                 'amount' => $amount,
@@ -510,15 +510,15 @@ class PixKeyController extends Controller
                 'adquirente' => $adquirenteDefault,
                 'processamento' => $processarAutomatico ? 'AUTOMATICO' : 'MANUAL',
                 'saque_automatico_config' => $setting->saque_automatico,
-                'limite_config' => $setting->limite_saque_automatico
+                'limite_config' => $setting->limite_saque_automatico,
             ]);
 
             // Regra abaixo: APENAS saque MANUAL. Débito na criação; em rejeição, valor + taxa são devolvidos.
             // Saque automático é processado na hora no bloco seguinte (AdquirentePIX + débito, sem aprovação).
-            if (!$processarAutomatico) {
+            if (! $processarAutomatico) {
                 $idempotencyKey = uniqid('withdraw_manual_', true);
                 $description = $request->description ?? 'Saque via PIX';
-                
+
                 // Criar registro + débito em transação atômica para garantir que
                 // o saque só existe no banco se o débito também for aplicado.
                 $withdrawal = \Illuminate\Support\Facades\DB::transaction(function () use (
@@ -557,11 +557,11 @@ class PixKeyController extends Controller
                     'user_id' => $user->username,
                     'amount' => $amount,
                     'valor_total_descontar' => $valorTotalDescontar,
-                    'motivo' => !$setting->saque_automatico
+                    'motivo' => ! $setting->saque_automatico
                         ? 'Saque automático desativado'
-                        : 'Valor acima do limite de R$ ' . number_format($setting->limite_saque_automatico, 2, ',', '.')
+                        : 'Valor acima do limite de R$ '.number_format($setting->limite_saque_automatico, 2, ',', '.'),
                 ]);
-                
+
                 return response()->json([
                     'success' => true,
                     'message' => 'Saque criado com sucesso e aguardando aprovação manual.',
@@ -574,9 +574,9 @@ class PixKeyController extends Controller
                         'description' => $description,
                         'status' => 'PENDING_APPROVAL',
                         'tipo_processamento' => 'Manual',
-                        'motivo_manual' => !$setting->saque_automatico 
-                            ? 'Saque automático desativado no sistema' 
-                            : 'Valor acima do limite automático de R$ ' . number_format($setting->limite_saque_automatico, 2, ',', '.'),
+                        'motivo_manual' => ! $setting->saque_automatico
+                            ? 'Saque automático desativado no sistema'
+                            : 'Valor acima do limite automático de R$ '.number_format($setting->limite_saque_automatico, 2, ',', '.'),
                         'created_at' => now()->toISOString(),
                         // Split de taxas
                         'taxa_cash_out' => round($taxaCashOut, 2),
@@ -584,8 +584,8 @@ class PixKeyController extends Controller
                         'taxa_aplicacao' => round($taxaAplicacao, 2),
                         'valor_liquido' => round($cashOutLiquido, 2),
                         'valor_total_descontar' => round($valorTotalDescontar, 2),
-                        'observacao' => 'Valor e taxa já foram descontados. Em caso de rejeição, serão devolvidos.'
-                    ]
+                        'observacao' => 'Valor e taxa já foram descontados. Em caso de rejeição, serão devolvidos.',
+                    ],
                 ])->header('Access-Control-Allow-Origin', '*');
             }
 
@@ -593,7 +593,7 @@ class PixKeyController extends Controller
                 $acquirerManager = app(PixAcquirerManager::class);
                 $acquirerService = $acquirerManager->resolve($adquirenteDefault);
 
-                if (!$acquirerService->isActive()) {
+                if (! $acquirerService->isActive()) {
                     return response()->json([
                         'success' => false,
                         'message' => 'Integração PIX automática temporariamente indisponível.',
@@ -617,7 +617,7 @@ class PixKeyController extends Controller
                     $recipientDocument
                 );
 
-                if (!($payoutResult['success'] ?? false)) {
+                if (! ($payoutResult['success'] ?? false)) {
                     Log::error('PixKeyController::withdraw - adquirente recusou payout', [
                         'acquirer' => $acquirerService->getReference(),
                         'message' => $payoutResult['message'] ?? 'N/A',
@@ -676,21 +676,20 @@ class PixKeyController extends Controller
                         'taxa_aplicacao' => round($taxaAplicacao, 2),
                         'valor_liquido' => round($cashOutLiquido, 2),
                         'valor_total_descontado' => round($valorTotalDescontar, 2),
-                    ]
+                    ],
                 ])->header('Access-Control-Allow-Origin', '*');
             }
 
         } catch (\Exception $e) {
             Log::error('Erro ao realizar saque PIX', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'Erro ao processar saque PIX'
+                'message' => 'Erro ao processar saque PIX',
             ], 500)->header('Access-Control-Allow-Origin', '*');
         }
     }
 }
-
