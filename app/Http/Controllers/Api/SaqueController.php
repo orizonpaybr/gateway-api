@@ -266,7 +266,7 @@ class SaqueController extends Controller
             if (! $acquirerService->isActive()) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'Integração PIX temporariamente indisponível.',
+                    'message' => 'PIX temporariamente indisponível.',
                 ], 503);
             }
 

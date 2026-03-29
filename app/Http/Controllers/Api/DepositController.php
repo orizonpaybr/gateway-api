@@ -12,6 +12,8 @@ use App\Models\Pagarme;
 use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
 use App\Services\PagarMeService;
+use App\Services\PixAcquirer\MagenPayService;
+use App\Services\PixAcquirer\NullPixAcquirerService;
 use App\Services\PixAcquirer\PixAcquirerManager;
 use App\Traits\PagarMeTrait;
 use Carbon\Carbon;
@@ -553,7 +555,7 @@ class DepositController extends Controller
         if (! $acquirerService->isActive()) {
             return [
                 'status' => 503,
-                'data' => ['status' => 'error', 'message' => 'Integração PIX temporariamente indisponível.'],
+                'data' => ['status' => 'error', 'message' => 'PIX temporariamente indisponível.'],
             ];
         }
 
