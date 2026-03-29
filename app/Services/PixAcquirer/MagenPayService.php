@@ -7,10 +7,6 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
-/**
- * Integração MagenPay na Coratri: PIX — QR dinâmico (depósito), Pix Out por chave (saque), estorno via API (dashboard).
- * Webhooks: \App\Jobs\ProcessMagenPayWebhookJob.
- */
 class MagenPayService implements PixAcquirerInterface
 {
     private const REFERENCE = 'magenpay';
@@ -88,7 +84,7 @@ class MagenPayService implements PixAcquirerInterface
         if (! $this->isActive()) {
             return [
                 'success' => false,
-                'message' => 'Integração MagenPay inativa ou credenciais inválidas.',
+                'message' => 'PIX temporariamente indisponível.',
             ];
         }
 
@@ -175,7 +171,7 @@ class MagenPayService implements PixAcquirerInterface
 
             return [
                 'success' => false,
-                'message' => $msg,
+                'message' => 'PIX temporariamente indisponível.',
                 'raw' => is_array($json) ? $json : null,
             ];
         }
@@ -215,7 +211,7 @@ class MagenPayService implements PixAcquirerInterface
         if (! $this->isActive()) {
             return [
                 'success' => false,
-                'message' => 'Integração MagenPay inativa ou credenciais inválidas.',
+                'message' => 'PIX temporariamente indisponível.',
             ];
         }
 
@@ -266,7 +262,7 @@ class MagenPayService implements PixAcquirerInterface
         if (! $this->isActive()) {
             return [
                 'success' => false,
-                'message' => 'Integração MagenPay inativa ou credenciais inválidas.',
+                'message' => 'PIX temporariamente indisponível.',
             ];
         }
 
@@ -419,7 +415,7 @@ class MagenPayService implements PixAcquirerInterface
 
         return [
             'success' => false,
-            'message' => $msg,
+            'message' => 'PIX temporariamente indisponível.',
             'raw' => is_array($json) ? $json : null,
         ];
     }

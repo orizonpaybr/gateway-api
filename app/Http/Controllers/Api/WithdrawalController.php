@@ -355,7 +355,7 @@ class WithdrawalController extends Controller
         if (! $acquirerService->isActive()) {
             return response()->json([
                 'success' => false,
-                'message' => 'Integração PIX temporariamente indisponível.',
+                'message' => 'PIX temporariamente indisponível.',
             ], 503);
         }
 

@@ -596,7 +596,7 @@ class PixKeyController extends Controller
                 if (! $acquirerService->isActive()) {
                     return response()->json([
                         'success' => false,
-                        'message' => 'Integração PIX automática temporariamente indisponível.',
+                        'message' => 'PIX automático temporariamente indisponível.',
                     ], 503)->header('Access-Control-Allow-Origin', '*');
                 }
 
