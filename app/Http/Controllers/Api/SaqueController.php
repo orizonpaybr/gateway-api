@@ -346,7 +346,11 @@ class SaqueController extends Controller
 
             $pixOutApiAccepted = true;
 
-            $idTxn = $payoutResult['referenceCode'] ?? $correlationID;
+            $idTxnRaw = $payoutResult['referenceCode'] ?? $correlationID;
+            $idTxn = is_string($idTxnRaw) ? trim($idTxnRaw) : (string) $idTxnRaw;
+            if ($idTxn === '') {
+                $idTxn = $correlationID;
+            }
             $statusMapped = $acquirerService->mapPayoutStatus((string) ($payoutResult['status'] ?? 'pending'));
 
             $raw = $payoutResult['raw'] ?? [];

@@ -315,11 +315,11 @@ class MagenPayService implements PixAcquirerInterface
             return $this->pixApiErrorResult($response, $json);
         }
 
-        $ref = $json['returnId'] ?? $json['externalId'] ?? $externalId;
+        $ref = $this->firstNonEmptyJsonString($json, ['returnId', 'externalId'], $externalId);
 
         return [
             'success' => true,
-            'referenceCode' => is_scalar($ref) ? (string) $ref : $externalId,
+            'referenceCode' => $ref,
             'status' => isset($json['status']) ? (string) $json['status'] : 'processing',
             'raw' => $json,
         ];
@@ -354,6 +354,33 @@ class MagenPayService implements PixAcquirerInterface
     }
 
     /**
+     * Primeiro valor escalar não vazio (a API pode enviar txId como "" — o operador ?? não faz fallback).
+     *
+     * @param  array<string, mixed>  $json
+     * @param  array<int, string>  $keys
+     */
+    private function firstNonEmptyJsonString(array $json, array $keys, string $fallback): string
+    {
+        foreach ($keys as $key) {
+            if (! array_key_exists($key, $json)) {
+                continue;
+            }
+            $v = $json[$key];
+            if (! is_scalar($v)) {
+                continue;
+            }
+            $s = trim((string) $v);
+            if ($s !== '') {
+                return $s;
+            }
+        }
+
+        $fb = trim($fallback);
+
+        return $fb !== '' ? $fb : str_replace('-', '', Str::uuid()->toString());
+    }
+
+    /**
      * @param  array<string, mixed>  $payload
      * @return array{success:bool,message?:string,referenceCode?:string,status?:string,raw?:array}
      */
@@ -384,11 +411,11 @@ class MagenPayService implements PixAcquirerInterface
             return $this->pixApiErrorResult($response, $json);
         }
 
-        $ref = $json['txId'] ?? $json['endToEndId'] ?? $externalId;
+        $ref = $this->firstNonEmptyJsonString($json, ['txId', 'endToEndId', 'endToEndid', 'externalId'], $externalId);
 
         return [
             'success' => true,
-            'referenceCode' => is_scalar($ref) ? (string) $ref : $externalId,
+            'referenceCode' => $ref,
             'status' => isset($json['status']) ? (string) $json['status'] : 'processing',
             'raw' => $json,
         ];
