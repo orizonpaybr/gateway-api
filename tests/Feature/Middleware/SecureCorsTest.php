@@ -3,6 +3,7 @@
 namespace Tests\Feature\Middleware;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Log;
 use Tests\TestCase;
 use App\Http\Middleware\SecureCors;
@@ -70,18 +71,54 @@ class SecureCorsTest extends TestCase
     /** @test */
     public function preflight_em_producao_com_origem_nao_permitida_retorna_403(): void
     {
+        $restoreFrontend = config('secure_cors.frontend_url');
+        $restoreAllowed = config('secure_cors.allowed_origins');
         $this->app['env'] = 'production';
+        Config::set('secure_cors.frontend_url', 'https://finance.coratri.com');
+        Config::set('secure_cors.allowed_origins', ['https://www.finance.coratri.com']);
 
-        $request = Request::create('/api/test', 'OPTIONS');
-        $request->headers->set('Origin', 'https://evil.com');
+        try {
+            $request = Request::create('/api/test', 'OPTIONS');
+            $request->headers->set('Origin', 'https://evil.com');
 
-        $middleware = new SecureCors();
-        $response = $middleware->handle($request, fn ($r) => response()->json([]));
+            $middleware = new SecureCors();
+            $response = $middleware->handle($request, fn ($r) => response()->json([]));
 
-        $this->assertEquals(403, $response->getStatusCode());
-        $this->assertStringContainsString('Origin not allowed', $response->getContent());
+            $this->assertEquals(403, $response->getStatusCode());
+            $this->assertStringContainsString('Origin not allowed', $response->getContent());
+        } finally {
+            $this->app['env'] = 'testing';
+            Config::set('secure_cors.frontend_url', $restoreFrontend);
+            Config::set('secure_cors.allowed_origins', $restoreAllowed);
+        }
+    }
 
-        $this->app['env'] = 'testing';
+    /** @test */
+    public function preflight_em_producao_com_origem_em_config_secure_cors_permite(): void
+    {
+        $restoreFrontend = config('secure_cors.frontend_url');
+        $restoreAllowed = config('secure_cors.allowed_origins');
+        $this->app['env'] = 'production';
+        Config::set('secure_cors.frontend_url', 'https://finance.coratri.com');
+        Config::set('secure_cors.allowed_origins', [
+            'https://finance.coratri.com',
+            'https://www.finance.coratri.com',
+        ]);
+
+        try {
+            $request = Request::create('/api/test', 'OPTIONS');
+            $request->headers->set('Origin', 'https://finance.coratri.com');
+
+            $middleware = new SecureCors();
+            $response = $middleware->handle($request, fn ($r) => response()->json([]));
+
+            $this->assertEquals(200, $response->getStatusCode());
+            $this->assertEquals('https://finance.coratri.com', $response->headers->get('Access-Control-Allow-Origin'));
+        } finally {
+            $this->app['env'] = 'testing';
+            Config::set('secure_cors.frontend_url', $restoreFrontend);
+            Config::set('secure_cors.allowed_origins', $restoreAllowed);
+        }
     }
 
     /** @test */
