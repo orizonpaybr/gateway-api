@@ -189,6 +189,13 @@ class SaqueController extends Controller
             $cashOutLiquido = $taxaCalculada['saque_liquido'];
             $valorTotalDescontar = $taxaCalculada['valor_total_descontar'];
 
+            $clientPostbackUrl = ($request->filled('baasPostbackUrl') && $request->baasPostbackUrl !== 'web')
+                ? trim((string) $request->baasPostbackUrl)
+                : null;
+            if ($clientPostbackUrl === '') {
+                $clientPostbackUrl = null;
+            }
+
             $keyValue = $request->pixKey;
             $keyType = strtolower((string) $request->pixKeyType);
             if ($keyType === 'phone') {
@@ -217,7 +224,8 @@ class SaqueController extends Controller
                     $keyType,
                     $taxaCashOut,
                     $cashOutLiquido,
-                    $valorTotalDescontar
+                    $valorTotalDescontar,
+                    $clientPostbackUrl
                 ) {
                     $w = SolicitacoesCashOut::create([
                         'user_id' => $user->user_id ?? $user->username,
@@ -235,6 +243,7 @@ class SaqueController extends Controller
                         'cash_out_liquido' => $cashOutLiquido,
                         'descricao_transacao' => 'MANUAL',
                         'executor_ordem' => null,
+                        'callback' => $clientPostbackUrl,
                     ]);
 
                     $balanceService = app(\App\Services\BalanceService::class);
@@ -304,6 +313,7 @@ class SaqueController extends Controller
                 'descricao_transacao' => 'AUTOMATICO',
                 'executor_ordem' => $acquirerService->getReference(),
                 'descricao_externa' => $correlationID,
+                'callback' => $clientPostbackUrl,
             ]);
             $provisionedAutoWithdrawal = $withdrawal;
 
