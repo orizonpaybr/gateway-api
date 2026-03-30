@@ -9,15 +9,12 @@ use Symfony\Component\HttpFoundation\Response;
 
 /**
  * Middleware CORS seguro baseado em variáveis de ambiente
- * 
+ *
  * Em produção, permite apenas origens configuradas via FRONTEND_URL.
  * Em desenvolvimento, permite localhost para facilitar testes.
- * 
- * Configuração (.env):
- * FRONTEND_URL=http://localhost:3000 (desenvolvimento)
- * FRONTEND_URL=https://finance.coratri.com (produção)
- * CORS_ALLOWED_ORIGINS (opcional): lista separada por vírgula para múltiplas origens em produção.
- *   Ex.: https://finance.coratri.com,https://www.finance.coratri.com
+ *
+ * Configuração: ver config/secure_cors.php (valores vindos do .env).
+ * FRONTEND_URL — SPA principal; CORS_ALLOWED_ORIGINS — origens extra, vírgula.
  *
  * IMPORTANTE: Em produção, NUNCA usar Access-Control-Allow-Origin: *
  */
@@ -45,20 +42,23 @@ class SecureCors
     }
 
     /**
-     * Obter origens permitidas baseado em variáveis de ambiente
+     * Origens permitidas (config, não env) — funciona com config:cache.
      */
     private function getAllowedOrigins(): array
     {
-        $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
+        $frontendUrl = (string) config('secure_cors.frontend_url', 'http://localhost:3000');
+        if ($frontendUrl === '') {
+            $frontendUrl = 'http://localhost:3000';
+        }
 
-        // Em produção: CORS_ALLOWED_ORIGINS (vírgula) ou apenas FRONTEND_URL
+        // Em produção: secure_cors.allowed_origins ou apenas FRONTEND_URL
         if (app()->environment('production')) {
-            $allowed = env('CORS_ALLOWED_ORIGINS');
-            if ($allowed !== null && $allowed !== '') {
-                $origins = array_map('trim', explode(',', $allowed));
-                return array_values(array_unique(array_filter($origins)));
+            $extra = config('secure_cors.allowed_origins', []);
+            if (is_array($extra) && count($extra) > 0) {
+                return array_values(array_unique(array_filter($extra)));
             }
-            return array_filter([$frontendUrl]);
+
+            return array_values(array_unique(array_filter([$frontendUrl])));
         }
 
         // Em desenvolvimento, permitir localhost em várias portas
@@ -82,7 +82,7 @@ class SecureCors
     {
         if (empty($origin)) {
             // Requisições sem Origin (ex: Postman, curl) - permitir em dev
-            return !app()->environment('production');
+            return ! app()->environment('production');
         }
 
         foreach ($allowedOrigins as $allowed) {
@@ -100,7 +100,7 @@ class SecureCors
     private function handlePreflight(array $allowedOrigins, ?string $origin): Response
     {
         // Verificar se a origem é permitida
-        if (!$this->isOriginAllowed($origin, $allowedOrigins)) {
+        if (! $this->isOriginAllowed($origin, $allowedOrigins)) {
             // Em produção, retornar 403 para origens não permitidas
             if (app()->environment('production')) {
                 Log::warning('[CORS] Preflight rejeitado - Origem não permitida', [
@@ -108,16 +108,16 @@ class SecureCors
                     'allowed_origins' => $allowedOrigins,
                     'ip' => request()->ip(),
                 ]);
-                
+
                 return response()->json([
-                    'error' => 'Origin not allowed'
+                    'error' => 'Origin not allowed',
                 ], 403);
             }
         }
 
         // Usar a origem específica, nunca '*' em produção
         $originHeader = $origin ?: (app()->environment('production') ? '' : '*');
-        
+
         // Se não há origem válida em produção, não adicionar header
         if (app()->environment('production') && empty($origin)) {
             return response('', 200)
@@ -148,14 +148,14 @@ class SecureCors
         if ($this->isOriginAllowed($origin, $allowedOrigins)) {
             // Usar origem específica, nunca '*'
             $originToUse = $origin ?: (app()->environment('production') ? '' : '*');
-            
-            if (!empty($originToUse)) {
+
+            if (! empty($originToUse)) {
                 $response->headers->set('Access-Control-Allow-Origin', $originToUse);
                 $response->headers->set('Access-Control-Allow-Credentials', 'true');
             }
         } else {
             // Em produção, logar origens não permitidas
-            if (app()->environment('production') && !empty($origin)) {
+            if (app()->environment('production') && ! empty($origin)) {
                 Log::warning('[CORS] Origem não permitida', [
                     'origin' => $origin,
                     'allowed_origins' => $allowedOrigins,
