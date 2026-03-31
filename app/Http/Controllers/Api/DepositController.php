@@ -632,6 +632,8 @@ class DepositController extends Controller
             'executor_ordem' => $acquirerService->getReference(),
             'descricao_transacao' => $fees['descricao'] ?? 'PIX',
             'callback' => $request->postback,
+            'split_email' => $request->input('split_email'),
+            'split_percentage' => $request->input('split_percentage'),
         ];
 
         Solicitacoes::create($cashin);
