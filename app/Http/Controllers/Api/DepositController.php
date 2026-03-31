@@ -605,6 +605,11 @@ class DepositController extends Controller
             ? 'WAITING_FOR_APPROVAL'
             : ($chargeResult['status'] ?? 'WAITING_FOR_APPROVAL');
 
+        $phoneForStorage = trim((string) ($request->phone ?? ''));
+        if ($phoneForStorage === '') {
+            $phoneForStorage = 'N/A';
+        }
+
         $cashin = [
             'user_id' => $user->username,
             'externalreference' => $idTxn,
@@ -612,7 +617,7 @@ class DepositController extends Controller
             'client_name' => $request->debtor_name,
             'client_document' => $request->debtor_document_number,
             'client_email' => $request->email,
-            'client_telefone' => $request->phone,
+            'client_telefone' => $phoneForStorage,
             'date' => Carbon::now(),
             'status' => $statusCharge,
             'idTransaction' => $idTxn,
