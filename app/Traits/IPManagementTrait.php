@@ -331,13 +331,37 @@ trait IPManagementTrait
     public static function removeAllowedIP(User $user, string $ip): bool
     {
         try {
-            $currentIPs = self::parseAllowedIPs($user->ips_saque_permitidos ?? '');
-            $newIPs = array_filter($currentIPs, function($currentIP) use ($ip) {
-                return $currentIP !== $ip;
-            });
+            $ip = trim($ip);
+            if ($ip === '') {
+                return false;
+            }
 
-            $user->ips_saque_permitidos = json_encode(array_values($newIPs));
-            $user->save();
+            $user = User::where('username', $user->username)->first();
+            if (! $user) {
+                return false;
+            }
+
+            $currentIPs = self::parseAllowedIPs((string) ($user->ips_saque_permitidos ?? ''));
+            $normalizedCurrent = array_map(static fn ($currentIP) => trim((string) $currentIP), $currentIPs);
+
+            if (! in_array($ip, $normalizedCurrent, true)) {
+                Log::info('[IP_MANAGEMENT] IP não encontrado para remoção', [
+                    'user_id' => $user->user_id,
+                    'requested_ip' => $ip,
+                    'current_ips' => $normalizedCurrent,
+                ]);
+
+                return false;
+            }
+
+            $newIPs = array_values(array_filter($normalizedCurrent, static function ($currentIP) use ($ip) {
+                return $currentIP !== '' && $currentIP !== $ip;
+            }));
+
+            $ipsJson = json_encode($newIPs);
+            DB::table('users')
+                ->where('username', $user->username)
+                ->update(['ips_saque_permitidos' => $ipsJson]);
 
             Log::info('[IP_MANAGEMENT] IP removido com sucesso', [
                 'user_id' => $user->user_id,

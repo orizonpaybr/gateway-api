@@ -365,6 +365,8 @@ class IntegrationController extends Controller
                 ], 401);
             }
 
+            $ip = trim(urldecode((string) $ip));
+
             // Validar formato do IP
             if (!filter_var($ip, FILTER_VALIDATE_IP)) {
                 return response()->json([
