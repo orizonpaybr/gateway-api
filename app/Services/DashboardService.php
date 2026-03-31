@@ -80,25 +80,54 @@ class DashboardService
                 ->first(['saldo', 'saldo_afiliado']);
             $saldoDisponivel = $row ? ((float) ($row->saldo ?? 0) + (float) ($row->saldo_afiliado ?? 0)) : 0;
 
-            // Buscar splits do mês (se tabela existir)
+            // Splits do mês: internos (beneficiário) + API split_payments (enviados/recebidos)
             $splitsMes = 0;
             try {
-                if (DB::getSchemaBuilder()->hasTable('split_internos_executados')) {
-                    // Buscar ID do usuário pelo username
-                    $userId = DB::table('users')
-                        ->where('username', $username)
-                        ->value('id');
-                    
-                    if ($userId) {
-                        $splitsMes = DB::table('split_internos_executados')
-                            ->where('usuario_beneficiario_id', $userId)
+                $userRow = DB::table('users')
+                    ->where('username', $username)
+                    ->first(['id', 'user_id', 'email']);
+
+                if ($userRow) {
+                    if (DB::getSchemaBuilder()->hasTable('split_internos_executados')) {
+                        $splitsMes = (float) (DB::table('split_internos_executados')
+                            ->where('usuario_beneficiario_id', $userRow->id)
                             ->whereBetween('created_at', [$startOfMonth, $endOfMonth])
                             ->where('status', 'processado')
-                            ->sum('valor_split') ?? 0;
+                            ->sum('valor_split') ?? 0);
+                    }
+
+                    if (DB::getSchemaBuilder()->hasTable('split_payments')) {
+                        $enviados = (float) (DB::table('split_payments')
+                            ->where('user_id', $userRow->user_id)
+                            ->where('split_status', 'completed')
+                            ->whereIn('solicitacao_id', function ($q) use ($username, $startOfMonth, $endOfMonth) {
+                                $q->select('id')
+                                    ->from('solicitacoes')
+                                    ->where('user_id', $username)
+                                    ->whereBetween('date', [$startOfMonth, $endOfMonth])
+                                    ->whereIn('status', ['PAID_OUT', 'COMPLETED']);
+                            })
+                            ->sum('split_amount') ?? 0);
+
+                        $recebidos = 0.0;
+                        $em = trim((string) ($userRow->email ?? ''));
+                        if ($em !== '') {
+                            $recebidos = (float) (DB::table('split_payments')
+                                ->whereRaw('LOWER(TRIM(split_email)) = ?', [strtolower($em)])
+                                ->where('split_status', 'completed')
+                                ->whereIn('solicitacao_id', function ($q) use ($startOfMonth, $endOfMonth) {
+                                    $q->select('id')
+                                        ->from('solicitacoes')
+                                        ->whereBetween('date', [$startOfMonth, $endOfMonth])
+                                        ->whereIn('status', ['PAID_OUT', 'COMPLETED']);
+                                })
+                                ->sum('split_amount') ?? 0);
+                        }
+
+                        $splitsMes += $enviados + $recebidos;
                     }
                 }
             } catch (\Exception $e) {
-                // Tabela não existe ou erro na query - continuar com 0
                 $splitsMes = 0;
             }
 
