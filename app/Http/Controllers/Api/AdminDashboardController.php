@@ -640,15 +640,15 @@ class AdminDashboardController extends Controller
     private function calculateAcquirerFees($solicitacoes, $saques): array
     {
         // Custo fixo da Adquirente PIX por transação
-        $custoHeartpayPorTransacao = (float) config('app.custo_fixo_adquirente_pix', 0.025);
+        $custoAdquirentePorTransacao = (float) config('app.custo_fixo_adquirente_pix', 0.025);
         
         // Contar número de transações aprovadas
         $totalDepositos = (clone $solicitacoes)->count();
         $totalSaques = (clone $saques)->count();
         
         // Calcular custos totais da Adquirente PIX
-        $custosEntradas = $totalDepositos * $custoHeartpayPorTransacao;
-        $custosSaidas = $totalSaques * $custoHeartpayPorTransacao;
+        $custosEntradas = $totalDepositos * $custoAdquirentePorTransacao;
+        $custosSaidas = $totalSaques * $custoAdquirentePorTransacao;
         
         return [
             'entradas' => (float) $custosEntradas,

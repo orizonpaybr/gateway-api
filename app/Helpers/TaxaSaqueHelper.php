@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Log;
  * 1. Taxa global padrão: R$ 1,00 (taxa_fixa_pix) para todos os usuários
  * 2. Taxa personalizada: pode ser definida por usuário (taxa_fixa_pix do user)
  * 3. A taxa NÃO muda se houver afiliado - a comissão sai da taxa fixa
- * 4. Split da taxa: custo adquirente (MagenPay R$ 0,04; demais R$ 0,025) → Afiliado (R$ 0,50 se houver) → Coratri (resto)
+ * 4. Split da taxa: custo adquirente (CustoAdquirentePixHelper) → Afiliado (R$ 0,50 se houver) → Coratri (resto)
  * 5. Cliente sempre recebe o valor solicitado; taxa é descontada do saldo
  *
  * EXEMPLOS (mesmo padrão do depósito):
@@ -44,7 +44,7 @@ class TaxaSaqueHelper
      * @param  User  $user  Usuário específico
      * @param  bool  $isInterfaceWeb  Se é saque via interface web (true) ou API (false)
      * @param  bool  $taxaPorFora  Se true, cliente recebe valor integral e taxa é descontada do saldo
-     * @param  string|null  $adquirenteReferencia  Referência do adquirente PIX (ex.: magenpay) para custo fixo correto
+     * @param  string|null  $adquirenteReferencia  Referência do adquirente PIX (para custo fixo via CustoAdquirentePixHelper)
      * @return array [
      *               'taxa_cash_out' => float,          // Taxa total cobrada do cliente
      *               'saque_liquido' => float,          // Valor que o cliente recebe
@@ -126,17 +126,17 @@ class TaxaSaqueHelper
             ]);
         }
 
-        $custoHeartpay = CustoAdquirentePixHelper::custoFixoTransacao($adquirenteReferencia);
+        $custoAdquirente = CustoAdquirentePixHelper::custoFixoTransacao($adquirenteReferencia);
 
         // Lucro líquido da aplicação = taxa fixa - custo Adquirente PIX - comissão afiliado
-        $lucroAplicacao = max(0, $taxaTotal - $custoHeartpay - $comissaoAfiliado);
+        $lucroAplicacao = max(0, $taxaTotal - $custoAdquirente - $comissaoAfiliado);
 
         Log::info('TaxaSaqueHelper: Taxas calculadas', [
             'user_id' => $user->user_id ?? 'N/A',
             'isInterfaceWeb' => $isInterfaceWeb,
             'taxa_total' => $taxaTotal,
             'comissao_afiliado' => $comissaoAfiliado,
-            'custo_adquirente' => $custoHeartpay,
+            'custo_adquirente' => $custoAdquirente,
             'lucro_aplicacao' => $lucroAplicacao,
             'descricao' => $descricao,
         ]);
@@ -165,7 +165,7 @@ class TaxaSaqueHelper
             [
                 'amount_solicitado' => $amount,
                 'taxa_total' => $taxaTotal,
-                'custo_adquirente' => $custoHeartpay,
+                'custo_adquirente' => $custoAdquirente,
                 'lucro_aplicacao' => $lucroAplicacao,
                 'valor_total_descontar' => $valor_total_descontar,
                 'is_interface_web' => $isInterfaceWeb,
@@ -181,14 +181,14 @@ class TaxaSaqueHelper
                 'saque_liquido' => $saque_liquido,
                 'valor_total_descontar' => $valor_total_descontar,
                 'lucro_aplicacao' => $lucroAplicacao,
-                'custo_adquirente' => $custoHeartpay,
+                'custo_adquirente' => $custoAdquirente,
             ],
         ]);
 
         return [
             'taxa_cash_out' => $taxa_cash_out,       // Taxa fixa cobrada do cliente (NÃO muda com afiliado)
             'taxa_aplicacao' => $lucroAplicacao,    // Lucro Coratri (taxa - Adquirente PIX - afiliado)
-            'taxa_adquirente' => $custoHeartpay,
+            'taxa_adquirente' => $custoAdquirente,
             'comissao_afiliado' => $comissaoAfiliado, // Comissão do pai afiliado (R$ 0,50 se houver)
             'saque_liquido' => $saque_liquido,       // Valor que o cliente recebe (sempre o valor solicitado)
             'descricao' => $descricao,

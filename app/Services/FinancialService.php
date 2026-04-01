@@ -382,7 +382,7 @@ class FinancialService
             $mesFim = $now->copy()->endOfMonth();
 
             // Custo fixo Adquirente PIX por transação
-            $custoHeartpayPorTransacao = (float) config('app.custo_fixo_adquirente_pix', 0.025);
+            $custoAdquirentePorTransacao = (float) config('app.custo_fixo_adquirente_pix', 0.025);
             
             // Usar uma única query com subqueries para melhor performance
             // Isso reduz o número de round-trips ao banco
@@ -408,20 +408,20 @@ class FinancialService
             ", array_merge(
                 self::APPROVED_STATUSES, // saques_aprovados_geral
                 self::APPROVED_STATUSES, // valor_total_geral
-                [$custoHeartpayPorTransacao], // custo Adquirente PIX para lucro_total_geral
+                [$custoAdquirentePorTransacao], // custo Adquirente PIX para lucro_total_geral
                 self::APPROVED_STATUSES, // lucro_total_geral
                 [$hojeInicio, $hojeFim], // saques_aprovados_hoje
                 self::APPROVED_STATUSES,
                 [$hojeInicio, $hojeFim], // valor_total_hoje
                 self::APPROVED_STATUSES,
-                [$custoHeartpayPorTransacao], // custo Adquirente PIX para lucro_total_hoje
+                [$custoAdquirentePorTransacao], // custo Adquirente PIX para lucro_total_hoje
                 [$hojeInicio, $hojeFim], // lucro_total_hoje
                 self::APPROVED_STATUSES,
                 [$mesInicio, $mesFim], // saques_aprovados_mes
                 self::APPROVED_STATUSES,
                 [$mesInicio, $mesFim], // valor_total_mes
                 self::APPROVED_STATUSES,
-                [$custoHeartpayPorTransacao], // custo Adquirente PIX para lucro_total_mes
+                [$custoAdquirentePorTransacao], // custo Adquirente PIX para lucro_total_mes
                 [$mesInicio, $mesFim], // lucro_total_mes
                 self::APPROVED_STATUSES,
                 ['PENDING'] // saques_pendentes_geral
@@ -516,7 +516,7 @@ class FinancialService
     {
         // Calcular lucro líquido: taxa_cash_in - custo Adquirente PIX
         // IMPORTANTE: Para transações Adquirente PIX sem taxa_pix_cash_in_adquirente ou com valor 0, usar custo fixo
-        $custoHeartpayPorTransacao = (float) config('app.custo_fixo_adquirente_pix', 0.025);
+        $custoAdquirentePorTransacao = (float) config('app.custo_fixo_adquirente_pix', 0.025);
         
         $stats = Solicitacoes::whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
             ->selectRaw('
@@ -526,7 +526,7 @@ class FinancialService
                     CASE 
                         WHEN (adquirente_ref = \'Adquirente PIX\' OR executor_ordem = \'Adquirente PIX\') 
                              AND (taxa_pix_cash_in_adquirente IS NULL OR taxa_pix_cash_in_adquirente = 0)
-                        THEN ' . $custoHeartpayPorTransacao . '
+                        THEN ' . $custoAdquirentePorTransacao . '
                         WHEN taxa_pix_cash_in_adquirente IS NOT NULL AND taxa_pix_cash_in_adquirente > 0
                         THEN taxa_pix_cash_in_adquirente
                         ELSE 0
@@ -546,7 +546,7 @@ class FinancialService
      */
     private function getWithdrawalsStatsAggregated(array $dateRange): array
     {
-        $custoHeartpayPorTransacao = (float) config('app.custo_fixo_adquirente_pix', 0.025);
+        $custoAdquirentePorTransacao = (float) config('app.custo_fixo_adquirente_pix', 0.025);
         
         $stats = SolicitacoesCashOut::whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
             ->selectRaw('
@@ -562,8 +562,8 @@ class FinancialService
         $taxaTotal = (float) ($stats->taxa_total ?? 0);
         // TODOS os saques são processados pela Adquirente PIX, incluindo os manuais
         // Portanto, TODOS os saques têm custo de 4 centavos por transação
-        $custoHeartpay = $totalSaques * $custoHeartpayPorTransacao;
-        $lucro = $taxaTotal - $custoHeartpay;
+        $custoAdquirente = $totalSaques * $custoAdquirentePorTransacao;
+        $lucro = $taxaTotal - $custoAdquirente;
 
         return [
             'aprovadas' => $totalSaques,
@@ -577,7 +577,7 @@ class FinancialService
     private function calculateProfit(string $periodo): float
     {
         $dateRange = $this->getDateRange($periodo);
-        $custoHeartpayPorTransacao = (float) config('app.custo_fixo_adquirente_pix', 0.025);
+        $custoAdquirentePorTransacao = (float) config('app.custo_fixo_adquirente_pix', 0.025);
 
         // Lucro líquido de depósitos: taxa_cash_in - custo Adquirente PIX
         // IMPORTANTE: Para transações Adquirente PIX sem taxa_pix_cash_in_adquirente ou com valor 0, usar custo fixo
@@ -587,7 +587,7 @@ class FinancialService
                 CASE 
                     WHEN (adquirente_ref = 'Adquirente PIX' OR executor_ordem = 'Adquirente PIX') 
                          AND (taxa_pix_cash_in_adquirente IS NULL OR taxa_pix_cash_in_adquirente = 0)
-                    THEN {$custoHeartpayPorTransacao}
+                    THEN {$custoAdquirentePorTransacao}
                     WHEN taxa_pix_cash_in_adquirente IS NOT NULL AND taxa_pix_cash_in_adquirente > 0
                     THEN taxa_pix_cash_in_adquirente
                     ELSE 0
@@ -605,8 +605,8 @@ class FinancialService
             ->sum('taxa_cash_out');
         
         // TODOS os saques são processados pela Adquirente PIX, então todos têm custo de 4 centavos por transação
-        $custoHeartpaySaques = $totalSaques * $custoHeartpayPorTransacao;
-        $lucroSaques = $taxaTotalSaques - $custoHeartpaySaques;
+        $custoAdquirenteSaques = $totalSaques * $custoAdquirentePorTransacao;
+        $lucroSaques = $taxaTotalSaques - $custoAdquirenteSaques;
 
         return (float) ($lucroDepositos + $lucroSaques);
     }

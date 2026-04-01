@@ -33,10 +33,10 @@ class DashboardService
         
         return Cache::remember($cacheKey, self::CACHE_TTL_STATS, function () use ($username, $startOfMonth, $endOfMonth) {
             // Custo fixo Adquirente PIX por transação
-            $custoHeartpayPorTransacao = (float) config('app.custo_fixo_adquirente_pix', 0.025);
+            $custoAdquirentePorTransacao = (float) config('app.custo_fixo_adquirente_pix', 0.025);
             
             // Query única otimizada usando UNION ALL
-            // Lucro líquido = taxa - custo adquirente (Adquirente PIX). Legado: adquirente_ref/executor_ordem 'Treeal' tratado como Adquirente PIX.
+            // Lucro líquido = taxa - custo adquirente PIX (taxa explícita ou custo fixo padrão quando ausente).
             $statsQuery = "
                 SELECT 
                     'deposito' as tipo,
@@ -44,10 +44,9 @@ class DashboardService
                     SUM(CASE WHEN status IN ('PAID_OUT', 'COMPLETED') THEN (
                         taxa_cash_in - 
                         CASE 
-                            WHEN (adquirente_ref IN ('Treeal') OR executor_ordem IN ('Treeal')) 
-                                 AND (taxa_pix_cash_in_adquirente IS NULL OR taxa_pix_cash_in_adquirente = 0)
-                            THEN {$custoHeartpayPorTransacao}
-                            WHEN taxa_pix_cash_in_adquirente IS NOT NULL AND taxa_pix_cash_in_adquirente > 0
+                            WHEN (taxa_pix_cash_in_adquirente IS NULL OR taxa_pix_cash_in_adquirente = 0)
+                            THEN {$custoAdquirentePorTransacao}
+                            WHEN taxa_pix_cash_in_adquirente > 0
                             THEN taxa_pix_cash_in_adquirente
                             ELSE 0
                         END
@@ -67,7 +66,7 @@ class DashboardService
 
             $results = DB::select($statsQuery, [
                 $username, $startOfMonth, $endOfMonth, // depósitos
-                $custoHeartpayPorTransacao, // custo Adquirente PIX para saques
+                $custoAdquirentePorTransacao, // custo Adquirente PIX para saques
                 $username, $startOfMonth, $endOfMonth // saques
             ]);
 

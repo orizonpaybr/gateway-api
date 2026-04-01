@@ -12,8 +12,6 @@ use App\Models\Pagarme;
 use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
 use App\Services\PagarMeService;
-use App\Services\PixAcquirer\MagenPayService;
-use App\Services\PixAcquirer\NullPixAcquirerService;
 use App\Services\PixAcquirer\PixAcquirerManager;
 use App\Traits\PagarMeTrait;
 use Carbon\Carbon;
@@ -625,7 +623,7 @@ class DepositController extends Controller
             'qrcode_pix' => $brCode,
             'paymentcode' => $brCode,
             'paymentCodeBase64' => $brCode,
-            'adquirente_ref' => $acquirerRef === 'magenpay' ? 'Magen' : $acquirerRef,
+            'adquirente_ref' => $acquirerRef,
             'taxa_cash_in' => $fees['taxa_cash_in'],
             'taxa_pix_cash_in_adquirente' => $fees['taxa_adquirente'],
             'taxa_pix_cash_in_valor_fixo' => $fees['taxa_aplicacao'],
