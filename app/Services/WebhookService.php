@@ -185,7 +185,7 @@ class WebhookService
         $data = $request->all();
         $inner = isset($data['data']) && is_array($data['data']) ? $data['data'] : null;
 
-        // MagenPay: { "type": "pixRequestIn", "data": { "endToEndId", "externalId", "txId", ... } }
+        // Webhook com envelope { "type": "...", "data": { "endToEndId", "externalId", "txId", ... } }
         if (isset($data['type']) && is_string($data['type']) && $inner !== null) {
             $e2e = $inner['endToEndId'] ?? $inner['endToEndid'] ?? null;
             $ext = $inner['externalId'] ?? null;

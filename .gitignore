@@ -57,9 +57,7 @@ Thumbs.db
 /ANALISE_QUALIDADE_SOFTWARE.md
 /COMO_RODAR_TESTES.md
 
-/storage/app/magen-ecdsa-local-only/
-
-# Certificates (Treeal/ONZ)
+# Certificates (PIX / ONZ etc.)
 /storage/app/certificates/*.pfx
 /storage/app/certificates/*.key
 /storage/app/certificates/*.crt

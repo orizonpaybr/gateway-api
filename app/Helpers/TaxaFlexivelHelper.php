@@ -12,7 +12,7 @@ use App\Models\App;
  * 1. Taxa global padrão: R$ 1,00 (taxa_fixa_padrao) para todos os usuários
  * 2. Taxa personalizada: pode ser definida por usuário (taxa_fixa_deposito)
  * 3. A taxa NÃO muda se houver afiliado - a comissão sai da taxa fixa
- * 4. Split da taxa: custo adquirente (MagenPay R$ 0,04; demais R$ 0,025) → Afiliado (R$ 0,50 se houver) → Coratri (resto)
+ * 4. Split da taxa: custo adquirente (CustoAdquirentePixHelper) → Afiliado (R$ 0,50 se houver) → Coratri (resto)
  *
  * EXEMPLOS:
  *
@@ -36,7 +36,7 @@ class TaxaFlexivelHelper
      * @param  float  $amount  Valor do depósito (valor bruto solicitado pelo cliente)
      * @param  App  $setting  Configurações do sistema
      * @param  User|null  $user  Usuário específico (opcional)
-     * @param  string|null  $adquirenteReferencia  Referência do adquirente PIX (ex.: magenpay) para custo fixo correto
+     * @param  string|null  $adquirenteReferencia  Referência do adquirente PIX (para custo fixo via CustoAdquirentePixHelper)
      * @return array [
      *               'taxa_cash_in' => float,           // Taxa total cobrada do cliente (taxa fixa configurada)
      *               'deposito_liquido' => float,       // Valor que o cliente recebe (amount - taxa_cash_in)
@@ -122,25 +122,24 @@ class TaxaFlexivelHelper
             ]);
         }
 
-        $custoHeartpay = CustoAdquirentePixHelper::custoFixoTransacao($adquirenteReferencia);
+        $custoAdquirente = CustoAdquirentePixHelper::custoFixoTransacao($adquirenteReferencia);
 
         // Lucro líquido da aplicação = taxa fixa - custo Adquirente PIX - comissão afiliado
-        $lucroAplicacao = max(0, $taxaTotal - $custoHeartpay - $comissaoAfiliado);
+        $lucroAplicacao = max(0, $taxaTotal - $custoAdquirente - $comissaoAfiliado);
 
         // Depósito líquido para o cliente = valor bruto - taxa fixa (NÃO muda com afiliado)
         $depositoLiquido = max(0, $amount - $taxaTotal);
 
         // Valor líquido após custo Adquirente PIX (informativo)
-        $valorRecebidoHeartpay = max(0, $amount - $custoHeartpay);
+        $valorRecebidoAdquirente = max(0, $amount - $custoAdquirente);
 
         return [
             'taxa_cash_in' => $taxaTotal,
             'taxa_aplicacao' => $lucroAplicacao,
-            'taxa_adquirente' => $custoHeartpay,
+            'taxa_adquirente' => $custoAdquirente,
             'comissao_afiliado' => $comissaoAfiliado,
             'deposito_liquido' => $depositoLiquido,
-            'valor_recebido_treeal' => $valorRecebidoHeartpay, // compatibilidade (chave legada)
-            'valor_recebido_adquirente' => $valorRecebidoHeartpay,
+            'valor_recebido_adquirente' => $valorRecebidoAdquirente,
             'descricao' => $descricao,
         ];
     }

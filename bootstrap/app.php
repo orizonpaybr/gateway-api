@@ -39,7 +39,6 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
         $middleware->validateCsrfTokens([
             '/pagarme/*',
-            '/magenpay/*',
             '/callback',
             '/callback/*',
             '/checkout/webhook/*',

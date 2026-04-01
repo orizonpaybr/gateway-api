@@ -8,7 +8,6 @@ use App\Models\User;
 use App\Observers\SolicitacoesCashOutObserver;
 use App\Observers\SolicitacoesObserver;
 use App\Observers\UserObserver;
-use App\Services\PixAcquirer\MagenPayService;
 use App\Services\PixAcquirer\PixAcquirerManager;
 use Illuminate\Support\ServiceProvider;
 
@@ -29,9 +28,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        $this->callAfterResolving(PixAcquirerManager::class, function (PixAcquirerManager $manager) {
-            $manager->register('magenpay', MagenPayService::class);
-        });
+        // Registre adquirentes PIX em PixAcquirerManager::register('referencia', Servico::class).
 
         // Registrar Observers para monitorar mudanças de status
         Solicitacoes::observe(SolicitacoesObserver::class);
