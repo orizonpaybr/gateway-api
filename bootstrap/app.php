@@ -32,6 +32,18 @@ return Application::configure(basePath: dirname(__DIR__))
 
             return Limit::perMinutes(15, 10000)->by('status|'.$key);
         });
+
+        RateLimiter::for('simpay-webhook', function (Request $request) {
+            return Limit::perMinute((int) config('simpay.webhook_rate_limit_per_minute', 18000))
+                ->by('simpay-webhook|'.$request->ip());
+        });
+
+        RateLimiter::for('simpay-api', function (Request $request) {
+            $key = $request->input('token') ?? $request->ip();
+
+            return Limit::perMinute((int) config('simpay.rate_limit_per_minute', 18000))
+                ->by('simpay-api|'.$key);
+        });
     })
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->append([
@@ -39,6 +51,7 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
         $middleware->validateCsrfTokens([
             '/pagarme/*',
+            '/simpay/*',
             '/callback',
             '/callback/*',
             '/checkout/webhook/*',

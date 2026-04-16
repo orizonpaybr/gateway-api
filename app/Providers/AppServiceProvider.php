@@ -9,6 +9,9 @@ use App\Observers\SolicitacoesCashOutObserver;
 use App\Observers\SolicitacoesObserver;
 use App\Observers\UserObserver;
 use App\Services\PixAcquirer\PixAcquirerManager;
+use App\Services\Simpay\SimpayAuthService;
+use App\Services\Simpay\SimpayCpfService;
+use App\Services\Simpay\SimpayPixAcquirerService;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -21,6 +24,16 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(PixAcquirerManager::class, function () {
             return new PixAcquirerManager;
         });
+
+        $this->app->singleton(SimpayAuthService::class);
+
+        $this->app->singleton(SimpayCpfService::class, function ($app) {
+            return new SimpayCpfService($app->make(SimpayAuthService::class));
+        });
+
+        $this->app->singleton(SimpayPixAcquirerService::class, function ($app) {
+            return new SimpayPixAcquirerService($app->make(SimpayAuthService::class));
+        });
     }
 
     /**
@@ -28,7 +41,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        // Registre adquirentes PIX em PixAcquirerManager::register('referencia', Servico::class).
+        $this->app->make(PixAcquirerManager::class)
+            ->register('simpay', SimpayPixAcquirerService::class);
 
         // Registrar Observers para monitorar mudanças de status
         Solicitacoes::observe(SolicitacoesObserver::class);

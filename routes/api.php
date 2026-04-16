@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\DepositController;
 use Illuminate\Support\Facades\Artisan;
 use App\Http\Controllers\Api\PixInfracoesController;
 use App\Http\Controllers\Api\PixKeyController;
+use App\Http\Controllers\Api\SimpayCpfController;
 
 /*
 |--------------------------------------------------------------------------
@@ -151,6 +152,9 @@ Route::middleware(['verify.jwt'])->group(function () {
     Route::post('2fa/enable', [App\Http\Controllers\TwoFactorAuthController::class, 'enable']);
     Route::post('2fa/disable', [App\Http\Controllers\TwoFactorAuthController::class, 'disable']);
     
+    // SIMPAY - Validação de CPF
+    Route::middleware(['throttle:30,1'])->post('simpay/validate-cpf', [SimpayCpfController::class, 'validate']);
+
     // Rotas de segurança e conta
     Route::post('auth/change-password', [UserController::class, 'changePassword']);
     

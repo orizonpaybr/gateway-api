@@ -640,7 +640,7 @@ class AdminDashboardController extends Controller
     private function calculateAcquirerFees($solicitacoes, $saques): array
     {
         // Custo fixo da Adquirente PIX por transação
-        $custoAdquirentePorTransacao = (float) config('app.custo_fixo_adquirente_pix', 0.025);
+        $custoAdquirentePorTransacao = (float) config('simpay.custo_fixo_transacao', 0.035);
         
         // Contar número de transações aprovadas
         $totalDepositos = (clone $solicitacoes)->count();
