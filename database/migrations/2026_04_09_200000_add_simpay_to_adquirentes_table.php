@@ -9,7 +9,8 @@ return new class extends Migration
     {
         DB::table('adquirentes')->insert([
             'adquirente' => 'SIMPAY',
-            'status' => 0,
+            'status' => 1,
+            'is_default' => 1,
             'url' => 'https://api.somossimpay.com.br/v2/finance',
             'referencia' => 'simpay',
             'created_at' => now(),
