@@ -51,4 +51,28 @@ class NullPixAcquirerService implements PixAcquirerInterface
     {
         return 'PENDING';
     }
+
+    public function getPayoutStatus(string $transactionId): array
+    {
+        return [
+            'success' => false,
+            'message' => 'Adquirente PIX não implementada ou inativa.',
+        ];
+    }
+
+    public function getChargeStatus(string $transactionId): array
+    {
+        return [
+            'success' => false,
+            'message' => 'Adquirente PIX não implementada ou inativa.',
+        ];
+    }
+
+    public function createRefund(string $transactionId, float $amount, string $reason): array
+    {
+        return [
+            'success' => false,
+            'message' => 'Adquirente PIX não implementada ou inativa.',
+        ];
+    }
 }

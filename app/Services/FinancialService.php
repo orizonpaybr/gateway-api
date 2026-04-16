@@ -382,7 +382,7 @@ class FinancialService
             $mesFim = $now->copy()->endOfMonth();
 
             // Custo fixo Adquirente PIX por transação
-            $custoAdquirentePorTransacao = (float) config('app.custo_fixo_adquirente_pix', 0.025);
+            $custoAdquirentePorTransacao = (float) config('simpay.custo_fixo_transacao', 0.035);
             
             // Usar uma única query com subqueries para melhor performance
             // Isso reduz o número de round-trips ao banco
@@ -516,7 +516,7 @@ class FinancialService
     {
         // Calcular lucro líquido: taxa_cash_in - custo Adquirente PIX
         // IMPORTANTE: Para transações Adquirente PIX sem taxa_pix_cash_in_adquirente ou com valor 0, usar custo fixo
-        $custoAdquirentePorTransacao = (float) config('app.custo_fixo_adquirente_pix', 0.025);
+        $custoAdquirentePorTransacao = (float) config('simpay.custo_fixo_transacao', 0.035);
         
         $stats = Solicitacoes::whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
             ->selectRaw('
@@ -546,7 +546,7 @@ class FinancialService
      */
     private function getWithdrawalsStatsAggregated(array $dateRange): array
     {
-        $custoAdquirentePorTransacao = (float) config('app.custo_fixo_adquirente_pix', 0.025);
+        $custoAdquirentePorTransacao = (float) config('simpay.custo_fixo_transacao', 0.035);
         
         $stats = SolicitacoesCashOut::whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
             ->selectRaw('
@@ -561,7 +561,7 @@ class FinancialService
         $totalSaques = (int) ($stats->aprovadas ?? 0);
         $taxaTotal = (float) ($stats->taxa_total ?? 0);
         // TODOS os saques são processados pela Adquirente PIX, incluindo os manuais
-        // Portanto, TODOS os saques têm custo de 4 centavos por transação
+        // Custo fixo por transação: config('simpay.custo_fixo_transacao')
         $custoAdquirente = $totalSaques * $custoAdquirentePorTransacao;
         $lucro = $taxaTotal - $custoAdquirente;
 
@@ -577,7 +577,7 @@ class FinancialService
     private function calculateProfit(string $periodo): float
     {
         $dateRange = $this->getDateRange($periodo);
-        $custoAdquirentePorTransacao = (float) config('app.custo_fixo_adquirente_pix', 0.025);
+        $custoAdquirentePorTransacao = (float) config('simpay.custo_fixo_transacao', 0.035);
 
         // Lucro líquido de depósitos: taxa_cash_in - custo Adquirente PIX
         // IMPORTANTE: Para transações Adquirente PIX sem taxa_pix_cash_in_adquirente ou com valor 0, usar custo fixo

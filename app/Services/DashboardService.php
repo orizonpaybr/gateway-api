@@ -33,7 +33,7 @@ class DashboardService
         
         return Cache::remember($cacheKey, self::CACHE_TTL_STATS, function () use ($username, $startOfMonth, $endOfMonth) {
             // Custo fixo Adquirente PIX por transação
-            $custoAdquirentePorTransacao = (float) config('app.custo_fixo_adquirente_pix', 0.025);
+            $custoAdquirentePorTransacao = (float) config('simpay.custo_fixo_transacao', 0.035);
             
             // Query única otimizada usando UNION ALL
             // Lucro líquido = taxa - custo adquirente PIX (taxa explícita ou custo fixo padrão quando ausente).

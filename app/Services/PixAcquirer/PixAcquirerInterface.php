@@ -33,4 +33,25 @@ interface PixAcquirerInterface
     ): array;
 
     public function mapPayoutStatus(string $providerStatus): string;
+
+    /**
+     * Consulta o status atual de um payout na adquirente.
+     *
+     * @return array{success:bool,status?:string,message?:string,raw?:array}
+     */
+    public function getPayoutStatus(string $transactionId): array;
+
+    /**
+     * Consulta o status atual de uma cobrança (cash in) na adquirente.
+     *
+     * @return array{success:bool,status?:string,message?:string,raw?:array}
+     */
+    public function getChargeStatus(string $transactionId): array;
+
+    /**
+     * Solicita reembolso (total ou parcial) de uma cobrança PIX.
+     *
+     * @return array{success:bool,refundId?:string,status?:string,message?:string,raw?:array}
+     */
+    public function createRefund(string $transactionId, float $amount, string $reason): array;
 }
