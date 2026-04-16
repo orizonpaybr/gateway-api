@@ -153,7 +153,7 @@ Route::middleware(['verify.jwt'])->group(function () {
     Route::post('2fa/disable', [App\Http\Controllers\TwoFactorAuthController::class, 'disable']);
     
     // SIMPAY - Validação de CPF
-    Route::middleware(['throttle:30,1'])->post('simpay/validate-cpf', [SimpayCpfController::class, 'validate']);
+    Route::middleware(['throttle:30,1'])->post('simpay/validate-cpf', [SimpayCpfController::class, 'validateCpf']);
 
     // Rotas de segurança e conta
     Route::post('auth/change-password', [UserController::class, 'changePassword']);

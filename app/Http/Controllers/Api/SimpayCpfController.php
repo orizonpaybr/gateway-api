@@ -34,7 +34,7 @@ class SimpayCpfController extends Controller
      *     @OA\Response(response="503", description="Serviço SIMPAY indisponível")
      * )
      */
-    public function validate(Request $request): JsonResponse
+    public function validateCpf(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
             'cpf' => ['required', 'string', 'regex:/^\d{11}$/'],
