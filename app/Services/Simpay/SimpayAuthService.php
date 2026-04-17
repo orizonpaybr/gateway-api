@@ -58,7 +58,7 @@ class SimpayAuthService
             throw new \RuntimeException('Credenciais SIMPAY (client_id / client_secret) não configuradas.');
         }
 
-        $url = $this->baseUrl.'/auth-token';
+        $url = $this->baseUrl.'/auth-token/';
 
         try {
             $response = SecureHttp::post($url, [
