@@ -66,14 +66,27 @@ class SimpayAuthService
                 'client_secret' => $this->clientSecret,
             ], [], $this->timeout);
 
+            $rawBody = $response->body();
             $body = $response->json();
+            $jsonError = json_last_error();
 
             if (!$response->successful() || empty($body['worked']) || empty($body['access_token'])) {
-                $detail = $body['detail'] ?? $body['message'] ?? 'Resposta inesperada';
+                $detail = is_array($body)
+                    ? ($body['detail'] ?? $body['message'] ?? null)
+                    : null;
+                $detail = $detail ?? 'Resposta inesperada';
 
                 Log::error('[SIMPAY] Falha ao obter token', [
+                    'url' => $url,
                     'status' => $response->status(),
                     'detail' => $detail,
+                    'client_id_prefix' => strlen($this->clientId) > 0
+                        ? substr($this->clientId, 0, 8).'…'
+                        : '(vazio)',
+                    'response_json_ok' => is_array($body),
+                    'json_decode_error' => $jsonError !== JSON_ERROR_NONE ? json_last_error_msg() : null,
+                    'body_parsed' => is_array($body) ? $body : null,
+                    'body_raw_truncated' => strlen($rawBody) > 2000 ? substr($rawBody, 0, 2000).'…(truncado)' : $rawBody,
                 ]);
 
                 throw new \RuntimeException("SIMPAY auth falhou: {$detail}");
