@@ -64,13 +64,22 @@ class SecureHttp
 
         while ($attempt <= self::$maxRetries) {
             try {
-                $response = Http::timeout($timeout)
+                $client = Http::timeout($timeout)
                     ->withHeaders(array_merge([
                         'User-Agent' => 'PlayGameGateway/1.0',
                         'Accept' => 'application/json',
                         'Content-Type' => 'application/json',
-                    ], $headers))
-                    ->{strtolower($method)}($url, $data);
+                    ], $headers));
+
+                if (str_contains($url, 'somossimpay.com.br')) {
+                    $client = $client->withOptions([
+                        'curl' => [
+                            \CURLOPT_IPRESOLVE => \CURL_IPRESOLVE_V4,
+                        ],
+                    ]);
+                }
+
+                $response = $client->{strtolower($method)}($url, $data);
 
                 // Se a requisição foi bem-sucedida, retorna
                 if ($response->successful() || $response->status() < 500) {
@@ -111,7 +120,16 @@ class SecureHttp
         }
 
         // Fallback - nunca deveria chegar aqui
-        return Http::timeout($timeout)->{strtolower($method)}($url, $data);
+        $fallback = Http::timeout($timeout);
+        if (str_contains($url, 'somossimpay.com.br')) {
+            $fallback = $fallback->withOptions([
+                'curl' => [
+                    \CURLOPT_IPRESOLVE => \CURL_IPRESOLVE_V4,
+                ],
+            ]);
+        }
+
+        return $fallback->{strtolower($method)}($url, $data);
     }
 
     /**
