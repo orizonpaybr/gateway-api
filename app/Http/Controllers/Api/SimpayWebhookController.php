@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Jobs\ClientWebhookDispatchJob;
 use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
+use App\Services\PaymentProcessingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -90,6 +91,8 @@ class SimpayWebhookController extends Controller
     private function processCashInPaid(Solicitacoes $deposit, array $data): JsonResponse
     {
         if ($deposit->status === 'PAID_OUT') {
+            $this->creditPixDepositOrLog(Solicitacoes::find($deposit->id), false);
+
             return response()->json(['received' => true, 'processed' => false, 'reason' => 'already_paid']);
         }
 
@@ -125,9 +128,7 @@ class SimpayWebhookController extends Controller
             'end_to_end' => $e2e,
         ]);
 
-        Helper::calculaSaldoLiquido($deposit->user_id);
-        app(\App\Services\PaymentProcessingService::class)
-            ->invalidateCachesAfterPayment($deposit->user_id);
+        $this->creditPixDepositOrLog(Solicitacoes::find($deposit->id));
 
         $this->dispatchClientWebhook(
             $deposit,
@@ -137,6 +138,33 @@ class SimpayWebhookController extends Controller
         );
 
         return response()->json(['received' => true, 'processed' => true]);
+    }
+
+    /**
+     * Incremento de saldo em depósitos PIX Simpay só ocorre aqui (via processPaymentReceived).
+     * Helper::calculaSaldoLiquido não altera users.saldo — apenas valor_saque_pendente.
+     *
+     * @param  bool  $rethrow  Se false, apenas loga (ex.: webhook duplicado já PAID_OUT).
+     */
+    private function creditPixDepositOrLog(?Solicitacoes $deposit, bool $rethrow = true): void
+    {
+        if (! $deposit) {
+            return;
+        }
+
+        try {
+            app(PaymentProcessingService::class)->processPaymentReceived($deposit);
+        } catch (\Throwable $e) {
+            Log::error('[SIMPAY][WEBHOOK] Falha ao creditar depósito PIX', [
+                'deposit_id' => $deposit->id,
+                'transaction_id' => $deposit->idTransaction,
+                'user_id' => $deposit->user_id,
+                'error' => $e->getMessage(),
+            ]);
+            if ($rethrow) {
+                throw $e;
+            }
+        }
     }
 
     private function processCashInRefunded(Solicitacoes $deposit, array $data): JsonResponse

@@ -151,7 +151,8 @@ class UserController extends Controller
             $dataFim = $request->get('data_fim');
             $onlyProcessed = $request->boolean('only_processed');
 
-            // Cache Redis para transações (TTL: 2 minutos)
+            // Cache curto: lista (ex.: dashboard) deve refletir depósitos/saques e estornos rapidamente
+            $cacheTtlSeconds = 15;
             $cacheKey = sprintf('user_transactions_%s_%s_%s_%s_%s_%s_%s_%s_%s', 
                 $user->username, 
                 $page, 
@@ -164,7 +165,7 @@ class UserController extends Controller
                 $onlyProcessed ? '1' : '0'
             );
             
-            $transactionsData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 120, function() use ($user, $page, $limit, $tipo, $status, $busca, $dataInicio, $dataFim, $onlyProcessed) {
+            $transactionsData = \Illuminate\Support\Facades\Cache::remember($cacheKey, $cacheTtlSeconds, function() use ($user, $page, $limit, $tipo, $status, $busca, $dataInicio, $dataFim, $onlyProcessed) {
                 $depositosQuery = \App\Models\Solicitacoes::where('user_id', $user->user_id)
                 ->select([
                     'id',
@@ -225,10 +226,20 @@ class UserController extends Controller
                 $saquesQuery->where('status', $status);
             }
 
-            // Últimas transações: apenas processadas (pendentes/falhas não aparecem aqui)
+            // Últimas transações: pagas + estornos (para PIX estorno aparecer no dashboard)
             if ($onlyProcessed) {
-                $depositosQuery->whereIn('status', ['PAID_OUT', 'COMPLETED']);
-                $saquesQuery->whereIn('status', ['PAID_OUT', 'COMPLETED']);
+                $depositosQuery->whereIn('status', [
+                    'PAID_OUT',
+                    'COMPLETED',
+                    'REFUNDED',
+                    'PARTIALLY_REFUNDED',
+                ]);
+                $saquesQuery->whereIn('status', [
+                    'PAID_OUT',
+                    'COMPLETED',
+                    'REFUNDED',
+                    'PARTIALLY_REFUNDED',
+                ]);
             }
 
             // Extrato/Depósitos: só mostrar status finais (pago, falha, cancelado, estorno, contestação)

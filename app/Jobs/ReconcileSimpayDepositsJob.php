@@ -2,8 +2,8 @@
 
 namespace App\Jobs;
 
-use App\Helpers\Helper;
 use App\Models\Solicitacoes;
+use App\Services\PaymentProcessingService;
 use App\Services\Simpay\SimpayPixAcquirerService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -99,9 +99,18 @@ class ReconcileSimpayDepositsJob implements ShouldQueue
                 ]);
 
                 if ($newStatus === 'PAID_OUT') {
-                    Helper::calculaSaldoLiquido($deposit->user_id);
-                    app(\App\Services\PaymentProcessingService::class)
-                        ->invalidateCachesAfterPayment($deposit->user_id);
+                    $fresh = Solicitacoes::find($deposit->id);
+                    if ($fresh) {
+                        try {
+                            app(PaymentProcessingService::class)->processPaymentReceived($fresh);
+                        } catch (\Throwable $e) {
+                            Log::error('[SIMPAY][RECONCILE_DEPOSIT] Falha ao creditar depósito', [
+                                'deposit_id' => $deposit->id,
+                                'transaction_id' => $deposit->idTransaction,
+                                'error' => $e->getMessage(),
+                            ]);
+                        }
+                    }
                 }
 
                 if (! empty($deposit->callback) && $deposit->callback !== 'web') {
