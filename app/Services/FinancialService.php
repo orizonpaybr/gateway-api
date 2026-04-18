@@ -6,6 +6,9 @@ use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
 use App\Helpers\Helper;
+use App\Services\BalanceService;
+use App\Services\PaymentProcessingService;
+use App\Services\PixAcquirer\PixAcquirerManager;
 use Illuminate\Support\Facades\{Cache, DB, Log};
 use Illuminate\Support\Collection;
 use Carbon\Carbon;
@@ -230,6 +233,7 @@ class FinancialService
                 ->select([
                     'id', 'user_id', 'idTransaction', 'amount', 'deposito_liquido',
                     'status', 'date', 'method', 'client_name', 'created_at',
+                    'adquirente_ref', 'executor_ordem',
                 ])
                 ->when($status, fn($q) => $q->where('status', $status))
                 ->when($busca, fn($q) => $this->applyDepositSearch($q, $busca))
@@ -770,7 +774,125 @@ class FinancialService
             'status_legivel' => $this->getStatusLabel($item->status),
             'data' => $item->date,
             'created_at' => $item->created_at,
+            'adquirente_ref' => $item->adquirente_ref,
+            'executor_ordem' => $item->executor_ordem,
+            'pode_estornar' => $this->depositPodeEstornar($item),
         ];
+    }
+
+    /**
+     * Estorno PIX (Simpay) permitido na UI admin.
+     */
+    private function depositPodeEstornar(Solicitacoes $item): bool
+    {
+        $acq = strtolower(trim((string) ($item->adquirente_ref ?? $item->executor_ordem ?? '')));
+        if ($acq !== 'simpay') {
+            return false;
+        }
+        if (trim((string) ($item->idTransaction ?? '')) === '') {
+            return false;
+        }
+        $st = strtoupper((string) ($item->status ?? ''));
+
+        return in_array($st, ['PAID_OUT', 'COMPLETED'], true);
+    }
+
+    /**
+     * Solicita estorno na Simpay e atualiza depósito/saldo localmente.
+     *
+     * @throws \Exception com código HTTP em $e->getCode() quando aplicável
+     */
+    public function refundDeposit(int $depositoId, string $reason = ''): array
+    {
+        $reason = trim($reason) !== ''
+            ? trim($reason)
+            : 'Estorno solicitado pelo painel administrativo';
+
+        $deposit = Solicitacoes::with('user:id,user_id,name,username')
+            ->find($depositoId);
+
+        if (! $deposit) {
+            throw new \Exception('Depósito não encontrado', 404);
+        }
+
+        $acq = strtolower(trim((string) ($deposit->adquirente_ref ?? $deposit->executor_ordem ?? '')));
+        if ($acq !== 'simpay') {
+            throw new \Exception('Estorno disponível apenas para depósitos Simpay.', 422);
+        }
+
+        $st = strtoupper((string) $deposit->status);
+        if ($st === 'REFUNDED') {
+            throw new \Exception('Depósito já estornado.', 400);
+        }
+        if (! in_array($st, ['PAID_OUT', 'COMPLETED'], true)) {
+            throw new \Exception('Apenas depósitos pagos podem ser estornados.', 422);
+        }
+
+        $tid = trim((string) ($deposit->idTransaction ?? ''));
+        if ($tid === '') {
+            throw new \Exception('Transação sem identificador na adquirente.', 422);
+        }
+
+        $manager = app(PixAcquirerManager::class);
+        $simpay = $manager->resolve('simpay');
+        if (! $simpay->isActive()) {
+            throw new \Exception('Integração Simpay indisponível.', 503);
+        }
+
+        $refundResult = $simpay->createRefund($tid, (float) $deposit->amount, $reason);
+        if (! ($refundResult['success'] ?? false)) {
+            $msg = is_string($refundResult['message'] ?? null)
+                ? (string) $refundResult['message']
+                : 'Falha ao solicitar estorno na adquirente.';
+
+            throw new \Exception($msg, 502);
+        }
+
+        DB::transaction(function () use ($deposit) {
+            $locked = Solicitacoes::where('id', $deposit->id)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $locked) {
+                throw new \Exception('Depósito não encontrado após resposta da adquirente.', 500);
+            }
+
+            $cur = strtoupper((string) $locked->status);
+            if ($cur === 'REFUNDED') {
+                throw new \Exception('Depósito já estornado.', 409);
+            }
+            if (! in_array($cur, ['PAID_OUT', 'COMPLETED'], true)) {
+                throw new \Exception('Status do depósito não permite estorno.', 409);
+            }
+
+            $locked->update([
+                'status' => 'REFUNDED',
+                'updated_at' => Carbon::now(),
+            ]);
+
+            $user = User::where('user_id', $locked->user_id)->lockForUpdate()->first();
+            if ($user) {
+                app(BalanceService::class)->decrementBalanceForRefund(
+                    $user,
+                    (float) $locked->deposito_liquido,
+                    'saldo'
+                );
+            }
+
+            Helper::calculaSaldoLiquido($locked->user_id);
+        });
+
+        $depositFresh = Solicitacoes::with('user:id,user_id,name,username')->find($depositoId);
+
+        if (! $depositFresh) {
+            throw new \Exception('Erro ao recarregar depósito após estorno.', 500);
+        }
+
+        app(PaymentProcessingService::class)->invalidateCachesAfterPayment($depositFresh->user_id);
+
+        $this->invalidateDepositsCache();
+
+        return $this->formatDeposit($depositFresh);
     }
 
     /**
@@ -891,6 +1013,7 @@ class FinancialService
             'WAITING_FOR_APPROVAL' => 'Pendente',
             'PAID_OUT' => 'Pago',
             'COMPLETED' => 'Completo',
+            'REFUNDED' => 'Estornado',
             'PENDING' => 'Pendente',
             'CANCELLED' => 'Cancelado',
             'REJECTED' => 'Rejeitado',
