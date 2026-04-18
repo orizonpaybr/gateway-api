@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\{FinancialTransactionsRequest, FinancialStatsRequest, UpdateDepositStatusRequest};
+use App\Http\Requests\{FinancialTransactionsRequest, FinancialStatsRequest, RefundDepositRequest, UpdateDepositStatusRequest};
 use App\Services\FinancialService;
 use Illuminate\Http\{Request, JsonResponse};
 use Illuminate\Support\Facades\Log;
@@ -266,6 +266,32 @@ class FinancialController extends Controller
                 'error' => $e->getMessage(),
                 'deposit_id' => $id,
                 'new_status' => $request->input('status'),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
+            return $this->errorResponse($e->getMessage(), $statusCode);
+        }
+    }
+
+    /**
+     * Estorno de depósito PIX (Simpay) — admin
+     */
+    public function refundDeposit(RefundDepositRequest $request, int $id): JsonResponse
+    {
+        try {
+            $reason = (string) ($request->validated()['reason'] ?? '');
+            $deposit = $this->financialService->refundDeposit($id, $reason);
+
+            return $this->successResponse([
+                'deposit' => $deposit,
+                'message' => 'Estorno solicitado com sucesso.',
+            ]);
+        } catch (\Exception $e) {
+            $statusCode = $e->getCode() >= 400 && $e->getCode() < 600 ? $e->getCode() : 500;
+
+            Log::error('Erro ao estornar depósito', [
+                'error' => $e->getMessage(),
+                'deposit_id' => $id,
                 'trace' => $e->getTraceAsString(),
             ]);
 
