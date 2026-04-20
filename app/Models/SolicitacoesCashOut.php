@@ -25,6 +25,7 @@ class SolicitacoesCashOut extends Model
         "type",
         "idTransaction",
         "taxa_cash_out",
+        "valor_total_descontado",
         "cash_out_liquido",
         "end_to_end",
         "descricao_transacao",
@@ -47,6 +48,7 @@ class SolicitacoesCashOut extends Model
         "cryptocurrency" => "array",
         "amount" => "decimal:2",
         "taxa_cash_out" => "decimal:2",
+        "valor_total_descontado" => "decimal:4",
         "cash_out_liquido" => "decimal:2",
     ];
 
