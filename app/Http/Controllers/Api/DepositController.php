@@ -599,7 +599,7 @@ class DepositController extends Controller
         $brCode = $chargeResult['brCode'] ?? $chargeResult['qr_code'] ?? null;
         $idTxn = $chargeResult['correlationID'] ?? $correlationId;
         $rawStatus = strtolower((string) ($chargeResult['status'] ?? ''));
-        $statusCharge = $rawStatus === 'created' || $rawStatus === 'pending'
+        $statusCharge = $rawStatus === 'created' || $rawStatus === 'pending' || $rawStatus === 'new'
             ? 'WAITING_FOR_APPROVAL'
             : ($chargeResult['status'] ?? 'WAITING_FOR_APPROVAL');
 

@@ -151,7 +151,6 @@ class UserController extends Controller
             $dataFim = $request->get('data_fim');
             $onlyProcessed = $request->boolean('only_processed');
 
-            // Cache curto: lista (ex.: dashboard) deve refletir depósitos/saques e estornos rapidamente
             $cacheTtlSeconds = 15;
             $cacheKey = sprintf('user_transactions_%s_%s_%s_%s_%s_%s_%s_%s_%s', 
                 $user->username, 
@@ -1055,14 +1054,22 @@ class UserController extends Controller
             'CHARGEBACK' => 'Chargeback',
             'MEDIATION' => 'Mediação',
             'DISPUTE' => 'Disputa',
+            'NEW' => 'Pendente',
+            'CREATED' => 'Pendente',
         ];
 
+        $key = strtoupper(trim((string) $status));
+
         // Saque com PROCESSING = PIX já enviado; normalizar para exibição como concluído
-        if ($tipo === 'saque' && $status === 'PROCESSING') {
+        if ($tipo === 'saque' && $key === 'PROCESSING') {
             return 'Concluída';
         }
 
-        return $statusMap[$status] ?? ucfirst(strtolower(str_replace('_', ' ', $status)));
+        if (isset($statusMap[$key])) {
+            return $statusMap[$key];
+        }
+
+        return ucfirst(strtolower(str_replace('_', ' ', $key)));
     }
     private function detectPixKeyType($pixKey)
     {

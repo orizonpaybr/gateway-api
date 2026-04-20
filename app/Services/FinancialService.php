@@ -1043,7 +1043,9 @@ class FinancialService
      */
     private function getStatusLabel(string $status): string
     {
-        return match ($status) {
+        $s = strtoupper(trim($status));
+
+        return match ($s) {
             'WAITING_FOR_APPROVAL' => 'Pendente',
             'PAID_OUT' => 'Pago',
             'COMPLETED' => 'Completo',
@@ -1052,6 +1054,7 @@ class FinancialService
             'CANCELLED' => 'Cancelado',
             'REJECTED' => 'Rejeitado',
             'MEDIATION' => 'Mediação',
+            'NEW', 'CREATED' => 'Pendente',
             default => $status,
         };
     }
