@@ -2,11 +2,14 @@
 
 namespace App\Services;
 
+use App\Helpers\WebhookClientMessages;
+use App\Jobs\ClientWebhookDispatchJob;
 use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
 use App\Helpers\Helper;
 use App\Services\BalanceService;
+use App\Services\ClientWebhookPayloadBuilder;
 use App\Services\PaymentProcessingService;
 use App\Services\PixAcquirer\PixAcquirerManager;
 use Illuminate\Support\Facades\{Cache, DB, Log};
@@ -892,7 +895,38 @@ class FinancialService
 
         $this->invalidateDepositsCache();
 
+        $this->dispatchDepositRefundWebhookToClient($depositFresh);
+
         return $this->formatDeposit($depositFresh);
+    }
+
+    /**
+     * Notifica o integrador (postback) quando o estorno foi concluído pelo painel admin.
+     * Alinha com o webhook enviado em {@see \App\Http\Controllers\Api\SimpayWebhookController::processCashInRefunded}.
+     */
+    private function dispatchDepositRefundWebhookToClient(Solicitacoes $deposit): void
+    {
+        $callback = trim((string) ($deposit->callback ?? ''));
+        if ($callback === '' || $callback === 'web') {
+            return;
+        }
+
+        try {
+            ClientWebhookDispatchJob::dispatch(
+                $callback,
+                (string) $deposit->idTransaction,
+                'REFUNDED',
+                (float) $deposit->amount,
+                now()->toIso8601String(),
+                ClientWebhookPayloadBuilder::extraForDeposit($deposit),
+                WebhookClientMessages::getMessageForStatus('REFUNDED', 'PIX_IN')
+            );
+        } catch (\Throwable $e) {
+            Log::warning('FinancialService: falha ao enfileirar webhook de estorno ao cliente', [
+                'deposit_id' => $deposit->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**
