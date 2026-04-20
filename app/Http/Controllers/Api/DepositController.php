@@ -641,14 +641,7 @@ class DepositController extends Controller
             'data' => [
                 'status' => 'success',
                 'message' => 'QR Code gerado com sucesso',
-                'data' => [
-                    'idTransaction' => $idTxn,
-                    'qrcode' => $brCode,
-                    'qr_code' => $brCode,
-                    'qr_code_image_url' => $chargeResult['qrCodeImage'] ?? null,
-                ],
                 'idTransaction' => $idTxn,
-                'qrcode' => $brCode,
                 'qr_code' => $brCode,
                 'qr_code_image_url' => $chargeResult['qrCodeImage'] ?? null,
             ],

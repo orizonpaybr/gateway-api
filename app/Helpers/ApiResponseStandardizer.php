@@ -19,16 +19,6 @@ class ApiResponseStandardizer
             'expires_at' => null
         ];
 
-        // Se a resposta já está no formato padrão, retorna como está
-        if (isset($response['status']) && $response['status'] === 'success' && isset($response['qr_code_image_url'])) {
-            // Verificar se qr_code é válido (não base64 de imagem)
-            if (isset($response['qr_code']) && strpos($response['qr_code'], 'data:image') === 0) {
-                \Log::warning('ApiResponseStandardizer: qr_code contém base64 de imagem, removendo');
-                unset($response['qr_code']);
-            }
-            return $response;
-        }
-
         // Processar diferentes estruturas de resposta
         if (isset($response['data'])) {
             $data = $response['data'];
