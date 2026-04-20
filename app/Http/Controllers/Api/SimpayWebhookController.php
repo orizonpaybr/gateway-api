@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Jobs\ClientWebhookDispatchJob;
 use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
+use App\Services\ClientWebhookPayloadBuilder;
 use App\Services\PaymentProcessingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -319,7 +320,13 @@ class SimpayWebhookController extends Controller
             return;
         }
 
+        $record->refresh();
+
         $message = WebhookClientMessages::getMessageForStatus($status, $typeTransaction);
+
+        $extra = $record instanceof Solicitacoes
+            ? ClientWebhookPayloadBuilder::extraForDeposit($record)
+            : ClientWebhookPayloadBuilder::extraForCashOut($record);
 
         ClientWebhookDispatchJob::dispatch(
             $record->callback,
@@ -327,7 +334,7 @@ class SimpayWebhookController extends Controller
             $status,
             (float) $record->amount,
             $paymentDate ?? now()->toIso8601String(),
-            ['typeTransaction' => $typeTransaction],
+            $extra,
             $message
         );
     }

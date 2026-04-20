@@ -10,6 +10,7 @@ use App\Models\Adquirente;
 use App\Models\App;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
+use App\Services\ClientWebhookPayloadBuilder;
 use App\Services\PixAcquirer\PixAcquirerManager;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -446,7 +447,7 @@ class SaqueController extends Controller
             .', seu saldo disponível é R$ '.number_format($saldoCoratriDisponivel, 2, ',', '.').'.';
 
         try {
-            SolicitacoesCashOut::create([
+            $row = SolicitacoesCashOut::create([
                 'user_id' => $user->username,
                 'externalreference' => $idTransaction,
                 'amount' => $amountRequested,
@@ -469,7 +470,7 @@ class SaqueController extends Controller
                 'FAILED',
                 $amountRequested,
                 now()->toIso8601String(),
-                ['typeTransaction' => 'PIX_OUT', 'sender' => ['user_id' => $user->username]],
+                ClientWebhookPayloadBuilder::extraForCashOut($row),
                 $messageWebhook
             );
         } catch (\Throwable $e) {
