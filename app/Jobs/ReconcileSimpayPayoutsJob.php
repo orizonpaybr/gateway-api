@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Helpers\Helper;
 use App\Models\SolicitacoesCashOut;
 use App\Services\ClientWebhookPayloadBuilder;
+use App\Services\WithdrawalFailureRefundService;
 use App\Services\Simpay\SimpayPixAcquirerService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -80,12 +81,20 @@ class ReconcileSimpayPayoutsJob implements ShouldQueue
                         return;
                     }
 
+                    $previousStatus = $locked->status;
+
                     $updateData = ['status' => $newStatus];
                     if ($e2e !== null && $e2e !== '') {
                         $updateData['end_to_end'] = $e2e;
                     }
 
                     $locked->update($updateData);
+
+                    WithdrawalFailureRefundService::creditBackIfApplicable(
+                        $locked->fresh(),
+                        $previousStatus,
+                        $newStatus
+                    );
                 });
 
                 $updated++;

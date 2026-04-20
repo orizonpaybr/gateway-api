@@ -10,6 +10,7 @@ use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
 use App\Services\ClientWebhookPayloadBuilder;
 use App\Services\PaymentProcessingService;
+use App\Services\WithdrawalFailureRefundService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -280,12 +281,21 @@ class SimpayWebhookController extends Controller
                 return false;
             }
 
+            $previousStatus = $locked->status;
+
             $updateData = ['status' => $newStatus];
             if ($e2e !== null && $e2e !== '') {
                 $updateData['end_to_end'] = $e2e;
             }
 
             $locked->update($updateData);
+
+            WithdrawalFailureRefundService::creditBackIfApplicable(
+                $locked->fresh(),
+                $previousStatus,
+                $newStatus
+            );
+
             return true;
         });
 
