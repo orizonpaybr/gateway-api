@@ -37,6 +37,7 @@ class SolicitacoesCashOutFactory extends Factory
             'externalreference' => 'EXT_OUT_' . $uniqueId,
             'amount' => $amount,
             'taxa_cash_out' => $taxaCashOut,
+            'valor_total_descontado' => round($amount + $taxaCashOut, 4),
             'cash_out_liquido' => $amount - $taxaCashOut,
             'status' => 'PENDING',
             'date' => now(),

@@ -455,7 +455,9 @@ class WithdrawalController extends Controller
                 $userModel = User::where('user_id', $saque->user_id)->first();
                 if ($userModel) {
                     $userModel->increment('transacoes_recused', 1);
-                    $valorDevolver = (float) $saque->amount + (float) ($saque->taxa_cash_out ?? 0);
+                    $valorDevolver = $saque->valor_total_descontado !== null && (float) $saque->valor_total_descontado > 0
+                        ? (float) $saque->valor_total_descontado
+                        : (float) $saque->amount + (float) ($saque->taxa_cash_out ?? 0);
                     if ($valorDevolver > 0) {
                         $balanceService = app(BalanceService::class);
                         $balanceService->incrementBalance($userModel, $valorDevolver, 'saldo');

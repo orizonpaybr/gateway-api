@@ -16,7 +16,8 @@ use Illuminate\Support\Facades\Log;
 class WithdrawalFailureRefundService
 {
     /**
-     * Credita de volta valor solicitado + taxa_cash_out (mesmo total debitado na criação).
+     * Credita de volta o mesmo total debitado por BalanceService::decrementCombinedBalance.
+     * Preferimos `valor_total_descontado` gravado no débito; se ausente (registros antigos), amount + taxa_cash_out.
      * Chamar dentro da mesma transação DB que atualiza o status do saque, com User lockado se possível.
      */
     public static function creditBackIfApplicable(
@@ -37,7 +38,11 @@ class WithdrawalFailureRefundService
             return;
         }
 
-        $valorDevolver = (float) $cashOut->amount + (float) ($cashOut->taxa_cash_out ?? 0);
+        $pelaLinha = (float) $cashOut->amount + (float) ($cashOut->taxa_cash_out ?? 0);
+        $valorDevolver = $cashOut->valor_total_descontado !== null && (float) $cashOut->valor_total_descontado > 0
+            ? (float) $cashOut->valor_total_descontado
+            : $pelaLinha;
+
         if ($valorDevolver <= 0) {
             return;
         }
@@ -61,6 +66,9 @@ class WithdrawalFailureRefundService
             'previous_status' => $previousStatus,
             'new_status' => $newStatus,
             'valor_devolvido' => $valorDevolver,
+            'amount' => $cashOut->amount,
+            'taxa_cash_out' => $cashOut->taxa_cash_out,
+            'valor_total_descontado' => $cashOut->valor_total_descontado,
         ]);
     }
 }
