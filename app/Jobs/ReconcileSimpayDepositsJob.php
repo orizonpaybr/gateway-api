@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\Solicitacoes;
+use App\Services\ClientWebhookPayloadBuilder;
 use App\Services\PaymentProcessingService;
 use App\Services\Simpay\SimpayPixAcquirerService;
 use Illuminate\Bus\Queueable;
@@ -114,17 +115,20 @@ class ReconcileSimpayDepositsJob implements ShouldQueue
                 }
 
                 if (! empty($deposit->callback) && $deposit->callback !== 'web') {
-                    ClientWebhookDispatchJob::dispatch(
-                        $deposit->callback,
-                        $deposit->idTransaction,
-                        $newStatus,
-                        (float) $deposit->amount,
-                        $paymentDate ?? now()->toIso8601String(),
-                        ['typeTransaction' => 'PIX_IN'],
-                        $newStatus === 'PAID_OUT'
-                            ? 'Depósito PIX recebido com sucesso.'
-                            : 'Depósito PIX cancelado/expirado.'
-                    );
+                    $fresh = Solicitacoes::find($deposit->id);
+                    if ($fresh) {
+                        ClientWebhookDispatchJob::dispatch(
+                            $deposit->callback,
+                            $deposit->idTransaction,
+                            $newStatus,
+                            (float) $deposit->amount,
+                            $paymentDate ?? now()->toIso8601String(),
+                            ClientWebhookPayloadBuilder::extraForDeposit($fresh),
+                            $newStatus === 'PAID_OUT'
+                                ? 'Depósito PIX recebido com sucesso.'
+                                : 'Depósito PIX cancelado/expirado.'
+                        );
+                    }
                 }
 
                 usleep(200_000);

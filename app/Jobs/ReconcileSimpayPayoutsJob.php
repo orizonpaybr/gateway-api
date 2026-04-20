@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Helpers\Helper;
 use App\Models\SolicitacoesCashOut;
+use App\Services\ClientWebhookPayloadBuilder;
 use App\Services\Simpay\SimpayPixAcquirerService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -97,17 +98,20 @@ class ReconcileSimpayPayoutsJob implements ShouldQueue
                 ]);
 
                 if (! empty($payout->callback) && $payout->callback !== 'web') {
-                    ClientWebhookDispatchJob::dispatch(
-                        $payout->callback,
-                        $payout->idTransaction,
-                        $newStatus,
-                        (float) $payout->amount,
-                        now()->toIso8601String(),
-                        ['typeTransaction' => 'PIX_OUT'],
-                        $newStatus === 'COMPLETED'
-                            ? 'Saque PIX concluído com sucesso.'
-                            : 'Saque PIX cancelado.'
-                    );
+                    $fresh = SolicitacoesCashOut::find($payout->id);
+                    if ($fresh) {
+                        ClientWebhookDispatchJob::dispatch(
+                            $payout->callback,
+                            $payout->idTransaction,
+                            $newStatus,
+                            (float) $payout->amount,
+                            now()->toIso8601String(),
+                            ClientWebhookPayloadBuilder::extraForCashOut($fresh),
+                            $newStatus === 'COMPLETED'
+                                ? 'Saque PIX concluído com sucesso.'
+                                : 'Saque PIX cancelado.'
+                        );
+                    }
                 }
 
                 Helper::calculaSaldoLiquido($payout->user_id);
