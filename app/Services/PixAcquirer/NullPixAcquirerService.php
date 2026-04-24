@@ -52,7 +52,7 @@ class NullPixAcquirerService implements PixAcquirerInterface
         return 'PENDING';
     }
 
-    public function getPayoutStatus(string $transactionId): array
+    public function getPayoutStatus(string $transactionId, ?string $e2eId = null): array
     {
         return [
             'success' => false,

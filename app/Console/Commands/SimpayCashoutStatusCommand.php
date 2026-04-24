@@ -8,7 +8,8 @@ use Illuminate\Console\Command;
 class SimpayCashoutStatusCommand extends Command
 {
     protected $signature = 'simpay:cashout-status
-                            {id : transaction_id Simpay do cash out (ex.: 31101108)}';
+                            {id? : transaction_id Simpay do cash out (ex.: 31201108)}
+                            {--e2e= : End-to-end (E3398...); use com ou sem id}';
 
     protected $description = 'Consulta status detalhado do PIX cash out na Simpay (incl. erro_descriptor em falhas)';
 
@@ -20,11 +21,23 @@ class SimpayCashoutStatusCommand extends Command
             return self::FAILURE;
         }
 
-        $id = (string) $this->argument('id');
-        $result = $simpay->getPayoutStatus($id);
+        $id = (string) ($this->argument('id') ?? '');
+        $e2e = (string) ($this->option('e2e') ?? '');
+        $e2e = trim($e2e);
+
+        if ($id === '' && $e2e === '') {
+            $this->error('Informe {id} ou --e2e=E3398...');
+
+            return self::FAILURE;
+        }
+
+        $result = $simpay->getPayoutStatus($id, $e2e !== '' ? $e2e : null);
 
         if (! ($result['success'] ?? false)) {
             $this->warn($result['message'] ?? 'Falha');
+            if (! empty($result['http_status'])) {
+                $this->line('HTTP: '.$result['http_status']);
+            }
 
             return self::FAILURE;
         }
