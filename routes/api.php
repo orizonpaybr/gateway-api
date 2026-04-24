@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Artisan;
 use App\Http\Controllers\Api\PixInfracoesController;
 use App\Http\Controllers\Api\PixKeyController;
 use App\Http\Controllers\Api\SimpayCpfController;
+use App\Http\Controllers\Api\SimpayDebugController;
 
 /*
 |--------------------------------------------------------------------------
@@ -107,6 +108,8 @@ Route::middleware(['verify.jwt'])->group(function () {
         Route::get('admin/levels/{id}', [App\Http\Controllers\Api\AdminLevelsController::class, 'show'])->where('id', '[0-9]+');
         Route::put('admin/levels/{id}', [App\Http\Controllers\Api\AdminLevelsController::class, 'update'])->where('id', '[0-9]+');
         Route::post('admin/levels/toggle-active', [App\Http\Controllers\Api\AdminLevelsController::class, 'toggleActive']);
+
+        Route::get('admin/simpay/receipt-transaction', [SimpayDebugController::class, 'receiptTransaction']);
     });
     
     // Rotas compartilhadas entre Admin (3) e Gerente (2)

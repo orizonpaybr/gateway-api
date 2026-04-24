@@ -294,6 +294,100 @@ class SimpayPixAcquirerService implements PixAcquirerInterface
         }
     }
 
+    /**
+     * Dados detalhados / comprovante de transação PIX (cash out) na Simpay.
+     *
+     * GET /finance/receipt-transaction/file?id=&uuid=&language=
+     * Documentação Simpay: transaction_id do cash out ou EndToEnd (operationUuid).
+     *
+     * @param  int|string|null  $id  transaction_id numérico retornado no PIX Transfer
+     * @param  string|null  $uuid  End-to-end / operationUuid
+     * @return array{success: bool, data?: array, message?: string, http_status?: int, raw?: array|null}
+     */
+    public function getReceiptTransaction(int|string|null $id = null, ?string $uuid = null, string $language = 'portuguese'): array
+    {
+        $uuidTrim = $uuid !== null ? trim($uuid) : '';
+        $hasId = $id !== null && $id !== '';
+        if (! $hasId && $uuidTrim === '') {
+            return [
+                'success' => false,
+                'message' => 'Informe id (transaction_id do cash out) ou uuid (EndToEnd / operationUuid).',
+            ];
+        }
+
+        $query = ['language' => $language !== '' ? $language : 'portuguese'];
+        if ($hasId) {
+            $query['id'] = $id;
+        }
+        if ($uuidTrim !== '') {
+            $query['uuid'] = $uuidTrim;
+        }
+
+        $url = $this->baseUrl.'/finance/receipt-transaction/file?'.http_build_query($query);
+
+        try {
+            $response = SecureHttp::get($url, $this->auth->authHeaders(), $this->timeout);
+            $body = $response->json();
+
+            if ($this->isTokenExpired($response, $body)) {
+                $this->auth->invalidateToken();
+                $response = SecureHttp::get($url, $this->auth->authHeaders(), $this->timeout);
+                $body = $response->json();
+            }
+
+            if (! $response->successful() || empty($body['worked'])) {
+                $errorMsg = is_array($body)
+                    ? ($body['message'] ?? $body['detail'] ?? 'Transação não encontrada ou comprovante indisponível')
+                    : 'Resposta inválida';
+
+                Log::warning('[SIMPAY][RECEIPT] Falha ao consultar comprovante', [
+                    'id' => $id,
+                    'uuid' => $uuidTrim !== '' ? $uuidTrim : null,
+                    'http_status' => $response->status(),
+                    'error' => $errorMsg,
+                ]);
+
+                return [
+                    'success' => false,
+                    'message' => $errorMsg,
+                    'http_status' => $response->status(),
+                    'raw' => is_array($body) ? $body : null,
+                ];
+            }
+
+            if (! is_array($body)) {
+                return [
+                    'success' => false,
+                    'message' => 'Resposta JSON inválida da Simpay.',
+                    'http_status' => $response->status(),
+                ];
+            }
+
+            Log::info('[SIMPAY][RECEIPT] Comprovante obtido', [
+                'id' => $id,
+                'uuid' => $uuidTrim !== '' ? $uuidTrim : null,
+                'status' => $body['status'] ?? null,
+                'transaction_id' => $body['transaction_id'] ?? null,
+            ]);
+
+            return [
+                'success' => true,
+                'data' => $body,
+            ];
+        } catch (\Throwable $e) {
+            Log::error('[SIMPAY][RECEIPT] Exceção ao consultar comprovante', [
+                'id' => $id,
+                'uuid' => $uuidTrim !== '' ? $uuidTrim : null,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => 'Erro ao conectar com SIMPAY: '.$e->getMessage(),
+            ];
+        }
+    }
+
     public function getChargeStatus(string $transactionId): array
     {
         $url = $this->baseUrl . '/status-pix-copy-and-paste/?id=' . urlencode($transactionId);
