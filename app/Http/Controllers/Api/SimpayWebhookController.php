@@ -31,6 +31,14 @@ class SimpayWebhookController extends Controller
         'PIX_CASHOUT_REFUND',
     ];
 
+    /**
+     * Eventos cash-out apenas informativos: saque já está PROCESSING no gateway após a API síncrona.
+     * Responder processed=true evita reenvios desnecessários pelo provedor.
+     */
+    private const CASH_OUT_ACK_ONLY_TYPES = [
+        'PIX_CASHOUT_CREATED',
+    ];
+
     public function handle(Request $request): JsonResponse
     {
         $payload = $request->all();
@@ -52,6 +60,16 @@ class SimpayWebhookController extends Controller
             return $this->handleCashIn($type, $data);
         }
 
+        if (in_array($type, self::CASH_OUT_ACK_ONLY_TYPES, true)) {
+            Log::info('[SIMPAY][WEBHOOK] Cash out informativo (sem mudança de status)', [
+                'type' => $type,
+                'transaction_id' => $data['transaction_id'] ?? null,
+                'tag' => $data['tag'] ?? null,
+            ]);
+
+            return response()->json(['received' => true, 'processed' => true]);
+        }
+
         if (in_array($type, self::CASH_OUT_TYPES, true)) {
             return $this->handleCashOut($type, $data);
         }
@@ -59,6 +77,34 @@ class SimpayWebhookController extends Controller
         Log::info('[SIMPAY][WEBHOOK] Tipo de evento ignorado', ['type' => $type]);
 
         return response()->json(['received' => true, 'processed' => false]);
+    }
+
+    /**
+     * End-to-end conforme payload Simpay (PIX_CASHOUT_SUCCESS: end_to_end; legado/alternativo: operationUuid, code_transaction tipo E...).
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function resolveCashOutEndToEnd(array $data): ?string
+    {
+        $candidates = [
+            $data['end_to_end'] ?? null,
+            $data['operationUuid'] ?? null,
+            $data['operation_uuid'] ?? null,
+            $data['endToEndId'] ?? null,
+        ];
+
+        foreach ($candidates as $v) {
+            if (is_string($v) && $v !== '') {
+                return $v;
+            }
+        }
+
+        $code = $data['code_transaction'] ?? null;
+        if (is_string($code) && $code !== '' && str_starts_with($code, 'E')) {
+            return $code;
+        }
+
+        return null;
     }
 
     private function handleCashIn(string $type, array $data): JsonResponse
@@ -264,7 +310,7 @@ class SimpayWebhookController extends Controller
             return response()->json(['received' => true, 'processed' => false, 'reason' => 'already_terminal']);
         }
 
-        $e2e = $data['end_to_end'] ?? null;
+        $e2e = $this->resolveCashOutEndToEnd($data);
         $paymentDate = $data['payment_date'] ?? null;
 
         $updated = DB::transaction(function () use ($payout, $newStatus, $e2e) {
