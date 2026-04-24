@@ -235,25 +235,60 @@ class SimpayPixAcquirerService implements PixAcquirerInterface
         }
     }
 
-    public function getPayoutStatus(string $transactionId): array
+    public function getPayoutStatus(string $transactionId, ?string $e2eId = null): array
     {
-        $url = $this->baseUrl . '/status-cashout/?id=' . urlencode($transactionId);
+        $tid = trim($transactionId);
+        $e2e = $e2eId !== null ? trim($e2eId) : '';
+
+        if ($tid === '' && $e2e === '') {
+            return [
+                'success' => false,
+                'message' => 'Informe transaction_id ou e2e_id.',
+            ];
+        }
+
+        $query = [];
+        if ($tid !== '') {
+            $query['id'] = $tid;
+        }
+        if ($e2e !== '') {
+            $query['e2e_id'] = $e2e;
+        }
+
+        $base = rtrim($this->baseUrl, '/');
+        $path = $base.'/status-cashout';
 
         try {
-            $response = SecureHttp::get($url, $this->auth->authHeaders(), $this->timeout);
+            // Sem barra antes de ? — redirecionamentos costumam dropar query string.
+            $urlGet = $path.'?'.http_build_query($query);
+            $response = SecureHttp::get($urlGet, $this->auth->authHeaders(), $this->timeout);
             $body = $response->json();
 
             if ($this->isTokenExpired($response, $body)) {
                 $this->auth->invalidateToken();
-                $response = SecureHttp::get($url, $this->auth->authHeaders(), $this->timeout);
+                $response = SecureHttp::get($urlGet, $this->auth->authHeaders(), $this->timeout);
                 $body = $response->json();
             }
 
+            if ((! $response->successful() || empty($body['worked'])) && $this->statusCashoutMissingParamsMessage($body)) {
+                $response = SecureHttp::post($path.'/', $query, $this->auth->authHeaders(), $this->timeout);
+                $body = $response->json();
+
+                if ($this->isTokenExpired($response, $body)) {
+                    $this->auth->invalidateToken();
+                    $response = SecureHttp::post($path.'/', $query, $this->auth->authHeaders(), $this->timeout);
+                    $body = $response->json();
+                }
+            }
+
             if (! $response->successful() || empty($body['worked'])) {
-                $errorMsg = $body['message'] ?? $body['detail'] ?? 'Transação não encontrada';
+                $errorMsg = is_array($body)
+                    ? ($body['message'] ?? $body['detail'] ?? 'Transação não encontrada')
+                    : 'Transação não encontrada';
 
                 Log::warning('[SIMPAY][STATUS] Falha ao consultar status do payout', [
-                    'transaction_id' => $transactionId,
+                    'transaction_id' => $tid !== '' ? $tid : null,
+                    'e2e_id' => $e2e !== '' ? $e2e : null,
                     'http_status' => $response->status(),
                     'error' => $errorMsg,
                 ]);
@@ -280,18 +315,33 @@ class SimpayPixAcquirerService implements PixAcquirerInterface
                     'erro_descriptor' => $body['erro_descriptor'] ?? null,
                 ],
             ];
-
         } catch (\Throwable $e) {
             Log::error('[SIMPAY][STATUS] Exceção ao consultar status do payout', [
-                'transaction_id' => $transactionId,
+                'transaction_id' => $tid !== '' ? $tid : null,
+                'e2e_id' => $e2e !== '' ? $e2e : null,
                 'error' => $e->getMessage(),
             ]);
 
             return [
                 'success' => false,
-                'message' => 'Erro ao conectar com SIMPAY: ' . $e->getMessage(),
+                'message' => 'Erro ao conectar com SIMPAY: '.$e->getMessage(),
             ];
         }
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $body
+     */
+    private function statusCashoutMissingParamsMessage(?array $body): bool
+    {
+        if (! is_array($body)) {
+            return false;
+        }
+
+        $msg = (string) ($body['message'] ?? $body['detail'] ?? '');
+
+        return str_contains($msg, 'e2e_id') && str_contains(strtolower($msg), 'required')
+            || str_contains($msg, "Either 'id' or 'e2e_id'");
     }
 
     /**
