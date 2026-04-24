@@ -36,8 +36,14 @@ class SimpayReceiptCommand extends Command
 
         if (! ($result['success'] ?? false)) {
             $this->warn($result['message'] ?? 'Falha');
+            if (! empty($result['http_status'])) {
+                $this->line('HTTP: '.$result['http_status']);
+            }
             if (! empty($result['raw'])) {
                 $this->line(json_encode($result['raw'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+            }
+            if (($result['http_status'] ?? null) === 404 && ($id !== null && $id !== '')) {
+                $this->comment('Dica: cash out com falha costuma não ter comprovante em arquivo. Tente: php artisan simpay:cashout-status '.$id);
             }
 
             return self::FAILURE;

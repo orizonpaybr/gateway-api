@@ -336,22 +336,33 @@ class SimpayPixAcquirerService implements PixAcquirerInterface
             }
 
             if (! $response->successful() || empty($body['worked'])) {
-                $errorMsg = is_array($body)
-                    ? ($body['message'] ?? $body['detail'] ?? 'Transação não encontrada ou comprovante indisponível')
-                    : 'Resposta inválida';
+                $rawText = $response->body();
+                $decoded = is_array($body) ? $body : null;
+                if ($decoded !== null) {
+                    $errorMsg = $decoded['message'] ?? $decoded['detail'] ?? 'Transação não encontrada ou comprovante indisponível';
+                } else {
+                    $errorMsg = 'Comprovante indisponível (HTTP '.$response->status()
+                        .'). Resposta não-JSON — comum em PIX_CASHOUT_ERROR (sem arquivo de recibo). Use status-cashout.';
+                }
 
                 Log::warning('[SIMPAY][RECEIPT] Falha ao consultar comprovante', [
                     'id' => $id,
                     'uuid' => $uuidTrim !== '' ? $uuidTrim : null,
                     'http_status' => $response->status(),
                     'error' => $errorMsg,
+                    'body_preview' => $rawText !== '' ? mb_substr($rawText, 0, 500) : null,
                 ]);
+
+                $rawOut = $decoded;
+                if ($rawOut === null && $rawText !== '') {
+                    $rawOut = ['_response_preview' => mb_substr($rawText, 0, 2000)];
+                }
 
                 return [
                     'success' => false,
                     'message' => $errorMsg,
                     'http_status' => $response->status(),
-                    'raw' => is_array($body) ? $body : null,
+                    'raw' => $rawOut,
                 ];
             }
 
@@ -546,7 +557,9 @@ class SimpayPixAcquirerService implements PixAcquirerInterface
         return match (strtoupper($providerStatus)) {
             'SUCCESS' => 'COMPLETED',
             'PROCESSING' => 'PROCESSING',
-            'CANCELED' => 'CANCELLED',
+            'CANCELED', 'CANCELLED' => 'CANCELLED',
+            'ERROR', 'FAILED' => 'FAILED',
+            'REFUNDED' => 'REFUNDED',
             'NEW' => 'PENDING',
             default => 'PROCESSING',
         };
