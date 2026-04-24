@@ -256,29 +256,17 @@ class SimpayPixAcquirerService implements PixAcquirerInterface
         }
 
         $base = rtrim($this->baseUrl, '/');
-        $path = $base.'/status-cashout';
+        // Barra final alinhada aos outros endpoints Simpay; query via Laravel Http (evita perda de parâmetros).
+        $path = $base.'/status-cashout/';
 
         try {
-            // Sem barra antes de ? — redirecionamentos costumam dropar query string.
-            $urlGet = $path.'?'.http_build_query($query);
-            $response = SecureHttp::get($urlGet, $this->auth->authHeaders(), $this->timeout);
+            $response = SecureHttp::get($path, $this->auth->authHeaders(), $this->timeout, $query);
             $body = $response->json();
 
             if ($this->isTokenExpired($response, $body)) {
                 $this->auth->invalidateToken();
-                $response = SecureHttp::get($urlGet, $this->auth->authHeaders(), $this->timeout);
+                $response = SecureHttp::get($path, $this->auth->authHeaders(), $this->timeout, $query);
                 $body = $response->json();
-            }
-
-            if ((! $response->successful() || empty($body['worked'])) && $this->statusCashoutMissingParamsMessage($body)) {
-                $response = SecureHttp::post($path.'/', $query, $this->auth->authHeaders(), $this->timeout);
-                $body = $response->json();
-
-                if ($this->isTokenExpired($response, $body)) {
-                    $this->auth->invalidateToken();
-                    $response = SecureHttp::post($path.'/', $query, $this->auth->authHeaders(), $this->timeout);
-                    $body = $response->json();
-                }
             }
 
             if (! $response->successful() || empty($body['worked'])) {
@@ -296,6 +284,7 @@ class SimpayPixAcquirerService implements PixAcquirerInterface
                 return [
                     'success' => false,
                     'message' => $errorMsg,
+                    'http_status' => $response->status(),
                 ];
             }
 
@@ -327,21 +316,6 @@ class SimpayPixAcquirerService implements PixAcquirerInterface
                 'message' => 'Erro ao conectar com SIMPAY: '.$e->getMessage(),
             ];
         }
-    }
-
-    /**
-     * @param  array<string, mixed>|null  $body
-     */
-    private function statusCashoutMissingParamsMessage(?array $body): bool
-    {
-        if (! is_array($body)) {
-            return false;
-        }
-
-        $msg = (string) ($body['message'] ?? $body['detail'] ?? '');
-
-        return str_contains($msg, 'e2e_id') && str_contains(strtolower($msg), 'required')
-            || str_contains($msg, "Either 'id' or 'e2e_id'");
     }
 
     /**

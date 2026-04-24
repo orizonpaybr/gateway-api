@@ -31,11 +31,13 @@ class SecureHttp
     }
 
     /**
-     * Faz uma requisição GET com configurações seguras
+     * Faz uma requisição GET com configurações seguras.
+     *
+     * @param  array<string, string|int|float>  $query  Mescla na query string (Laravel Http).
      */
-    public static function get(string $url, array $headers = [], int $timeout = null): Response
+    public static function get(string $url, array $headers = [], ?int $timeout = null, array $query = []): Response
     {
-        return self::makeRequest('GET', $url, [], $headers, $timeout);
+        return self::makeRequest('GET', $url, $query, $headers, $timeout);
     }
 
     /**
