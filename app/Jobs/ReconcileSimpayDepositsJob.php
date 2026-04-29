@@ -117,7 +117,7 @@ class ReconcileSimpayDepositsJob implements ShouldQueue
                 if (! empty($deposit->callback) && $deposit->callback !== 'web') {
                     $fresh = Solicitacoes::find($deposit->id);
                     if ($fresh) {
-                        ClientWebhookDispatchJob::dispatch(
+                        ClientWebhookDispatchJob::send(
                             $deposit->callback,
                             $deposit->idTransaction,
                             $newStatus,

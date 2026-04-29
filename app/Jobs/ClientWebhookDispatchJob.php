@@ -42,6 +42,31 @@ class ClientWebhookDispatchJob implements ShouldQueue
         private ?string $message = null,
     ) {}
 
+    /**
+     * Envia o webhook ao integrador. Por padrão síncrono (não exige worker); ver config queue.client_webhooks_use_sync.
+     *
+     * @param  array<string, mixed>  $extraPayload
+     */
+    public static function send(
+        string $callbackUrl,
+        string $idTransaction,
+        string $status,
+        float $amount,
+        ?string $paidAt = null,
+        array $extraPayload = [],
+        ?string $message = null,
+    ): void {
+        $job = new self($callbackUrl, $idTransaction, $status, $amount, $paidAt, $extraPayload, $message);
+
+        if (config('queue.client_webhooks_use_sync', true)) {
+            dispatch_sync($job);
+
+            return;
+        }
+
+        dispatch($job);
+    }
+
     public function handle(): void
     {
         if (empty($this->callbackUrl) || $this->callbackUrl === 'web') {

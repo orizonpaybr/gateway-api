@@ -176,7 +176,7 @@ final class SimpayCashOutOutcomeService
         $payloadForReason = $this->normalizeRawForPixMessage($rawForClientMessage);
         $message = WebhookClientMessages::getMessageForStatus($status, 'PIX_OUT', $payloadForReason === [] ? null : $payloadForReason);
 
-        ClientWebhookDispatchJob::dispatch(
+        ClientWebhookDispatchJob::send(
             $record->callback,
             $record->idTransaction,
             $status,
