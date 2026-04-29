@@ -351,7 +351,7 @@ class SaqueController extends Controller
                 $payloadReason = is_string($failMsg) && $failMsg !== '' ? ['message' => $failMsg] : null;
                 if (! empty($withdrawal->callback) && $withdrawal->callback !== 'web') {
                     $withdrawal->refresh();
-                    ClientWebhookDispatchJob::dispatch(
+                    ClientWebhookDispatchJob::send(
                         $withdrawal->callback,
                         $withdrawal->idTransaction,
                         'FAILED',
@@ -494,7 +494,7 @@ class SaqueController extends Controller
                 'callback' => $callbackUrl,
             ]);
 
-            ClientWebhookDispatchJob::dispatch(
+            ClientWebhookDispatchJob::send(
                 $callbackUrl,
                 $idTransaction,
                 'FAILED',

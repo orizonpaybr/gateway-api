@@ -17,6 +17,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Webhooks Coratri → integrador (callback do cliente)
+    |--------------------------------------------------------------------------
+    |
+    | Quando true (padrão), o POST é executado na mesma requisição (dispatch_sync) e não depende
+    | de php artisan queue:work. Defina CLIENT_WEBHOOKS_USE_SYNC=false e use fila em alto volume.
+    |
+    */
+
+    'client_webhooks_use_sync' => env('CLIENT_WEBHOOKS_USE_SYNC', true),
+
+    /*
+    |--------------------------------------------------------------------------
     | Queue Connections
     |--------------------------------------------------------------------------
     |

@@ -80,6 +80,60 @@ class SimpayWebhookController extends Controller
     }
 
     /**
+     * Localiza o saque Simpay pelo transaction_id do webhook e fallbacks (tag = correlation da API,
+     * externalreference / descricao_externa gravados no create). Evita não processar cancelamento
+     * quando o provedor envia outro identificador no payload.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function findCashOutBySimpayWebhookIds(string $transactionId, array $data): ?SolicitacoesCashOut
+    {
+        $base = SolicitacoesCashOut::query()->where('executor_ordem', 'simpay');
+
+        $tid = trim($transactionId);
+        if ($tid !== '') {
+            $found = (clone $base)->where('idTransaction', $tid)->first();
+            if ($found !== null) {
+                return $found;
+            }
+        }
+
+        $candidates = [];
+        foreach (['tag', 'code_transaction', 'correlation_id', 'external_id'] as $key) {
+            if (! isset($data[$key])) {
+                continue;
+            }
+            $v = $data[$key];
+            if (is_string($v) && trim($v) !== '') {
+                $candidates[] = trim($v);
+            } elseif (is_numeric($v)) {
+                $candidates[] = trim((string) $v);
+            }
+        }
+
+        foreach (array_unique($candidates) as $c) {
+            if ($c === '') {
+                continue;
+            }
+            $found = (clone $base)->where(function ($q) use ($c) {
+                $q->where('idTransaction', $c)
+                    ->orWhere('externalreference', $c)
+                    ->orWhere('descricao_externa', $c);
+            })->first();
+            if ($found !== null) {
+                Log::info('[SIMPAY][WEBHOOK] Saque resolvido por fallback de id', [
+                    'matched_by' => $c,
+                    'payout_id' => $found->id,
+                ]);
+
+                return $found;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * End-to-end conforme payload Simpay (PIX_CASHOUT_SUCCESS: end_to_end; legado/alternativo: operationUuid, code_transaction tipo E...).
      *
      * @param  array<string, mixed>  $data
@@ -281,14 +335,14 @@ class SimpayWebhookController extends Controller
             return response()->json(['received' => true, 'processed' => false]);
         }
 
-        $payout = SolicitacoesCashOut::where('idTransaction', $transactionId)
-            ->where('executor_ordem', 'simpay')
-            ->first();
+        $payout = $this->findCashOutBySimpayWebhookIds($transactionId, $data);
 
         if (! $payout) {
             Log::warning('[SIMPAY][WEBHOOK] Saque não encontrado', [
                 'type' => $type,
                 'transaction_id' => $transactionId,
+                'tag' => $data['tag'] ?? null,
+                'code_transaction' => $data['code_transaction'] ?? null,
             ]);
             return response()->json(['received' => true, 'processed' => false]);
         }
@@ -354,7 +408,7 @@ class SimpayWebhookController extends Controller
             ? ClientWebhookPayloadBuilder::extraForDeposit($record)
             : ClientWebhookPayloadBuilder::extraForCashOut($record);
 
-        ClientWebhookDispatchJob::dispatch(
+        ClientWebhookDispatchJob::send(
             $record->callback,
             $record->idTransaction,
             $status,

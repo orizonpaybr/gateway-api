@@ -912,7 +912,7 @@ class FinancialService
         }
 
         try {
-            ClientWebhookDispatchJob::dispatch(
+            ClientWebhookDispatchJob::send(
                 $callback,
                 (string) $deposit->idTransaction,
                 'REFUNDED',

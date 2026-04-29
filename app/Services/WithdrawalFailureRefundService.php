@@ -97,6 +97,13 @@ class WithdrawalFailureRefundService
             'debito_saldo_principal' => $debPr,
         ]);
 
-        app(AffiliateCommissionService::class)->reverseCashOutCommissionForFailedWithdrawal($cashOut);
+        try {
+            app(AffiliateCommissionService::class)->reverseCashOutCommissionForFailedWithdrawal($cashOut);
+        } catch (\Throwable $e) {
+            Log::error('[WITHDRAWAL_REFUND] Estorno ao usuário ok, mas falhou reversão de comissão afiliado (não deve abortar o estorno)', [
+                'cash_out_id' => $cashOut->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 }
