@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Helpers\Helper;
 use App\Helpers\TaxaSaqueHelper;
+use App\Helpers\WebhookClientMessages;
 use App\Http\Controllers\Controller;
 use App\Jobs\ClientWebhookDispatchJob;
 use App\Models\Adquirente;
@@ -12,6 +13,7 @@ use App\Models\SolicitacoesCashOut;
 use App\Models\User;
 use App\Services\ClientWebhookPayloadBuilder;
 use App\Services\PixAcquirer\PixAcquirerManager;
+use App\Services\Simpay\SimpayCashOutOutcomeService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -249,9 +251,13 @@ class SaqueController extends Controller
                     ]);
 
                     $balanceService = app(\App\Services\BalanceService::class);
-                    $balanceService->decrementCombinedBalance($user, $valorTotalDescontar);
+                    $dec = $balanceService->decrementCombinedBalanceWithSplit($user, $valorTotalDescontar);
+                    $w->update([
+                        'debito_saldo_afiliado' => $dec['debito_saldo_afiliado'],
+                        'debito_saldo_principal' => $dec['debito_saldo_principal'],
+                    ]);
 
-                    return $w;
+                    return $w->fresh();
                 });
 
                 Helper::calculaSaldoLiquido($user->user_id ?? $user->username);
@@ -341,6 +347,21 @@ class SaqueController extends Controller
                     'amount' => $amount,
                 ]);
 
+                $failMsg = $payoutResult['message'] ?? null;
+                $payloadReason = is_string($failMsg) && $failMsg !== '' ? ['message' => $failMsg] : null;
+                if (! empty($withdrawal->callback) && $withdrawal->callback !== 'web') {
+                    $withdrawal->refresh();
+                    ClientWebhookDispatchJob::dispatch(
+                        $withdrawal->callback,
+                        $withdrawal->idTransaction,
+                        'FAILED',
+                        (float) $withdrawal->amount,
+                        now()->toIso8601String(),
+                        ClientWebhookPayloadBuilder::extraForCashOut($withdrawal),
+                        WebhookClientMessages::getMessageForStatus('FAILED', 'PIX_OUT', $payloadReason)
+                    );
+                }
+
                 return response()->json([
                     'status' => 'error',
                     'message' => $payoutResult['message'] ?? 'Não foi possível processar o saque PIX.',
@@ -368,17 +389,24 @@ class SaqueController extends Controller
                 if ($w === null) {
                     return;
                 }
+                $dec = $balanceService->decrementCombinedBalanceWithSplit($user, $valorTotalDescontar);
                 $w->update([
                     'idTransaction' => $idTxn,
                     'externalreference' => $idTxn,
                     'end_to_end' => $e2e,
                     'status' => $statusMapped,
+                    'debito_saldo_afiliado' => $dec['debito_saldo_afiliado'],
+                    'debito_saldo_principal' => $dec['debito_saldo_principal'],
                 ]);
-                $balanceService->decrementCombinedBalance($user, $valorTotalDescontar);
             });
 
             $withdrawal->refresh();
             $provisionedAutoWithdrawal = null;
+
+            if ($acquirerService->getReference() === 'simpay') {
+                app(SimpayCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($withdrawal);
+                $withdrawal->refresh();
+            }
 
             Helper::calculaSaldoLiquido($user->user_id ?? $user->username);
             app(\App\Services\PaymentProcessingService::class)->invalidateCachesAfterPayment($withdrawal->user_id);
@@ -392,7 +420,7 @@ class SaqueController extends Controller
                     'pixKeyType' => $keyType,
                     'pixKey' => $keyValue,
                     'description' => $description,
-                    'status' => $statusMapped,
+                    'status' => $withdrawal->status,
                     'tipo_processamento' => 'Automático',
                     'created_at' => now()->toISOString(),
                     'adquirente' => $acquirerService->getReference(),

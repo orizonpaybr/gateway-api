@@ -545,9 +545,13 @@ class PixKeyController extends Controller
                     ]);
 
                     $balanceService = app(\App\Services\BalanceService::class);
-                    $balanceService->decrementCombinedBalance($user, $valorTotalDescontar);
+                    $dec = $balanceService->decrementCombinedBalanceWithSplit($user, $valorTotalDescontar);
+                    $w->update([
+                        'debito_saldo_afiliado' => $dec['debito_saldo_afiliado'],
+                        'debito_saldo_principal' => $dec['debito_saldo_principal'],
+                    ]);
 
-                    return $w;
+                    return $w->fresh();
                 });
 
                 \App\Helpers\Helper::calculaSaldoLiquido($user->user_id ?? $user->username);
@@ -654,8 +658,14 @@ class PixKeyController extends Controller
                     'descricao_externa' => $correlationID,
                 ]);
 
-                $balanceService = app(\App\Services\BalanceService::class);
-                $balanceService->decrementCombinedBalance($user, $valorTotalDescontar);
+                \Illuminate\Support\Facades\DB::transaction(function () use ($withdrawal, $user, $valorTotalDescontar) {
+                    $balanceService = app(\App\Services\BalanceService::class);
+                    $dec = $balanceService->decrementCombinedBalanceWithSplit($user, $valorTotalDescontar);
+                    $withdrawal->update([
+                        'debito_saldo_afiliado' => $dec['debito_saldo_afiliado'],
+                        'debito_saldo_principal' => $dec['debito_saldo_principal'],
+                    ]);
+                });
                 \App\Helpers\Helper::calculaSaldoLiquido($user->user_id ?? $user->username);
                 app(\App\Services\PaymentProcessingService::class)->invalidateCachesAfterPayment($withdrawal->user_id);
 

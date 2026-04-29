@@ -179,16 +179,7 @@ class AffiliateCommissionService
 
             $commissionValue = $this->resolveCommissionValue($affiliate);
 
-            // Verificar saldo suficiente do filho
-            if ($user->saldo < $commissionValue) {
-                Log::warning("Saldo insuficiente para comissão de afiliado (cash-out)", [
-                    'user_id' => $user->user_id,
-                    'saldo_disponivel' => $user->saldo,
-                    'comissao_necessaria' => $commissionValue,
-                ]);
-                // Não lançar exceção - apenas logar e não processar comissão
-                return;
-            }
+            // A comissão já está embutida no valor_total_descontar / taxa na criação do saque — não debitar de novo aqui.
 
             // Criar registro de comissão
             $commission = AffiliateCommission::create([
@@ -233,5 +224,56 @@ class AffiliateCommissionService
                 'affiliate_balance_after' => $balanceAfterAffiliate,
             ]);
         });
+    }
+
+    /**
+     * Reverte comissão paga ao afiliado quando o cash-out do indicado falha ou é cancelado após ter concluído
+     * (ex.: estorno). Idempotente se não houver comissão paga para esse saque.
+     */
+    public function reverseCashOutCommissionForFailedWithdrawal(SolicitacoesCashOut $cashOut): void
+    {
+        $runner = function () use ($cashOut) {
+            $commission = AffiliateCommission::where('solicitacao_cash_out_id', $cashOut->id)
+                ->where('transaction_type', 'cash_out')
+                ->where('status', 'paid')
+                ->lockForUpdate()
+                ->first();
+
+            if (! $commission) {
+                return;
+            }
+
+            $affiliate = User::where('id', $commission->affiliate_id)->lockForUpdate()->first();
+            if (! $affiliate) {
+                Log::warning('[AFFILIATE][CASH_OUT_REVERSE] Afiliado não encontrado', [
+                    'commission_id' => $commission->id,
+                    'affiliate_id' => $commission->affiliate_id,
+                ]);
+
+                return;
+            }
+
+            $amount = (float) $commission->commission_value;
+            if ($amount > 0) {
+                User::where('id', $affiliate->id)->decrement('saldo_afiliado', $amount);
+            }
+
+            $commission->update(['status' => 'reversed']);
+
+            CacheKeyService::forgetAffiliateUser($affiliate->id);
+
+            Log::info('[AFFILIATE][CASH_OUT_REVERSE] Comissão de cash-out estornada do afiliado', [
+                'cash_out_id' => $cashOut->id,
+                'commission_id' => $commission->id,
+                'affiliate_user_id' => $affiliate->user_id,
+                'amount' => $amount,
+            ]);
+        };
+
+        if (DB::transactionLevel() > 0) {
+            $runner();
+        } else {
+            DB::transaction($runner);
+        }
     }
 }

@@ -11,7 +11,9 @@ use Illuminate\Support\Facades\Log;
  * (CANCELLED / FAILED após PROCESSING ou PENDING com débito já aplicado).
  *
  * O débito é feito em SaqueController via BalanceService::decrementCombinedBalance;
- * Helper::calculaSaldoLiquido não recalcula users.saldo — por isso o estorno precisa ser explícito.
+ * quando há split gravado (debito_saldo_*), restitui com incrementCombinedBalanceMirror.
+ * Comissão de afiliado no cash-out (Marcos) só é paga ao concluir com sucesso; se já foi paga
+ * e o saque falha depois, reverseCashOutCommissionForFailedWithdrawal reverte o pai.
  */
 class WithdrawalFailureRefundService
 {
@@ -57,7 +59,29 @@ class WithdrawalFailureRefundService
             return;
         }
 
-        User::where('id', $user->id)->increment('saldo', $valorDevolver);
+        $balanceService = app(BalanceService::class);
+
+        $debAf = $cashOut->debito_saldo_afiliado;
+        $debPr = $cashOut->debito_saldo_principal;
+
+        if ($debAf !== null && $debPr !== null
+            && ((float) $debAf > 0 || (float) $debPr > 0)) {
+            $a = round((float) $debAf, 4);
+            $p = round((float) $debPr, 4);
+            if (abs(($a + $p) - round($valorDevolver, 4)) > 0.02) {
+                Log::warning('[WITHDRAWAL_REFUND] Split gravado não bate com valor_total_descontado; usando estorno só em saldo principal', [
+                    'cash_out_id' => $cashOut->id,
+                    'split_sum' => $a + $p,
+                    'valor_devolver' => $valorDevolver,
+                ]);
+                User::where('id', $user->id)->increment('saldo', $valorDevolver);
+            } else {
+                $balanceService->incrementCombinedBalanceMirror($user, $a, $p);
+            }
+        } else {
+            User::where('id', $user->id)->increment('saldo', $valorDevolver);
+        }
+
         CacheKeyService::forgetAffiliateUser((int) $user->id);
 
         Log::info('[WITHDRAWAL_REFUND] Saldo restituído após falha/cancelamento do Pix Out', [
@@ -69,6 +93,10 @@ class WithdrawalFailureRefundService
             'amount' => $cashOut->amount,
             'taxa_cash_out' => $cashOut->taxa_cash_out,
             'valor_total_descontado' => $cashOut->valor_total_descontado,
+            'debito_saldo_afiliado' => $debAf,
+            'debito_saldo_principal' => $debPr,
         ]);
+
+        app(AffiliateCommissionService::class)->reverseCashOutCommissionForFailedWithdrawal($cashOut);
     }
 }

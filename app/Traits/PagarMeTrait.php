@@ -9,7 +9,10 @@ use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
 use App\Models\App;
 use App\Models\Pagarme;
+use App\Models\User;
 use App\Helpers\Helper;
+use App\Services\AffiliateCommissionService;
+use Illuminate\Support\Facades\DB;
 
 trait PagarMeTrait
 {
@@ -507,11 +510,24 @@ trait PagarMeTrait
                     "descricao_transacao"   => "AUTOMATICO"
                 ];
 
-                $cashout = SolicitacoesCashOut::create($pixcashout);
+                $cashout = DB::transaction(function () use ($pixcashout, $user, $valor_total_descontar) {
+                    $cashout = SolicitacoesCashOut::create($pixcashout);
 
-                // Debitar do saldo combinado (saldo_afiliado primeiro, depois saldo)
-                $balanceService = app(\App\Services\BalanceService::class);
-                $balanceService->decrementCombinedBalance($user, $valor_total_descontar);
+                    $balanceService = app(\App\Services\BalanceService::class);
+                    $dec = $balanceService->decrementCombinedBalanceWithSplit($user, $valor_total_descontar);
+                    $cashout->update([
+                        'debito_saldo_afiliado' => $dec['debito_saldo_afiliado'],
+                        'debito_saldo_principal' => $dec['debito_saldo_principal'],
+                    ]);
+
+                    $u = User::where('user_id', $user->user_id)->lockForUpdate()->first();
+                    if ($u) {
+                        app(AffiliateCommissionService::class)->processCashOutCommission($cashout->fresh(), $u);
+                    }
+
+                    return $cashout->fresh();
+                });
+
                 Helper::incrementAmount($user, $request->amount, 'valor_sacado');
                 Helper::calculaSaldoLiquido($user->user_id);
 
