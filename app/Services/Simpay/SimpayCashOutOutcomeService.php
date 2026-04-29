@@ -8,6 +8,7 @@ use App\Jobs\ClientWebhookDispatchJob;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
 use App\Services\AffiliateCommissionService;
+use App\Services\ClientWebhookPayloadBuilder;
 use App\Services\PaymentProcessingService;
 use App\Services\WithdrawalFailureRefundService;
 use Illuminate\Support\Facades\DB;
