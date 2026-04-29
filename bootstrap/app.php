@@ -89,10 +89,6 @@ return Application::configure(basePath: dirname(__DIR__))
             \App\Http\Middleware\LogSlowQueries::class,
         ]);
 
-        // Aplicar middleware de otimização de assets globalmente (primeira execução)
-        $middleware->prepend([
-            \App\Http\Middleware\AssetOptimizerMiddleware::class,
-        ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         //
