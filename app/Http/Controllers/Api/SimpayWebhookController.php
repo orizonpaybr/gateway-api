@@ -10,7 +10,7 @@ use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
 use App\Services\ClientWebhookPayloadBuilder;
 use App\Services\PaymentProcessingService;
-use App\Services\WithdrawalFailureRefundService;
+use App\Services\Simpay\SimpayCashOutOutcomeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -312,38 +312,15 @@ class SimpayWebhookController extends Controller
 
         $e2e = $this->resolveCashOutEndToEnd($data);
         $paymentDate = $data['payment_date'] ?? null;
+        $paidAt = is_string($paymentDate) && $paymentDate !== '' ? $paymentDate : null;
 
-        $updated = DB::transaction(function () use ($payout, $newStatus, $e2e) {
-            $locked = SolicitacoesCashOut::where('id', $payout->id)
-                ->lockForUpdate()
-                ->first();
-
-            if (! $locked) {
-                return false;
-            }
-
-            $lockedTerminal = ['COMPLETED', 'FAILED', 'CANCELLED', 'REFUNDED'];
-            if (in_array($locked->status, $lockedTerminal, true)) {
-                return false;
-            }
-
-            $previousStatus = $locked->status;
-
-            $updateData = ['status' => $newStatus];
-            if ($e2e !== null && $e2e !== '') {
-                $updateData['end_to_end'] = $e2e;
-            }
-
-            $locked->update($updateData);
-
-            WithdrawalFailureRefundService::creditBackIfApplicable(
-                $locked->fresh(),
-                $previousStatus,
-                $newStatus
-            );
-
-            return true;
-        });
+        $updated = app(SimpayCashOutOutcomeService::class)->applyFinalStatusIfNeeded(
+            $payout,
+            $newStatus,
+            $data,
+            $e2e,
+            $paidAt
+        );
 
         if (! $updated) {
             return response()->json(['received' => true, 'processed' => false]);
@@ -352,16 +329,9 @@ class SimpayWebhookController extends Controller
         Log::info('[SIMPAY][WEBHOOK] Status do saque atualizado', [
             'payout_id' => $payout->id,
             'transaction_id' => $transactionId,
-            'old_status' => $payout->status,
             'new_status' => $newStatus,
             'type' => $type,
         ]);
-
-        Helper::calculaSaldoLiquido($payout->user_id);
-        app(\App\Services\PaymentProcessingService::class)
-            ->invalidateCachesAfterPayment($payout->user_id);
-
-        $this->dispatchClientWebhook($payout, $newStatus, 'PIX_OUT', $paymentDate);
 
         return response()->json(['received' => true, 'processed' => true]);
     }

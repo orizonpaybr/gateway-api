@@ -10,6 +10,7 @@ use App\Http\Requests\WithdrawalStatsRequest;
 use App\Models\App;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
+use App\Services\AffiliateCommissionService;
 use App\Services\BalanceService;
 use App\Services\FinancialService;
 use App\Services\PixAcquirer\PixAcquirerManager;
@@ -387,7 +388,7 @@ class WithdrawalController extends Controller
         $providerStatus = (string) ($payoutResult['status'] ?? 'pending');
         $statusInterno = $acquirerService->mapPayoutStatus($providerStatus);
 
-        DB::transaction(function () use ($saque, $referenceCode, $statusInterno, $taxaCashOut, $correlationID, $acquirerService) {
+        DB::transaction(function () use ($saque, $referenceCode, $statusInterno, $taxaCashOut, $correlationID, $acquirerService, $userSaque) {
             $saqueAtualizado = SolicitacoesCashOut::where('id', $saque->id)
                 ->lockForUpdate()
                 ->first();
@@ -404,6 +405,16 @@ class WithdrawalController extends Controller
                 'taxa_cash_out' => $taxaCashOut,
                 'descricao_externa' => $correlationID,
             ]);
+
+            if ($statusInterno === 'COMPLETED') {
+                $child = User::where('user_id', $userSaque->user_id)->lockForUpdate()->first();
+                if ($child) {
+                    app(AffiliateCommissionService::class)->processCashOutCommission(
+                        $saqueAtualizado->fresh(),
+                        $child
+                    );
+                }
+            }
         });
 
         Helper::calculaSaldoLiquido($userSaque->user_id);
@@ -446,36 +457,63 @@ class WithdrawalController extends Controller
                 ], 400);
             }
 
-            // Atualizar status
-            $saque->status = 'CANCELLED';
-            $saque->save();
+            DB::transaction(function () use ($saque) {
+                $locked = SolicitacoesCashOut::where('id', $saque->id)->lockForUpdate()->first();
+                if (! $locked || $locked->status !== 'PENDING') {
+                    throw new \RuntimeException('Este saque já foi processado.');
+                }
 
-            // Devolver valor + taxa ao usuário (foram debitados na criação do saque; rejeição = saque não finalizado, não cobra taxa)
-            if ($saque->user_id) {
-                $userModel = User::where('user_id', $saque->user_id)->first();
-                if ($userModel) {
-                    $userModel->increment('transacoes_recused', 1);
-                    $valorDevolver = $saque->valor_total_descontado !== null && (float) $saque->valor_total_descontado > 0
-                        ? (float) $saque->valor_total_descontado
-                        : (float) $saque->amount + (float) ($saque->taxa_cash_out ?? 0);
-                    if ($valorDevolver > 0) {
-                        $balanceService = app(BalanceService::class);
+                $locked->update(['status' => 'CANCELLED']);
+
+                if (! $locked->user_id) {
+                    return;
+                }
+
+                $userModel = User::where('user_id', $locked->user_id)->lockForUpdate()->first();
+                if (! $userModel) {
+                    Log::warning("Usuário não encontrado ao rejeitar o saque ID: {$locked->id}, user_id: {$locked->user_id}");
+
+                    return;
+                }
+
+                User::where('id', $userModel->id)->increment('transacoes_recused', 1);
+
+                $valorDevolver = $locked->valor_total_descontado !== null && (float) $locked->valor_total_descontado > 0
+                    ? (float) $locked->valor_total_descontado
+                    : (float) $locked->amount + (float) ($locked->taxa_cash_out ?? 0);
+
+                if ($valorDevolver > 0) {
+                    $balanceService = app(BalanceService::class);
+                    $debAf = $locked->debito_saldo_afiliado;
+                    $debPr = $locked->debito_saldo_principal;
+
+                    if ($debAf !== null && $debPr !== null
+                        && ((float) $debAf > 0 || (float) $debPr > 0)) {
+                        $a = round((float) $debAf, 4);
+                        $p = round((float) $debPr, 4);
+                        if (abs(($a + $p) - round($valorDevolver, 4)) > 0.02) {
+                            $balanceService->incrementBalance($userModel, $valorDevolver, 'saldo');
+                        } else {
+                            $balanceService->incrementCombinedBalanceMirror($userModel, $a, $p);
+                        }
+                    } else {
                         $balanceService->incrementBalance($userModel, $valorDevolver, 'saldo');
                     }
-                    $userModel->save();
-
-                    Helper::calculaSaldoLiquido($userModel->user_id);
-
-                    Log::info('WithdrawalController::reject - Valor e taxa devolvidos ao usuário', [
-                        'saque_id' => $saque->id,
-                        'user_id' => $userModel->user_id,
-                        'valor_devolvido' => $valorDevolver,
-                    ]);
-                } else {
-                    Log::warning("Usuário não encontrado ao rejeitar o saque ID: {$saque->id}, user_id: {$saque->user_id}");
                 }
-            } else {
-                Log::info("Saque rejeitado sem usuário associado - ID: {$saque->id}");
+
+                app(AffiliateCommissionService::class)->reverseCashOutCommissionForFailedWithdrawal($locked);
+
+                Log::info('WithdrawalController::reject - Valor e taxa devolvidos ao usuário', [
+                    'saque_id' => $locked->id,
+                    'user_id' => $userModel->user_id,
+                    'valor_devolvido' => $valorDevolver,
+                ]);
+            });
+
+            $saque->refresh();
+
+            if ($saque->user_id) {
+                Helper::calculaSaldoLiquido($saque->user_id);
             }
 
             if ($saque->user_id) {

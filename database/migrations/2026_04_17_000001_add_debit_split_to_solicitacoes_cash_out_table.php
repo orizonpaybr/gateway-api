@@ -1,0 +1,35 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+/**
+ * Partes do débito combinado (afiliado vs principal) para estorno fiel ao BalanceService::decrementCombinedBalance.
+ */
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::table('solicitacoes_cash_out', function (Blueprint $table) {
+            if (! Schema::hasColumn('solicitacoes_cash_out', 'debito_saldo_afiliado')) {
+                $table->decimal('debito_saldo_afiliado', 12, 4)->nullable()->after('valor_total_descontado');
+            }
+            if (! Schema::hasColumn('solicitacoes_cash_out', 'debito_saldo_principal')) {
+                $table->decimal('debito_saldo_principal', 12, 4)->nullable()->after('debito_saldo_afiliado');
+            }
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::table('solicitacoes_cash_out', function (Blueprint $table) {
+            if (Schema::hasColumn('solicitacoes_cash_out', 'debito_saldo_principal')) {
+                $table->dropColumn('debito_saldo_principal');
+            }
+            if (Schema::hasColumn('solicitacoes_cash_out', 'debito_saldo_afiliado')) {
+                $table->dropColumn('debito_saldo_afiliado');
+            }
+        });
+    }
+};

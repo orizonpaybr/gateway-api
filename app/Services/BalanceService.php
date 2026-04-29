@@ -179,33 +179,61 @@ class BalanceService
     /**
      * Debita valor do saldo combinado (saldo_afiliado primeiro, depois saldo)
      * Thread-safe, com lock pessimista
-     * 
-     * @param User $user
-     * @param float $amount Valor total a debitar
+     *
+     * @param  User  $user
+     * @param  float  $amount  Valor total a debitar
      * @return User Usuário atualizado
+     *
      * @throws \Exception Se saldo total insuficiente
      */
     public function decrementCombinedBalance(User $user, float $amount): User
+    {
+        return $this->decrementCombinedBalanceWithSplit($user, $amount)['user'];
+    }
+
+    /**
+     * Igual a decrementCombinedBalance, mas retorna o split debitado para estorno fiel.
+     *
+     * @return array{user: User, debito_saldo_afiliado: float, debito_saldo_principal: float}
+     *
+     * @throws \Exception Se saldo total insuficiente
+     */
+    public function decrementCombinedBalanceWithSplit(User $user, float $amount): array
     {
         if (DB::transactionLevel() > 0) {
             return $this->decrementCombinedBalanceInner($user, $amount);
         }
 
-        return DB::transaction(function () use ($user, $amount) {
-            return $this->decrementCombinedBalanceInner($user, $amount);
+        return DB::transaction(fn () => $this->decrementCombinedBalanceInner($user, $amount));
+    }
+
+    /**
+     * Devolve ao usuário o mesmo split debitado por decrementCombinedBalance (estorno de saque falho/cancelado).
+     *
+     * @param  float  $debitoSaldoAfiliado  Valor que saiu de saldo_afiliado
+     * @param  float  $debitoSaldoPrincipal  Valor que saiu de saldo
+     */
+    public function incrementCombinedBalanceMirror(User $user, float $debitoSaldoAfiliado, float $debitoSaldoPrincipal): User
+    {
+        if (DB::transactionLevel() > 0) {
+            return $this->incrementCombinedBalanceMirrorInner($user, $debitoSaldoAfiliado, $debitoSaldoPrincipal);
+        }
+
+        return DB::transaction(function () use ($user, $debitoSaldoAfiliado, $debitoSaldoPrincipal) {
+            return $this->incrementCombinedBalanceMirrorInner($user, $debitoSaldoAfiliado, $debitoSaldoPrincipal);
         });
     }
 
     /**
-     * Mesma lógica de decrementCombinedBalance, sem abrir transação (usa a transação atual).
+     * @return array{user: User, debito_saldo_afiliado: float, debito_saldo_principal: float}
      */
-    private function decrementCombinedBalanceInner(User $user, float $amount): User
+    private function decrementCombinedBalanceInner(User $user, float $amount): array
     {
         $user = User::where('id', $user->id)
             ->lockForUpdate()
             ->first();
 
-        if (!$user) {
+        if (! $user) {
             throw new \Exception("Usuário não encontrado: {$user->id}");
         }
 
@@ -219,27 +247,72 @@ class BalanceService
         $saldoAntes = $user->saldo;
         $restante = $amount;
 
+        $debitoAfiliado = 0.0;
         if ($user->saldo_afiliado > 0) {
             $debitoAfiliado = min($user->saldo_afiliado, $restante);
             User::where('id', $user->id)->decrement('saldo_afiliado', $debitoAfiliado);
             $restante -= $debitoAfiliado;
         }
 
+        $debitoPrincipal = 0.0;
         if ($restante > 0) {
+            $debitoPrincipal = $restante;
             User::where('id', $user->id)->decrement('saldo', $restante);
         }
 
         $user = $user->fresh();
 
-        Log::info("Saldo combinado debitado com sucesso", [
+        $splitAfiliado = round((float) $debitoAfiliado, 4);
+        $splitPrincipal = round((float) $debitoPrincipal, 4);
+
+        Log::info('Saldo combinado debitado com sucesso', [
             'user_id' => $user->user_id,
             'amount_total' => $amount,
+            'debito_saldo_afiliado' => $debitoAfiliado,
+            'debito_saldo_principal' => $debitoPrincipal,
             'saldo_afiliado_before' => $saldoAfiliadoAntes,
             'saldo_afiliado_after' => $user->saldo_afiliado,
             'saldo_before' => $saldoAntes,
             'saldo_after' => $user->saldo,
             'total_before' => $saldoAfiliadoAntes + $saldoAntes,
             'total_after' => $user->saldo_afiliado + $user->saldo,
+        ]);
+
+        CacheKeyService::forgetAffiliateUser($user->id);
+
+        return [
+            'user' => $user,
+            'debito_saldo_afiliado' => $splitAfiliado,
+            'debito_saldo_principal' => $splitPrincipal,
+        ];
+    }
+
+    private function incrementCombinedBalanceMirrorInner(User $user, float $debitoSaldoAfiliado, float $debitoSaldoPrincipal): User
+    {
+        $user = User::where('id', $user->id)
+            ->lockForUpdate()
+            ->first();
+
+        if (! $user) {
+            throw new \Exception("Usuário não encontrado: {$user->id}");
+        }
+
+        if ($debitoSaldoAfiliado > 0) {
+            User::where('id', $user->id)->increment('saldo_afiliado', $debitoSaldoAfiliado);
+        }
+
+        if ($debitoSaldoPrincipal > 0) {
+            User::where('id', $user->id)->increment('saldo', $debitoSaldoPrincipal);
+        }
+
+        $user = $user->fresh();
+
+        Log::info('Saldo combinado restituído (espelho do débito)', [
+            'user_id' => $user->user_id,
+            'credito_saldo_afiliado' => $debitoSaldoAfiliado,
+            'credito_saldo_principal' => $debitoSaldoPrincipal,
+            'saldo_afiliado_after' => $user->saldo_afiliado,
+            'saldo_after' => $user->saldo,
         ]);
 
         CacheKeyService::forgetAffiliateUser($user->id);
