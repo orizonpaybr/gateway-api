@@ -13,7 +13,7 @@ class WebhookClientMessages
     /** @var array<string, string> Status enviado ao cliente => Mensagem em português (Cash Out; PAID_OUT varia por tipo) */
     private const STATUS_MESSAGES = [
         'PAID_OUT'              => 'Pagamento PIX liquidado com sucesso.',
-        'CANCELLED'              => 'Saque PIX cancelado.',
+        'CANCELLED'              => 'Saque indisponível, entre em contato com o suporte.',
         'REFUNDED'               => 'Saque PIX estornado.',
         'PARTIALLY_REFUNDED'     => 'Saque PIX estornado parcialmente.',
         'FAILED'                 => 'Saque PIX não realizado.',
@@ -27,7 +27,8 @@ class WebhookClientMessages
 
     /**
      * Retorna mensagem amigável para o status enviado no webhook ao cliente.
-     * Para CANCELLED, se houver payload do adquirente com motivo (errorCode/rejectionReason), usa PixErrorCodes.
+     * Para CANCELLED/FAILED em PIX_OUT, a mensagem ao cliente é fixa (sem detalhe do adquirente).
+     * Para CANCELLED/FAILED em PIX_IN, se houver payload com motivo (errorCode/rejectionReason), usa PixErrorCodes.
      *
      * @param string $status Status enviado (ex.: PAID_OUT, CANCELLED, REFUNDED)
      * @param string $typeTransaction PIX_IN ou PIX_OUT (para mensagens específicas se necessário)
@@ -39,6 +40,11 @@ class WebhookClientMessages
         ?array $payloadForReason = null
     ): string {
         $statusUpper = strtoupper(trim($status));
+
+        // Saída de PIX: não repassar mensagem técnica do adquirente (ex.: "Insufficient balance")
+        if ($typeTransaction === 'PIX_OUT' && in_array($statusUpper, ['CANCELLED', 'FAILED'], true)) {
+            return 'Saque indisponível, entre em contato com o suporte.';
+        }
 
         // Para cancelamento/falha, priorizar motivo do adquirente (código PIX SPI) quando disponível
         if (in_array($statusUpper, ['CANCELLED', 'FAILED']) && $payloadForReason !== null && $payloadForReason !== []) {
