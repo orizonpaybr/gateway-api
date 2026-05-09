@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\SaqueController;
 use App\Http\Controllers\Api\DepositController;
 use Illuminate\Support\Facades\Artisan;
-use App\Http\Controllers\Api\PixInfracoesController;
+// use App\Http\Controllers\Api\PixInfracoesController; // Pix infrações — desativado temporariamente
 use App\Http\Controllers\Api\PixKeyController;
 use App\Http\Controllers\Api\SimpayCpfController;
 use App\Http\Controllers\Api\SimpayDebugController;
@@ -47,10 +47,10 @@ Route::middleware(['verify.jwt'])->group(function () {
     Route::get('gamification/journey', [UserController::class, 'getGamificationData']);
     Route::get('gamification/sidebar', [UserController::class, 'getSidebarGamificationData']);
 
-    // Infrações Pix
-    Route::get('pix/infracoes', [PixInfracoesController::class, 'index']);
-    Route::get('pix/infracoes/{id}', [PixInfracoesController::class, 'show']);
-    
+    // Infrações Pix (desativado temporariamente — reative o use acima e as duas rotas)
+    // Route::get('pix/infracoes', [PixInfracoesController::class, 'index']);
+    // Route::get('pix/infracoes/{id}', [PixInfracoesController::class, 'show']);
+
     // Chaves PIX
     Route::get('pix/keys', [PixKeyController::class, 'index']);
     Route::post('pix/keys', [PixKeyController::class, 'store']);
