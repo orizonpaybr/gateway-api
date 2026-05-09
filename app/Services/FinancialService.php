@@ -789,7 +789,7 @@ class FinancialService
     private function depositPodeEstornar(Solicitacoes $item): bool
     {
         $acq = strtolower(trim((string) ($item->adquirente_ref ?? $item->executor_ordem ?? '')));
-        if ($acq !== 'simpay') {
+        if (! in_array($acq, ['simpay', 'fyhub'], true)) {
             return false;
         }
         if (trim((string) ($item->idTransaction ?? '')) === '') {
@@ -801,7 +801,7 @@ class FinancialService
     }
 
     /**
-     * Solicita estorno na Simpay e atualiza depósito/saldo localmente.
+     * Solicita estorno na adquirente (Simpay/Fyhub) e atualiza depósito/saldo localmente.
      *
      * @throws \Exception com código HTTP em $e->getCode() quando aplicável
      */
@@ -819,8 +819,8 @@ class FinancialService
         }
 
         $acq = strtolower(trim((string) ($deposit->adquirente_ref ?? $deposit->executor_ordem ?? '')));
-        if ($acq !== 'simpay') {
-            throw new \Exception('Estorno disponível apenas para depósitos Simpay.', 422);
+        if (! in_array($acq, ['simpay', 'fyhub'], true)) {
+            throw new \Exception('Estorno disponível apenas para depósitos Simpay/Fyhub.', 422);
         }
 
         $st = strtoupper((string) $deposit->status);
@@ -832,17 +832,25 @@ class FinancialService
         }
 
         $tid = trim((string) ($deposit->idTransaction ?? ''));
+        if ($acq === 'fyhub') {
+            $tid = trim((string) ($deposit->end_to_end ?? ''));
+        }
         if ($tid === '') {
-            throw new \Exception('Transação sem identificador na adquirente.', 422);
+            throw new \Exception(
+                $acq === 'fyhub'
+                    ? 'Depósito FYHUB sem endToEndId para devolução.'
+                    : 'Transação sem identificador na adquirente.',
+                422
+            );
         }
 
         $manager = app(PixAcquirerManager::class);
-        $simpay = $manager->resolve('simpay');
-        if (! $simpay->isActive()) {
-            throw new \Exception('Integração Simpay indisponível.', 503);
+        $acquirer = $manager->resolve($acq);
+        if (! $acquirer->isActive()) {
+            throw new \Exception('Integração '.$acq.' indisponível.', 503);
         }
 
-        $refundResult = $simpay->createRefund($tid, (float) $deposit->amount, $reason);
+        $refundResult = $acquirer->createRefund($tid, (float) $deposit->amount, $reason);
         if (! ($refundResult['success'] ?? false)) {
             $msg = is_string($refundResult['message'] ?? null)
                 ? (string) $refundResult['message']
@@ -1053,6 +1061,7 @@ class FinancialService
             'PENDING' => 'Pendente',
             'CANCELLED' => 'Cancelado',
             'REJECTED' => 'Rejeitado',
+            'FAILED' => 'Falhou',
             'MEDIATION' => 'Mediação',
             'NEW', 'CREATED' => 'Pendente',
             default => $status,
