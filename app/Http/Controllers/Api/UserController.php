@@ -4,8 +4,6 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
-use App\Models\SplitPayment;
-use App\Models\SplitInternoExecutado;
 use App\Models\AffiliateCommission;
 use App\Constants\UserStatus;
 use Illuminate\Http\Request;
@@ -1337,7 +1335,7 @@ class UserController extends Controller
     }
 
     /**
-     * Obter estatísticas do dashboard (saldo, entradas, saídas, splits do mês)
+     * Obter estatísticas do dashboard (saldo, entradas, saídas, fluxo líquido do mês)
      */
     public function getDashboardStats(Request $request)
     {
@@ -1375,37 +1373,8 @@ class UserController extends Controller
                     ->whereBetween('date', [$startOfMonth, $endOfMonth])
                     ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
                     ->sum('amount');
-                // Split interno (taxa): beneficiário + split de pagamento API (split_payments),
-                // alinhado ao mês das transações (mesma lógica de entradas_mes).
-                $splitsInternos = (float) (SplitInternoExecutado::query()
-                    ->where('usuario_beneficiario_id', $user->id)
-                    ->whereBetween('created_at', [$startOfMonth, $endOfMonth])
-                    ->where('status', SplitInternoExecutado::STATUS_PROCESSADO)
-                    ->sum('valor_split') ?? 0);
-
-                $splitsPagamentoEnviados = (float) (SplitPayment::query()
-                    ->where('user_id', $user->user_id)
-                    ->where('split_status', SplitPayment::STATUS_COMPLETED)
-                    ->whereHas('solicitacao', function ($q) use ($startOfMonth, $endOfMonth) {
-                        $q->whereBetween('date', [$startOfMonth, $endOfMonth])
-                            ->whereIn('status', ['PAID_OUT', 'COMPLETED']);
-                    })
-                    ->sum('split_amount') ?? 0);
-
-                $splitsPagamentoRecebidos = 0.0;
-                $emailUsuario = trim((string) ($user->email ?? ''));
-                if ($emailUsuario !== '') {
-                    $splitsPagamentoRecebidos = (float) (SplitPayment::query()
-                        ->whereRaw('LOWER(TRIM(split_email)) = ?', [strtolower($emailUsuario)])
-                        ->where('split_status', SplitPayment::STATUS_COMPLETED)
-                        ->whereHas('solicitacao', function ($q) use ($startOfMonth, $endOfMonth) {
-                            $q->whereBetween('date', [$startOfMonth, $endOfMonth])
-                                ->whereIn('status', ['PAID_OUT', 'COMPLETED']);
-                        })
-                        ->sum('split_amount') ?? 0);
-                }
-
-                $splitsMes = $splitsInternos + $splitsPagamentoEnviados + $splitsPagamentoRecebidos;
+                // Campo `splits_mes` na API: fluxo líquido mensal (entradas − saídas), alinhado aos cards de PIX.
+                $splitsMes = (float) $entradasMes - (float) $saidasMes;
                 return [
                     'entradas_mes' => (float) $entradasMes,
                     'saidas_mes' => (float) $saidasMes,
