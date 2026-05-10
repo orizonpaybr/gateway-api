@@ -19,7 +19,7 @@ class DashboardService
     const CACHE_TTL_STATS = 300;
 
     /**
-     * Obter estatísticas do dashboard (saldo, entradas, saídas, splits)
+     * Obter estatísticas do dashboard (saldo, entradas, saídas, fluxo líquido em splits_mes)
      * 
      * @param string $username
      * @return array
@@ -79,61 +79,15 @@ class DashboardService
                 ->first(['saldo', 'saldo_afiliado']);
             $saldoDisponivel = $row ? ((float) ($row->saldo ?? 0) + (float) ($row->saldo_afiliado ?? 0)) : 0;
 
-            // Splits do mês: internos (beneficiário) + API split_payments (enviados/recebidos)
-            $splitsMes = 0;
-            try {
-                $userRow = DB::table('users')
-                    ->where('username', $username)
-                    ->first(['id', 'user_id', 'email']);
-
-                if ($userRow) {
-                    if (DB::getSchemaBuilder()->hasTable('split_internos_executados')) {
-                        $splitsMes = (float) (DB::table('split_internos_executados')
-                            ->where('usuario_beneficiario_id', $userRow->id)
-                            ->whereBetween('created_at', [$startOfMonth, $endOfMonth])
-                            ->where('status', 'processado')
-                            ->sum('valor_split') ?? 0);
-                    }
-
-                    if (DB::getSchemaBuilder()->hasTable('split_payments')) {
-                        $enviados = (float) (DB::table('split_payments')
-                            ->where('user_id', $userRow->user_id)
-                            ->where('split_status', 'completed')
-                            ->whereIn('solicitacao_id', function ($q) use ($username, $startOfMonth, $endOfMonth) {
-                                $q->select('id')
-                                    ->from('solicitacoes')
-                                    ->where('user_id', $username)
-                                    ->whereBetween('date', [$startOfMonth, $endOfMonth])
-                                    ->whereIn('status', ['PAID_OUT', 'COMPLETED']);
-                            })
-                            ->sum('split_amount') ?? 0);
-
-                        $recebidos = 0.0;
-                        $em = trim((string) ($userRow->email ?? ''));
-                        if ($em !== '') {
-                            $recebidos = (float) (DB::table('split_payments')
-                                ->whereRaw('LOWER(TRIM(split_email)) = ?', [strtolower($em)])
-                                ->where('split_status', 'completed')
-                                ->whereIn('solicitacao_id', function ($q) use ($startOfMonth, $endOfMonth) {
-                                    $q->select('id')
-                                        ->from('solicitacoes')
-                                        ->whereBetween('date', [$startOfMonth, $endOfMonth])
-                                        ->whereIn('status', ['PAID_OUT', 'COMPLETED']);
-                                })
-                                ->sum('split_amount') ?? 0);
-                        }
-
-                        $splitsMes += $enviados + $recebidos;
-                    }
-                }
-            } catch (\Exception $e) {
-                $splitsMes = 0;
-            }
+            $entradasMes = (float) $depositos->total_pago;
+            $saidasMes = (float) $saques->total_pago;
+            // `splits_mes`: fluxo líquido no mês (entradas − saídas), mesmo critério dos totais PIX acima.
+            $splitsMes = $entradasMes - $saidasMes;
 
             return [
                 'saldo_disponivel' => (float) $saldoDisponivel,
-                'entradas_mes' => (float) $depositos->total_pago,
-                'saidas_mes' => (float) $saques->total_pago,
+                'entradas_mes' => $entradasMes,
+                'saidas_mes' => $saidasMes,
                 'splits_mes' => (float) $splitsMes,
                 'periodo' => [
                     'inicio' => $startOfMonth->format('Y-m-d'),
