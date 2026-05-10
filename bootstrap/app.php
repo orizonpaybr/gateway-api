@@ -44,6 +44,16 @@ return Application::configure(basePath: dirname(__DIR__))
             return Limit::perMinute((int) config('simpay.rate_limit_per_minute', 18000))
                 ->by('simpay-api|'.$key);
         });
+
+        RateLimiter::for('fyhub-webhook', function (Request $request) {
+            return Limit::perMinute((int) config('fyhub.webhook_rate_limit_per_minute', 18000))
+                ->by('fyhub-webhook|'.$request->ip());
+        });
+
+        RateLimiter::for('fyhub-contas-webhook', function (Request $request) {
+            return Limit::perMinute((int) config('fyhub_contas.webhook_rate_limit_per_minute', 18000))
+                ->by('fyhub-contas-webhook|'.$request->ip());
+        });
     })
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->append([
@@ -52,6 +62,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->validateCsrfTokens([
             '/pagarme/*',
             '/simpay/*',
+            '/fyhub/*',
             '/callback',
             '/callback/*',
             '/checkout/webhook/*',

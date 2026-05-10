@@ -12,6 +12,7 @@ use App\Models\App;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
 use App\Services\ClientWebhookPayloadBuilder;
+use App\Services\Fyhub\FyhubCashOutOutcomeService;
 use App\Services\PixAcquirer\PixAcquirerManager;
 use App\Services\Simpay\SimpayCashOutOutcomeService;
 use Carbon\Carbon;
@@ -405,6 +406,11 @@ class SaqueController extends Controller
 
             if ($acquirerService->getReference() === 'simpay') {
                 app(SimpayCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($withdrawal);
+                $withdrawal->refresh();
+            }
+
+            if ($acquirerService->getReference() === 'fyhub') {
+                app(FyhubCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($withdrawal);
                 $withdrawal->refresh();
             }
 

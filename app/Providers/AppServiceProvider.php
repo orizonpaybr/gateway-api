@@ -8,6 +8,12 @@ use App\Models\User;
 use App\Observers\SolicitacoesCashOutObserver;
 use App\Observers\SolicitacoesObserver;
 use App\Observers\UserObserver;
+use App\Services\Fyhub\FyhubAuthService;
+use App\Services\Fyhub\FyhubPixAcquirerService;
+use App\Services\FyhubContas\FyhubContasAccountService;
+use App\Services\FyhubContas\FyhubContasApiClient;
+use App\Services\FyhubContas\FyhubContasAuthService;
+use App\Services\FyhubContas\FyhubContasPixOutService;
 use App\Services\PixAcquirer\PixAcquirerManager;
 use App\Services\Simpay\SimpayAuthService;
 use App\Services\Simpay\SimpayCpfService;
@@ -34,6 +40,29 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(SimpayPixAcquirerService::class, function ($app) {
             return new SimpayPixAcquirerService($app->make(SimpayAuthService::class));
         });
+
+        $this->app->singleton(FyhubAuthService::class);
+
+        $this->app->singleton(FyhubContasAuthService::class);
+
+        $this->app->singleton(FyhubContasApiClient::class, function ($app) {
+            return new FyhubContasApiClient($app->make(FyhubContasAuthService::class));
+        });
+
+        $this->app->singleton(FyhubContasPixOutService::class, function ($app) {
+            return new FyhubContasPixOutService($app->make(FyhubContasApiClient::class));
+        });
+
+        $this->app->singleton(FyhubContasAccountService::class, function ($app) {
+            return new FyhubContasAccountService($app->make(FyhubContasApiClient::class));
+        });
+
+        $this->app->singleton(FyhubPixAcquirerService::class, function ($app) {
+            return new FyhubPixAcquirerService(
+                $app->make(FyhubAuthService::class),
+                $app->make(FyhubContasPixOutService::class),
+            );
+        });
     }
 
     /**
@@ -43,6 +72,9 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->make(PixAcquirerManager::class)
             ->register('simpay', SimpayPixAcquirerService::class);
+
+        $this->app->make(PixAcquirerManager::class)
+            ->register('fyhub', FyhubPixAcquirerService::class);
 
         // Registrar Observers para monitorar mudanças de status
         Solicitacoes::observe(SolicitacoesObserver::class);
