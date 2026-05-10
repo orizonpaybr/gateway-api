@@ -1,5 +1,10 @@
 <?php
 
+/**
+ * Rotas HTTP deste controller estão comentadas em routes/api.php (GET pix/infracoes e pix/infracoes/{id}).
+ * Descomente-as e o import em api.php para reativar o recurso no gateway.
+ */
+
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
