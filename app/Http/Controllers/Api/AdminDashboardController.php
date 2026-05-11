@@ -898,6 +898,78 @@ class AdminDashboardController extends Controller
     }
 
     /**
+     * Alternar status de uma adquirente (semântica mutex para PIX)
+     *
+     * Comportamento:
+     * - Se a adquirente alvo já está ativa (status=1): retorna 422 (proteção contra
+     *   ficar sem adquirente padrão). Para "desativar", o admin deve ativar outra.
+     * - Caso contrário, dentro de uma transação atômica:
+     *     a) Desativa TODAS as demais (status=0, is_default=0)
+     *     b) Ativa a alvo e a torna padrão PIX (status=1, is_default=1)
+     *
+     * Escopo: apenas PIX. is_default_card_billet não é tocado.
+     *
+     * POST /api/admin/acquirers/{id}/toggle-status
+     */
+    public function toggleAcquirerStatus(Request $request, int $id)
+    {
+        try {
+            $target = Adquirente::find($id);
+            if (!$target) {
+                return $this->errorResponse('Adquirente não encontrada', 404);
+            }
+
+            if ((int) $target->status === 1) {
+                return $this->errorResponse(
+                    'Para trocar a adquirente padrão, ative outra. Pelo menos uma deve permanecer ativa.',
+                    422
+                );
+            }
+
+            DB::transaction(function () use ($id) {
+                Adquirente::where('id', '!=', $id)
+                    ->update(['status' => 0, 'is_default' => 0]);
+
+                Adquirente::where('id', $id)
+                    ->update(['status' => 1, 'is_default' => 1]);
+            });
+
+            Cache::forget('app_settings');
+
+            $fresh = Adquirente::find($id);
+
+            Log::info('Adquirente padrão PIX alterada pelo admin', [
+                'acquirer_id' => $id,
+                'referencia' => $fresh->referencia ?? null,
+                'adquirente' => $fresh->adquirente ?? null,
+                'changed_by' => optional($request->user())->id,
+            ]);
+
+            return $this->successResponse([
+                'message' => 'Adquirente ' . ($fresh->adquirente ?? '') . ' ativada como padrão PIX',
+                'acquirer' => [
+                    'id' => (int) $fresh->id,
+                    'adquirente' => (string) ($fresh->adquirente ?? ''),
+                    'status' => (int) ($fresh->status ?? 0),
+                    'url' => (string) ($fresh->url ?? ''),
+                    'referencia' => (string) ($fresh->referencia ?? ''),
+                    'is_default' => (int) ($fresh->is_default ?? 0),
+                    'is_default_card_billet' => (int) ($fresh->is_default_card_billet ?? 0),
+                    'created_at' => $fresh->created_at?->format('c'),
+                    'updated_at' => $fresh->updated_at?->format('c'),
+                ],
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Erro ao alternar status da adquirente', [
+                'acquirer_id' => $id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return $this->errorResponse('Erro ao alternar status da adquirente', 500);
+        }
+    }
+
+    /**
      * Listar adquirentes ativos para PIX
      */
     public function listPixAcquirers(Request $request)

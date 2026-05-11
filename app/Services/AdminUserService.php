@@ -206,7 +206,7 @@ class AdminUserService
             
             $updateData = [];
             // Campos que devem ser convertidos de string vazia para null
-            $nullableFields = ['telefone', 'cpf', 'cep', 'rua', 'estado', 'cidade', 'bairro', 'numero_residencia', 'complemento', 'observacoes_taxas', 'taxa_comissao_afiliado', 'saque_automatico_usuario', 'limite_saque_automatico_usuario'];
+            $nullableFields = ['telefone', 'cpf', 'cep', 'rua', 'estado', 'cidade', 'bairro', 'numero_residencia', 'complemento', 'observacoes_taxas', 'taxa_comissao_afiliado', 'saque_automatico_usuario', 'limite_saque_automatico_usuario', 'preferred_adquirente', 'preferred_adquirente_card_billet'];
             
             foreach ($allowedFields as $field) {
                 if (array_key_exists($field, $data)) {

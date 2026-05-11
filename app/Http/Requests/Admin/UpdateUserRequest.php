@@ -67,7 +67,7 @@ class UpdateUserRequest extends FormRequest
             
             // Relacionamentos
             'gerente_id' => 'nullable|integer|exists:users,id',
-        ], $this->addressRules(), $this->businessRules(), $this->customFeesRules());
+        ], $this->addressRules(), $this->businessRules(), $this->customFeesRules(), $this->acquirerOverrideRules());
     }
 
     /**
