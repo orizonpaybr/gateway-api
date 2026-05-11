@@ -189,6 +189,9 @@ class AdminDashboardController extends Controller
                     'permission' => $user->permission ?? UserPermission::CLIENT,
                     'permission_text' => $permissionText,
                     'adquirente' => $adquirente,
+                    // Edição administrativa / modal PIX (valores crus do banco)
+                    'preferred_adquirente' => $user->preferred_adquirente,
+                    'adquirente_override' => (bool) ($user->adquirente_override ?? false),
                     'vendas_7d' => (float) $vendas7dTotal,
                     'doc_status' => $docStatus,
                     'created_at' => $user->created_at,
@@ -1219,6 +1222,11 @@ class AdminDashboardController extends Controller
                     : null,
                 // Observações
                 'observacoes_taxas' => $user->observacoes_taxas ?? null,
+                // Adquirente PIX (override por usuário — necessário para o modal de edição)
+                'preferred_adquirente' => $user->preferred_adquirente,
+                'adquirente_override' => (bool) ($user->adquirente_override ?? false),
+                'preferred_adquirente_card_billet' => $user->preferred_adquirente_card_billet,
+                'adquirente_card_billet_override' => (bool) ($user->adquirente_card_billet_override ?? false),
             ];
 
             return $this->successResponse(['user' => $detail]);
