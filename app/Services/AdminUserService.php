@@ -506,11 +506,10 @@ class AdminUserService
      * @param int $userId
      * @param float $amount
      * @param string $type ('add' ou 'subtract')
-     * @param string $reason
      * @return User
      * @throws \Exception
      */
-    public function adjustBalance(int $userId, float $amount, string $type = 'add', string $reason = ''): User
+    public function adjustBalance(int $userId, float $amount, string $type = 'add'): User
     {
         DB::beginTransaction();
         
@@ -542,7 +541,6 @@ class AdminUserService
                 'new_balance' => $newBalance,
                 'amount' => $amount,
                 'type' => $type,
-                'reason' => $reason,
                 'adjusted_by' => Auth::id()
             ]);
             

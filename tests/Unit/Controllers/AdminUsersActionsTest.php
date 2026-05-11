@@ -112,8 +112,7 @@ class AdminUsersActionsTest extends TestCase
         $userData = $service->adjustBalance(
             $this->targetUser->id,
             $amount,
-            'add',
-            'Teste de ajuste'
+            'add'
         );
 
         $this->assertEquals($initialBalance + $amount, $userData->saldo);
@@ -131,8 +130,7 @@ class AdminUsersActionsTest extends TestCase
         $userData = $service->adjustBalance(
             $this->targetUser->id,
             $amount,
-            'subtract',
-            'Teste de ajuste'
+            'subtract'
         );
 
         $this->assertEquals(150.00, $userData->saldo);
@@ -154,8 +152,7 @@ class AdminUsersActionsTest extends TestCase
         $service->adjustBalance(
             $this->targetUser->id,
             $amount,
-            'subtract',
-            'Teste de ajuste'
+            'subtract'
         );
     }
 
@@ -302,7 +299,6 @@ class AdminUsersActionsTest extends TestCase
         $request->merge([
             'amount' => 100.00,
             'type' => 'add',
-            'reason' => 'Teste de ajuste',
         ]);
         $request->setUserResolver(function () {
             return $this->adminUser;

@@ -898,20 +898,20 @@ class AdminDashboardController extends Controller
     }
 
     /**
-     * Alternar status de uma adquirente (semântica mutex para PIX)
+     * Definir uma adquirente como a Global (is_default PIX) do sistema.
      *
      * Comportamento:
-     * - Se a adquirente alvo já está ativa (status=1): retorna 422 (proteção contra
-     *   ficar sem adquirente padrão). Para "desativar", o admin deve ativar outra.
-     * - Caso contrário, dentro de uma transação atômica:
-     *     a) Desativa TODAS as demais (status=0, is_default=0)
-     *     b) Ativa a alvo e a torna padrão PIX (status=1, is_default=1)
+     * - Todas as adquirentes permanecem ativas (`status` inalterado).
+     * - Apenas a flag `is_default` é movida: zera para todas e marca 1 na alvo.
+     * - A adquirente alvo deve estar com `status=1` para poder ser global
+     *   (Helper::adquirenteDefault depende disso para fallback).
+     * - Se a alvo já é a Global, retorna 200 idempotente (não faz nada).
      *
-     * Escopo: apenas PIX. is_default_card_billet não é tocado.
+     * Escopo: apenas PIX. `is_default_card_billet` não é tocado.
      *
-     * POST /api/admin/acquirers/{id}/toggle-status
+     * POST /api/admin/acquirers/{id}/set-default
      */
-    public function toggleAcquirerStatus(Request $request, int $id)
+    public function setDefaultAcquirer(Request $request, int $id)
     {
         try {
             $target = Adquirente::find($id);
@@ -919,26 +919,34 @@ class AdminDashboardController extends Controller
                 return $this->errorResponse('Adquirente não encontrada', 404);
             }
 
-            if ((int) $target->status === 1) {
+            if ((int) $target->status !== 1) {
                 return $this->errorResponse(
-                    'Para trocar a adquirente padrão, ative outra. Pelo menos uma deve permanecer ativa.',
+                    'A adquirente precisa estar habilitada (status ativo) para ser definida como Global.',
                     422
                 );
             }
 
+            if ((int) $target->is_default === 1) {
+                return $this->successResponse([
+                    'message' => 'Adquirente ' . ($target->adquirente ?? '') . ' já é a Global',
+                    'acquirer' => $this->formatAcquirerRow($target),
+                ]);
+            }
+
             DB::transaction(function () use ($id) {
                 Adquirente::where('id', '!=', $id)
-                    ->update(['status' => 0, 'is_default' => 0]);
+                    ->where('is_default', 1)
+                    ->update(['is_default' => 0]);
 
                 Adquirente::where('id', $id)
-                    ->update(['status' => 1, 'is_default' => 1]);
+                    ->update(['is_default' => 1]);
             });
 
             Cache::forget('app_settings');
 
             $fresh = Adquirente::find($id);
 
-            Log::info('Adquirente padrão PIX alterada pelo admin', [
+            Log::info('Adquirente Global PIX alterada pelo admin', [
                 'acquirer_id' => $id,
                 'referencia' => $fresh->referencia ?? null,
                 'adquirente' => $fresh->adquirente ?? null,
@@ -946,52 +954,70 @@ class AdminDashboardController extends Controller
             ]);
 
             return $this->successResponse([
-                'message' => 'Adquirente ' . ($fresh->adquirente ?? '') . ' ativada como padrão PIX',
-                'acquirer' => [
-                    'id' => (int) $fresh->id,
-                    'adquirente' => (string) ($fresh->adquirente ?? ''),
-                    'status' => (int) ($fresh->status ?? 0),
-                    'url' => (string) ($fresh->url ?? ''),
-                    'referencia' => (string) ($fresh->referencia ?? ''),
-                    'is_default' => (int) ($fresh->is_default ?? 0),
-                    'is_default_card_billet' => (int) ($fresh->is_default_card_billet ?? 0),
-                    'created_at' => $fresh->created_at?->format('c'),
-                    'updated_at' => $fresh->updated_at?->format('c'),
-                ],
+                'message' => 'Adquirente ' . ($fresh->adquirente ?? '') . ' definida como Global',
+                'acquirer' => $this->formatAcquirerRow($fresh),
             ]);
         } catch (\Exception $e) {
-            Log::error('Erro ao alternar status da adquirente', [
+            Log::error('Erro ao definir adquirente Global', [
                 'acquirer_id' => $id,
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
-            return $this->errorResponse('Erro ao alternar status da adquirente', 500);
+            return $this->errorResponse('Erro ao definir adquirente Global', 500);
         }
     }
 
     /**
-     * Listar adquirentes ativos para PIX
+     * Formata uma linha de adquirente para resposta da API.
+     */
+    private function formatAcquirerRow(Adquirente $row): array
+    {
+        return [
+            'id' => (int) $row->id,
+            'adquirente' => (string) ($row->adquirente ?? ''),
+            'status' => (int) ($row->status ?? 0),
+            'url' => (string) ($row->url ?? ''),
+            'referencia' => (string) ($row->referencia ?? ''),
+            'is_default' => (int) ($row->is_default ?? 0),
+            'is_default_card_billet' => (int) ($row->is_default_card_billet ?? 0),
+            'created_at' => $row->created_at?->format('c'),
+            'updated_at' => $row->updated_at?->format('c'),
+        ];
+    }
+
+    /**
+     * Listar adquirentes ativas para PIX (popula seletor do modal de usuário)
+     *
+     * Retorna `is_default` para que o frontend identifique qual delas é a Global —
+     * a global é representada implicitamente pela opção "Padrão Global" no seletor,
+     * então o front pode escondê-la das opções específicas.
      */
     public function listPixAcquirers(Request $request)
     {
         try {
-            // Verificação de admin feita pelo middleware 'ensure.admin'
-            // MELHORIA: Adicionar paginação e busca
             $perPage = $request->input('per_page', 50);
             $search = $request->input('search');
-            
+
             $query = Adquirente::where('status', 1);
-            
+
             if ($search) {
                 $query->where('adquirente', 'like', "%{$search}%")
                       ->orWhere('referencia', 'like', "%{$search}%");
             }
-            
+
             $acquirers = $query->orderBy('adquirente')
-                ->paginate($perPage, ['adquirente as name', 'referencia']);
-            
+                ->paginate($perPage, ['adquirente as name', 'referencia', 'is_default']);
+
+            $items = collect($acquirers->items())->map(function ($row) {
+                return [
+                    'name' => (string) ($row->name ?? ''),
+                    'referencia' => (string) ($row->referencia ?? ''),
+                    'is_default' => (int) ($row->is_default ?? 0),
+                ];
+            })->all();
+
             return $this->successResponse([
-                'acquirers' => $acquirers->items(),
+                'acquirers' => $items,
                 'pagination' => [
                     'current_page' => $acquirers->currentPage(),
                     'per_page' => $acquirers->perPage(),
@@ -1460,14 +1486,12 @@ class AdminDashboardController extends Controller
             $request->validate([
                 'amount' => 'required|numeric|min:0.01',
                 'type' => 'required|in:add,subtract',
-                'reason' => 'nullable|string|max:500'
             ]);
             
             $userData = $this->userService->adjustBalance(
                 $id,
                 $request->input('amount'),
                 $request->input('type'),
-                $request->input('reason', '')
             );
             
             return $this->successResponse([
