@@ -79,9 +79,6 @@ Route::middleware(['verify.jwt'])->group(function () {
         
         // Rotas de gerenciamento de adquirentes (Admin)
         Route::get('admin/acquirers', [App\Http\Controllers\Api\AdminDashboardController::class, 'listAcquirers']);
-        Route::post('admin/acquirers', [App\Http\Controllers\Api\AdminDashboardController::class, 'createAcquirer']);
-        Route::put('admin/acquirers/{id}', [App\Http\Controllers\Api\AdminDashboardController::class, 'updateAcquirer'])->where('id', '[0-9]+');
-        Route::delete('admin/acquirers/{id}', [App\Http\Controllers\Api\AdminDashboardController::class, 'deleteAcquirer'])->where('id', '[0-9]+');
         Route::post('admin/acquirers/{id}/toggle-status', [App\Http\Controllers\Api\AdminDashboardController::class, 'toggleAcquirerStatus'])->where('id', '[0-9]+');
         
         // Rotas de configuração de saque (Apenas Admin)

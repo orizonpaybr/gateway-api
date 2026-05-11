@@ -120,4 +120,20 @@ trait UserRequestTrait
             'limite_saque_automatico_usuario' => 'nullable|numeric|min:0',
         ];
     }
+
+    /**
+     * Regras para override de adquirente por usuário (PIX)
+     *
+     * Quando o admin marca uma adquirente específica para este usuário, ela
+     * sobrepõe a adquirente padrão global (is_default=1). Se `adquirente_override`
+     * for false ou `preferred_adquirente` for vazio, o sistema volta a usar o
+     * padrão global em Helper::adquirenteDefault().
+     */
+    protected function acquirerOverrideRules(): array
+    {
+        return [
+            'preferred_adquirente' => 'nullable|string|exists:adquirentes,referencia',
+            'adquirente_override' => 'nullable|boolean',
+        ];
+    }
 }
