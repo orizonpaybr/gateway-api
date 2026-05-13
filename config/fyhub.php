@@ -39,6 +39,28 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Custo fixo por transação PIX (R$)
+    |--------------------------------------------------------------------------
+    |
+    | Usado no split interno (TaxaSaqueHelper / TaxaFlexível) e nas métricas de lucro.
+    |
+    */
+
+    'custo_fixo_transacao' => (float) env('FYHUB_CUSTO_FIXO_TRANSACAO', 0.04),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Limite de throughput informado pela FYHUB (transações por segundo)
+    |--------------------------------------------------------------------------
+    |
+    | Aplicado nas rotas PIX quando a adquirente padrão do usuário é fyhub.
+    |
+    */
+
+    'rate_limit_per_second' => (int) env('FYHUB_RATE_LIMIT_PER_SECOND', 200),
+
+    /*
+    |--------------------------------------------------------------------------
     | Margem de segurança do token (segundos)
     |--------------------------------------------------------------------------
     |

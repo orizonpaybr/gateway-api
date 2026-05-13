@@ -82,6 +82,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'check.allowed.ip' => \App\Http\Middleware\CheckAllowedIP::class,
             'check.pin' => \App\Http\Middleware\CheckPin::class,
             'secure.cors' => \App\Http\Middleware\SecureCors::class,
+            'throttle.fyhub.pix' => \App\Http\Middleware\ThrottleFyhubPixThroughput::class,
         ]);
 
         // Aplicar CORS seguro globalmente nas rotas API
