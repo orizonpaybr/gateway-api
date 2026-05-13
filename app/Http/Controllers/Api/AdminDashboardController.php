@@ -642,20 +642,22 @@ class AdminDashboardController extends Controller
      */
     private function calculateAcquirerFees($solicitacoes, $saques): array
     {
-        // Custo fixo da Adquirente PIX por transação
-        $custoAdquirentePorTransacao = (float) config('simpay.custo_fixo_transacao', 0.035);
-        
-        // Contar número de transações aprovadas
-        $totalDepositos = (clone $solicitacoes)->count();
-        $totalSaques = (clone $saques)->count();
-        
-        // Calcular custos totais da Adquirente PIX
-        $custosEntradas = $totalDepositos * $custoAdquirentePorTransacao;
-        $custosSaidas = $totalSaques * $custoAdquirentePorTransacao;
-        
+        $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.035);
+        $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
+
+        $custosEntradasRow = (clone $solicitacoes)->selectRaw(
+            'SUM(CASE WHEN executor_ordem = ? THEN ? WHEN executor_ordem = ? THEN ? ELSE ? END) as total',
+            ['fyhub', $custoFyhub, 'simpay', $custoSimpay, $custoSimpay]
+        )->first();
+
+        $custosSaidasRow = (clone $saques)->selectRaw(
+            'SUM(CASE WHEN executor_ordem = ? THEN ? WHEN executor_ordem = ? THEN ? ELSE ? END) as total',
+            ['fyhub', $custoFyhub, 'simpay', $custoSimpay, $custoSimpay]
+        )->first();
+
         return [
-            'entradas' => (float) $custosEntradas,
-            'saidas' => (float) $custosSaidas,
+            'entradas' => (float) ($custosEntradasRow->total ?? 0),
+            'saidas' => (float) ($custosSaidasRow->total ?? 0),
         ];
     }
 

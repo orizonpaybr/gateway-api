@@ -388,47 +388,42 @@ class FinancialService
             $mesInicio = $now->copy()->startOfMonth();
             $mesFim = $now->copy()->endOfMonth();
 
-            // Custo fixo Adquirente PIX por transação
-            $custoAdquirentePorTransacao = (float) config('simpay.custo_fixo_transacao', 0.035);
-            
-            // Usar uma única query com subqueries para melhor performance
-            // Isso reduz o número de round-trips ao banco
-            // IMPORTANTE: TODOS os saques são processados pela Adquirente PIX, incluindo os manuais
-            // Portanto, calcular lucro líquido subtraindo o custo da Adquirente PIX de TODOS os saques
+            $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.035);
+            $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
+
+            // Saques: custo por transação conforme executor_ordem (fyhub R$ 0,04; demais PIX automáticos usam custo Simpay como legado)
+            $custoSql = "COALESCE(SUM(CASE WHEN executor_ordem = 'fyhub' THEN {$custoFyhub} WHEN executor_ordem = 'simpay' THEN {$custoSimpay} ELSE {$custoSimpay} END), 0)";
             $stats = DB::selectOne("
                 SELECT 
                     -- Estatísticas gerais
                     (SELECT COUNT(*) FROM solicitacoes_cash_out) as total_saques_geral,
                     (SELECT COUNT(*) FROM solicitacoes_cash_out WHERE status IN (?, ?)) as saques_aprovados_geral,
                     (SELECT COALESCE(SUM(amount), 0) FROM solicitacoes_cash_out WHERE status IN (?, ?)) as valor_total_geral,
-                    (SELECT COALESCE(SUM(taxa_cash_out), 0) - (COUNT(*) * ?) FROM solicitacoes_cash_out WHERE status IN (?, ?)) as lucro_total_geral,
+                    (SELECT COALESCE(SUM(taxa_cash_out), 0) - {$custoSql} FROM solicitacoes_cash_out WHERE status IN (?, ?)) as lucro_total_geral,
                     -- Estatísticas de hoje
                     (SELECT COUNT(*) FROM solicitacoes_cash_out WHERE date BETWEEN ? AND ? AND status IN (?, ?)) as saques_aprovados_hoje,
                     (SELECT COALESCE(SUM(amount), 0) FROM solicitacoes_cash_out WHERE date BETWEEN ? AND ? AND status IN (?, ?)) as valor_total_hoje,
-                    (SELECT COALESCE(SUM(taxa_cash_out), 0) - (COUNT(*) * ?) FROM solicitacoes_cash_out WHERE date BETWEEN ? AND ? AND status IN (?, ?)) as lucro_total_hoje,
+                    (SELECT COALESCE(SUM(taxa_cash_out), 0) - {$custoSql} FROM solicitacoes_cash_out WHERE date BETWEEN ? AND ? AND status IN (?, ?)) as lucro_total_hoje,
                     -- Estatísticas do mês
                     (SELECT COUNT(*) FROM solicitacoes_cash_out WHERE date BETWEEN ? AND ? AND status IN (?, ?)) as saques_aprovados_mes,
                     (SELECT COALESCE(SUM(amount), 0) FROM solicitacoes_cash_out WHERE date BETWEEN ? AND ? AND status IN (?, ?)) as valor_total_mes,
-                    (SELECT COALESCE(SUM(taxa_cash_out), 0) - (COUNT(*) * ?) FROM solicitacoes_cash_out WHERE date BETWEEN ? AND ? AND status IN (?, ?)) as lucro_total_mes,
+                    (SELECT COALESCE(SUM(taxa_cash_out), 0) - {$custoSql} FROM solicitacoes_cash_out WHERE date BETWEEN ? AND ? AND status IN (?, ?)) as lucro_total_mes,
                     -- Saques pendentes (geral)
                     (SELECT COUNT(*) FROM solicitacoes_cash_out WHERE status = ?) as saques_pendentes_geral
             ", array_merge(
                 self::APPROVED_STATUSES, // saques_aprovados_geral
                 self::APPROVED_STATUSES, // valor_total_geral
-                [$custoAdquirentePorTransacao], // custo Adquirente PIX para lucro_total_geral
                 self::APPROVED_STATUSES, // lucro_total_geral
                 [$hojeInicio, $hojeFim], // saques_aprovados_hoje
                 self::APPROVED_STATUSES,
                 [$hojeInicio, $hojeFim], // valor_total_hoje
                 self::APPROVED_STATUSES,
-                [$custoAdquirentePorTransacao], // custo Adquirente PIX para lucro_total_hoje
                 [$hojeInicio, $hojeFim], // lucro_total_hoje
                 self::APPROVED_STATUSES,
                 [$mesInicio, $mesFim], // saques_aprovados_mes
                 self::APPROVED_STATUSES,
                 [$mesInicio, $mesFim], // valor_total_mes
                 self::APPROVED_STATUSES,
-                [$custoAdquirentePorTransacao], // custo Adquirente PIX para lucro_total_mes
                 [$mesInicio, $mesFim], // lucro_total_mes
                 self::APPROVED_STATUSES,
                 ['PENDING'] // saques_pendentes_geral
@@ -521,21 +516,20 @@ class FinancialService
      */
     private function getDepositsStatsAggregated(array $dateRange): array
     {
-        // Calcular lucro líquido: taxa_cash_in - custo Adquirente PIX
-        // IMPORTANTE: Para transações Adquirente PIX sem taxa_pix_cash_in_adquirente ou com valor 0, usar custo fixo
-        $custoAdquirentePorTransacao = (float) config('simpay.custo_fixo_transacao', 0.035);
-        
+        $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.035);
+        $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
+
         $stats = Solicitacoes::whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
             ->selectRaw('
                 SUM(CASE WHEN status IN (?, ?) THEN 1 ELSE 0 END) as aprovadas,
                 SUM(CASE WHEN status IN (?, ?) THEN (
-                    taxa_cash_in - 
-                    CASE 
-                        WHEN (adquirente_ref = \'Adquirente PIX\' OR executor_ordem = \'Adquirente PIX\') 
-                             AND (taxa_pix_cash_in_adquirente IS NULL OR taxa_pix_cash_in_adquirente = 0)
-                        THEN ' . $custoAdquirentePorTransacao . '
+                    taxa_cash_in -
+                    CASE
                         WHEN taxa_pix_cash_in_adquirente IS NOT NULL AND taxa_pix_cash_in_adquirente > 0
                         THEN taxa_pix_cash_in_adquirente
+                        WHEN executor_ordem = \'fyhub\' THEN ' . $custoFyhub . '
+                        WHEN executor_ordem = \'simpay\' OR executor_ordem = \'Adquirente PIX\' OR adquirente_ref = \'Adquirente PIX\'
+                        THEN ' . $custoSimpay . '
                         ELSE 0
                     END
                 ) ELSE 0 END) as lucro
@@ -553,23 +547,28 @@ class FinancialService
      */
     private function getWithdrawalsStatsAggregated(array $dateRange): array
     {
-        $custoAdquirentePorTransacao = (float) config('simpay.custo_fixo_transacao', 0.035);
-        
+        $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.035);
+        $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
+
         $stats = SolicitacoesCashOut::whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
             ->selectRaw('
                 SUM(CASE WHEN status IN (?, ?) THEN 1 ELSE 0 END) as aprovadas,
                 SUM(CASE WHEN status IN (?, ?) THEN taxa_cash_out ELSE 0 END) as taxa_total
             ', array_merge(
-                self::APPROVED_STATUSES, 
+                self::APPROVED_STATUSES,
                 self::APPROVED_STATUSES
             ))
             ->first();
 
         $totalSaques = (int) ($stats->aprovadas ?? 0);
         $taxaTotal = (float) ($stats->taxa_total ?? 0);
-        // TODOS os saques são processados pela Adquirente PIX, incluindo os manuais
-        // Custo fixo por transação: config('simpay.custo_fixo_transacao')
-        $custoAdquirente = $totalSaques * $custoAdquirentePorTransacao;
+
+        $fyhubSaques = SolicitacoesCashOut::whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
+            ->whereIn('status', self::APPROVED_STATUSES)
+            ->where('executor_ordem', 'fyhub')
+            ->count();
+
+        $custoAdquirente = ($fyhubSaques * $custoFyhub) + (($totalSaques - $fyhubSaques) * $custoSimpay);
         $lucro = $taxaTotal - $custoAdquirente;
 
         return [
@@ -584,35 +583,36 @@ class FinancialService
     private function calculateProfit(string $periodo): float
     {
         $dateRange = $this->getDateRange($periodo);
-        $custoAdquirentePorTransacao = (float) config('simpay.custo_fixo_transacao', 0.035);
+        $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.035);
+        $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
 
-        // Lucro líquido de depósitos: taxa_cash_in - custo Adquirente PIX
-        // IMPORTANTE: Para transações Adquirente PIX sem taxa_pix_cash_in_adquirente ou com valor 0, usar custo fixo
+        // Lucro líquido de depósitos: taxa_cash_in − custo por adquirente quando não há taxa explícita na linha
         $lucroDepositos = Solicitacoes::whereIn('status', self::APPROVED_STATUSES)
             ->whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
-            ->sum(DB::raw("taxa_cash_in - 
-                CASE 
-                    WHEN (adquirente_ref = 'Adquirente PIX' OR executor_ordem = 'Adquirente PIX') 
-                         AND (taxa_pix_cash_in_adquirente IS NULL OR taxa_pix_cash_in_adquirente = 0)
-                    THEN {$custoAdquirentePorTransacao}
+            ->sum(DB::raw("taxa_cash_in -
+                CASE
                     WHEN taxa_pix_cash_in_adquirente IS NOT NULL AND taxa_pix_cash_in_adquirente > 0
                     THEN taxa_pix_cash_in_adquirente
+                    WHEN executor_ordem = 'fyhub' THEN {$custoFyhub}
+                    WHEN executor_ordem = 'simpay' OR executor_ordem = 'Adquirente PIX' OR adquirente_ref = 'Adquirente PIX'
+                    THEN {$custoSimpay}
                     ELSE 0
                 END"));
 
-        // Lucro líquido de saques: taxa_cash_out - (número total de saques * custo Adquirente PIX)
-        // IMPORTANTE: TODOS os saques são processados pela Adquirente PIX, incluindo os manuais
-        // Portanto, TODOS os saques têm custo de 4 centavos por transação
         $totalSaques = SolicitacoesCashOut::whereIn('status', self::APPROVED_STATUSES)
             ->whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
             ->count();
-        
+
         $taxaTotalSaques = SolicitacoesCashOut::whereIn('status', self::APPROVED_STATUSES)
             ->whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
             ->sum('taxa_cash_out');
-        
-        // TODOS os saques são processados pela Adquirente PIX, então todos têm custo de 4 centavos por transação
-        $custoAdquirenteSaques = $totalSaques * $custoAdquirentePorTransacao;
+
+        $fyhubSaques = SolicitacoesCashOut::whereIn('status', self::APPROVED_STATUSES)
+            ->whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
+            ->where('executor_ordem', 'fyhub')
+            ->count();
+
+        $custoAdquirenteSaques = ($fyhubSaques * $custoFyhub) + (($totalSaques - $fyhubSaques) * $custoSimpay);
         $lucroSaques = $taxaTotalSaques - $custoAdquirenteSaques;
 
         return (float) ($lucroDepositos + $lucroSaques);

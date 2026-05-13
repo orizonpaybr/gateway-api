@@ -32,22 +32,25 @@ class DashboardService
         $cacheKey = sprintf('dashboard:stats:%s:%s', $username, now()->format('Y-m-d'));
         
         return Cache::remember($cacheKey, self::CACHE_TTL_STATS, function () use ($username, $startOfMonth, $endOfMonth) {
-            // Custo fixo Adquirente PIX por transação
-            $custoAdquirentePorTransacao = (float) config('simpay.custo_fixo_transacao', 0.035);
-            
+            $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.035);
+            $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
+
+            $custoSaqueExpr = "CASE WHEN executor_ordem = 'fyhub' THEN {$custoFyhub} WHEN executor_ordem = 'simpay' THEN {$custoSimpay} ELSE {$custoSimpay} END";
+
             // Query única otimizada usando UNION ALL
-            // Lucro líquido = taxa - custo adquirente PIX (taxa explícita ou custo fixo padrão quando ausente).
+            // Lucro líquido = taxa − custo adquirente (taxa explícita na linha ou custo fixo por executor_ordem).
             $statsQuery = "
                 SELECT 
                     'deposito' as tipo,
                     SUM(CASE WHEN status IN ('PAID_OUT', 'COMPLETED') THEN amount ELSE 0 END) as total_pago,
                     SUM(CASE WHEN status IN ('PAID_OUT', 'COMPLETED') THEN (
-                        taxa_cash_in - 
-                        CASE 
-                            WHEN (taxa_pix_cash_in_adquirente IS NULL OR taxa_pix_cash_in_adquirente = 0)
-                            THEN {$custoAdquirentePorTransacao}
-                            WHEN taxa_pix_cash_in_adquirente > 0
+                        taxa_cash_in -
+                        CASE
+                            WHEN taxa_pix_cash_in_adquirente IS NOT NULL AND taxa_pix_cash_in_adquirente > 0
                             THEN taxa_pix_cash_in_adquirente
+                            WHEN executor_ordem = 'fyhub' THEN {$custoFyhub}
+                            WHEN executor_ordem = 'simpay' OR executor_ordem = 'Adquirente PIX' OR adquirente_ref = 'Adquirente PIX'
+                            THEN {$custoSimpay}
                             ELSE 0
                         END
                     ) ELSE 0 END) as total_taxa
@@ -59,15 +62,15 @@ class DashboardService
                 SELECT 
                     'saque' as tipo,
                     SUM(CASE WHEN status IN ('PAID_OUT', 'COMPLETED') THEN amount ELSE 0 END) as total_pago,
-                    COALESCE(SUM(CASE WHEN status IN ('PAID_OUT', 'COMPLETED') THEN taxa_cash_out ELSE 0 END), 0) - (COALESCE(SUM(CASE WHEN status IN ('PAID_OUT', 'COMPLETED') THEN 1 ELSE 0 END), 0) * ?) as total_taxa
+                    COALESCE(SUM(CASE WHEN status IN ('PAID_OUT', 'COMPLETED') THEN taxa_cash_out ELSE 0 END), 0)
+                    - COALESCE(SUM(CASE WHEN status IN ('PAID_OUT', 'COMPLETED') THEN {$custoSaqueExpr} ELSE 0 END), 0) as total_taxa
                 FROM solicitacoes_cash_out 
                 WHERE user_id = ? AND date BETWEEN ? AND ?
             ";
 
             $results = DB::select($statsQuery, [
-                $username, $startOfMonth, $endOfMonth, // depósitos
-                $custoAdquirentePorTransacao, // custo Adquirente PIX para saques
-                $username, $startOfMonth, $endOfMonth // saques
+                $username, $startOfMonth, $endOfMonth,
+                $username, $startOfMonth, $endOfMonth,
             ]);
 
             $depositos = $results[0] ?? (object)['total_pago' => 0, 'total_taxa' => 0];

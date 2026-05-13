@@ -9,14 +9,16 @@ class CustoAdquirentePixHelper
 {
     /**
      * Custo fixo por transação conforme a referência do adquirente (executor_ordem / resolve Pix).
-     * Apenas SIMPAY possui custo configurado em {@see config('simpay.custo_fixo_transacao')}.
+     *
+     * @see config('simpay.custo_fixo_transacao')
+     * @see config('fyhub.custo_fixo_transacao')
      */
     public static function custoFixoTransacao(?string $adquirenteReferencia = null): float
     {
-        if ($adquirenteReferencia === 'simpay') {
-            return (float) config('simpay.custo_fixo_transacao', 0.035);
-        }
-
-        return 0.0;
+        return match ($adquirenteReferencia) {
+            'fyhub' => (float) config('fyhub.custo_fixo_transacao', 0.04),
+            'simpay' => (float) config('simpay.custo_fixo_transacao', 0.035),
+            default => 0.0,
+        };
     }
 }
