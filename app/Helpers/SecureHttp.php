@@ -2,6 +2,7 @@
 
 namespace App\Helpers;
 
+use App\Services\Fyhub\FyhubMtlsOptions;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Http\Client\Response;
 
@@ -81,6 +82,10 @@ class SecureHttp
                     ]);
                 }
 
+                if (self::isFyhubQrUrl($url) && FyhubMtlsOptions::isConfigured()) {
+                    $client = $client->withOptions(FyhubMtlsOptions::build());
+                }
+
                 $response = $client->{strtolower($method)}($url, $data);
 
                 // Se a requisição foi bem-sucedida, retorna
@@ -131,7 +136,25 @@ class SecureHttp
             ]);
         }
 
+        if (self::isFyhubQrUrl($url) && FyhubMtlsOptions::isConfigured()) {
+            $fallback = $fallback->withOptions(FyhubMtlsOptions::build());
+        }
+
         return $fallback->{strtolower($method)}($url, $data);
+    }
+
+    /**
+     * Detecta se a URL pertence à API QRCode da FYHUB (cash-in mTLS).
+     */
+    private static function isFyhubQrUrl(string $url): bool
+    {
+        $base = trim((string) config('fyhub.base_url', ''));
+
+        if ($base !== '' && str_starts_with($url, rtrim($base, '/'))) {
+            return true;
+        }
+
+        return str_contains($url, 'api.qrcode.fyhub.com.br');
     }
 
     /**

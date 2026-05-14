@@ -69,4 +69,22 @@ return [
     |
     */
     'token_cache_buffer_seconds' => (int) env('FYHUB_TOKEN_CACHE_BUFFER_SECONDS', 30),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Certificado mTLS (obrigatório pela FYHUB QR)
+    |--------------------------------------------------------------------------
+    |
+    | A API QRCode da FYHUB exige envio de certificado mTLS em TODAS as
+    | requisições (inclusive /oauth/token). Suporta arquivo .pfx + senha
+    | OU par .pem + .key (conforme FYHUB_CERT_FORMAT = pfx | pem).
+    |
+    */
+    'cert_format' => env('FYHUB_CERT_FORMAT', 'pfx'),
+    'cert_pfx_path' => env('FYHUB_CERT_PFX_PATH'),
+    'cert_pfx_password' => env('FYHUB_CERT_PFX_PASSWORD'),
+    'cert_pem_path' => env('FYHUB_CERT_PEM_PATH'),
+    'cert_key_path' => env('FYHUB_CERT_KEY_PATH'),
+    'cert_key_password' => env('FYHUB_CERT_KEY_PASSWORD'),
+    'verify_ssl' => env('FYHUB_VERIFY_SSL', true),
 ];
