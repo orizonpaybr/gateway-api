@@ -72,7 +72,15 @@ class FyhubAuthService
         $url = $this->baseUrl.'/oauth/token';
 
         try {
+            $mtls = FyhubMtlsOptions::build();
+        } catch (\Throwable $e) {
+            Log::error('[FYHUB][AUTH] Certificado mTLS não configurado', ['error' => $e->getMessage()]);
+            throw $e;
+        }
+
+        try {
             $response = Http::timeout($this->timeout)
+                ->withOptions($mtls)
                 ->asForm()
                 ->acceptJson()
                 ->post($url, $payload);
