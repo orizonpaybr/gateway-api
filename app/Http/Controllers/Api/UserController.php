@@ -377,12 +377,16 @@ class UserController extends Controller
             // Cache Redis para transação específica (TTL: 5 minutos)
             $cacheKey = "transaction_by_id_{$user->username}_{$id}";
             
-            $transactionData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 300, function() use ($user, $idNumerico, $soDeposito, $soSaque) {
+            $isNumericId = ctype_digit((string) $idNumerico);
+
+            $transactionData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 300, function() use ($user, $idNumerico, $soDeposito, $soSaque, $isNumericId) {
                 if (!$soSaque) {
                     $deposito = \App\Models\Solicitacoes::where('user_id', $user->username)
-                    ->where(function($query) use ($idNumerico) {
-                        $query->where('id', $idNumerico)
-                              ->orWhere('idTransaction', $idNumerico)
+                    ->where(function($query) use ($idNumerico, $isNumericId) {
+                        if ($isNumericId) {
+                            $query->where('id', (int) $idNumerico);
+                        }
+                        $query->orWhere('idTransaction', $idNumerico)
                               ->orWhere('externalreference', $idNumerico);
                     })
                     ->first();
@@ -431,9 +435,11 @@ class UserController extends Controller
                     $saque = \App\Models\SolicitacoesCashOut::where(function ($q) use ($user) {
                         $q->where('user_id', $user->user_id)->orWhere('user_id', $user->username);
                     })
-                        ->where(function($query) use ($idNumerico) {
-                            $query->where('id', $idNumerico)
-                                  ->orWhere('idTransaction', $idNumerico)
+                        ->where(function($query) use ($idNumerico, $isNumericId) {
+                            if ($isNumericId) {
+                                $query->where('id', (int) $idNumerico);
+                            }
+                            $query->orWhere('idTransaction', $idNumerico)
                                   ->orWhere('externalreference', $idNumerico);
                         })
                         ->first();
