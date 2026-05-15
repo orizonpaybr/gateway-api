@@ -10,8 +10,10 @@ use App\Http\Requests\WithdrawalStatsRequest;
 use App\Models\App;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
+use App\Jobs\ClientWebhookDispatchJob;
 use App\Services\AffiliateCommissionService;
 use App\Services\BalanceService;
+use App\Services\ClientWebhookPayloadBuilder;
 use App\Services\FinancialService;
 use App\Services\PixAcquirer\PixAcquirerManager;
 use App\Services\WithdrawalStatsService;
@@ -527,6 +529,8 @@ class WithdrawalController extends Controller
             $this->financialService->invalidateWalletsCache();
             $this->financialService->invalidateStatsCache();
 
+            $this->dispatchRejectionWebhook($saque);
+
             return response()->json([
                 'success' => true,
                 'message' => 'Saque rejeitado com sucesso.',
@@ -545,6 +549,26 @@ class WithdrawalController extends Controller
                 'error' => $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * Dispara webhook ao cliente informando que o saque manual foi rejeitado pelo admin.
+     */
+    private function dispatchRejectionWebhook(SolicitacoesCashOut $saque): void
+    {
+        if (empty($saque->callback) || $saque->callback === 'web') {
+            return;
+        }
+
+        ClientWebhookDispatchJob::send(
+            $saque->callback,
+            $saque->idTransaction ?? $saque->externalreference,
+            'CANCELLED',
+            (float) $saque->amount,
+            now()->toIso8601String(),
+            ClientWebhookPayloadBuilder::extraForCashOut($saque),
+            'Saque rejeitado, entre em contato com o suporte.'
+        );
     }
 
     /**
