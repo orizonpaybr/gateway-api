@@ -113,10 +113,19 @@ class FyhubPixAcquirerService implements PixAcquirerInterface
             $providerStatus = strtoupper((string) ($body['status'] ?? 'ATIVA'));
             $resolvedTxid = (string) ($body['txid'] ?? $txid);
 
+            $pixCopiaECola = $body['pixCopiaECola']
+                ?? $body['dadosQR']['pixCopiaECola']
+                ?? null;
+
+            if (is_string($pixCopiaECola) && trim($pixCopiaECola) !== '') {
+                $brCode = trim($pixCopiaECola);
+            } else {
+                $brCode = $body['location'] ?? ($body['loc']['location'] ?? null);
+            }
+
             return [
                 'success' => true,
-                // Fyhub retorna location. O BR Code pode ser resolvido em endpoint de payload na próxima fase.
-                'brCode' => $body['location'] ?? ($body['loc']['location'] ?? null),
+                'brCode' => $brCode,
                 'correlationID' => $resolvedTxid,
                 'status' => $this->mapChargeStatus($providerStatus),
                 'raw' => [
@@ -127,6 +136,7 @@ class FyhubPixAcquirerService implements PixAcquirerInterface
                     'loc_id' => $body['loc']['id'] ?? ($managedLocation['id'] ?? null),
                     'provider_status' => $providerStatus,
                     'chave' => $body['chave'] ?? null,
+                    'pix_copia_e_cola' => $pixCopiaECola,
                 ],
             ];
         } catch (\Throwable $e) {
