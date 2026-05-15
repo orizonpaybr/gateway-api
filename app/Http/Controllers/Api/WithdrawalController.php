@@ -362,7 +362,11 @@ class WithdrawalController extends Controller
 
         $correlationID = preg_replace('/[^a-zA-Z0-9]/', '', str()->uuid()->toString());
         $recipientName = $saque->beneficiaryname ?: null;
-        $recipientDocument = $saque->beneficiarydocument ? preg_replace('/\D/', '', $saque->beneficiarydocument) : null;
+
+        $pixKeyTypeNorm = strtolower((string) ($saque->pixkey ?? ''));
+        $recipientDocument = in_array($pixKeyTypeNorm, ['cpf', 'cnpj'], true)
+            ? preg_replace('/\D/', '', (string) $saque->pix)
+            : null;
         if ($recipientDocument === '') {
             $recipientDocument = null;
         }
