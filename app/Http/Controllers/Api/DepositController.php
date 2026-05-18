@@ -66,6 +66,7 @@ class DepositController extends Controller
                 'phone' => ['nullable', 'string'],
                 'method_pay' => ['nullable', 'string'],
                 'postback' => ['nullable', 'string'],
+                'description' => ['nullable', 'string', 'max:140'],
                 'split_email' => ['nullable', 'string', 'email'],
                 'split_percentage' => ['nullable', 'numeric', 'min:0', 'max:100'],
             ]);
@@ -569,7 +570,7 @@ class DepositController extends Controller
             (float) $request->amount,
             $customer,
             $correlationId,
-            $request->input('postback'),
+            $this->resolvePayerMessageForPixCharge($request),
             null
         );
 
@@ -646,5 +647,27 @@ class DepositController extends Controller
                 'qr_code_image_url' => $chargeResult['qrCodeImage'] ?? null,
             ],
         ];
+    }
+
+    /**
+     * Texto exibido ao pagador no PIX (solicitacaoPagador na adquirente).
+     * postback/callback são apenas para webhook Coratri → integrador e não devem ir aqui.
+     */
+    private function resolvePayerMessageForPixCharge(Request $request): ?string
+    {
+        $description = trim((string) $request->input('description', ''));
+        if ($description === '') {
+            return null;
+        }
+
+        if (preg_match('#^https?://#i', $description)) {
+            Log::warning('DepositController - description ignorada por parecer URL', [
+                'user_id' => $request->user()?->id,
+            ]);
+
+            return null;
+        }
+
+        return mb_substr($description, 0, 140);
     }
 }
