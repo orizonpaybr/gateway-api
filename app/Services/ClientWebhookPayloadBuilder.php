@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
+use App\Services\CashOut\CashOutBeneficiaryResolver;
 
 /**
  * Monta o payload extra enviado ao cliente integrado (webhook Coratri → cliente).
@@ -44,14 +45,22 @@ class ClientWebhookPayloadBuilder
     /**
      * @return array<string, mixed>
      */
-    public static function extraForCashOut(SolicitacoesCashOut $w): array
+    /**
+     * @param  array<string, mixed>|null  $providerRaw  Payload do provedor (ex.: FyHub creditorAccount) para sobrescrever recebedor real
+     */
+    public static function extraForCashOut(SolicitacoesCashOut $w, ?array $providerRaw = null): array
     {
         $extra = ['typeTransaction' => 'PIX_OUT'];
 
+        $fromProvider = CashOutBeneficiaryResolver::resolve($providerRaw);
+        $beneficiaryName = $fromProvider['name'] ?? $w->beneficiaryname;
+        $beneficiaryDocument = $fromProvider['document'] ?? $w->beneficiarydocument;
+        $pixKey = self::resolvePixKeyValue($w, $providerRaw);
+
         $beneficiary = array_filter([
-            'name' => $w->beneficiaryname,
-            'document' => $w->beneficiarydocument,
-            'pixKey' => $w->pix,
+            'name' => $beneficiaryName,
+            'document' => $beneficiaryDocument,
+            'pixKey' => $pixKey,
         ], fn ($v) => $v !== null && $v !== '');
 
         if ($beneficiary !== []) {
@@ -76,5 +85,31 @@ class ClientWebhookPayloadBuilder
         }
 
         return $v;
+    }
+
+    /**
+     * Coluna pix guarda o valor da chave; pixkey guarda o tipo (cpf, email, …).
+     *
+     * @param  array<string, mixed>|null  $providerRaw
+     */
+    private static function resolvePixKeyValue(SolicitacoesCashOut $w, ?array $providerRaw): ?string
+    {
+        if ($providerRaw !== null) {
+            $providerKey = $providerRaw['pixKey'] ?? null;
+            if (is_string($providerKey) && trim($providerKey) !== '') {
+                return trim($providerKey);
+            }
+            $data = $providerRaw['data'] ?? null;
+            if (is_array($data)) {
+                $nested = $data['pixKey'] ?? null;
+                if (is_string($nested) && trim($nested) !== '') {
+                    return trim($nested);
+                }
+            }
+        }
+
+        $stored = trim((string) ($w->pix ?? ''));
+
+        return $stored !== '' ? $stored : null;
     }
 }

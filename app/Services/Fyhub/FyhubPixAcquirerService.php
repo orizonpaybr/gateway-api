@@ -301,6 +301,8 @@ class FyhubPixAcquirerService implements PixAcquirerInterface
                     'provider_status' => $providerStatus,
                     'errorCode' => $row['errorCode'] ?? null,
                     'payment' => $row['payment'] ?? null,
+                    'creditorAccount' => $row['creditorAccount'] ?? null,
+                    'pixKey' => $row['pixKey'] ?? null,
                 ],
             ];
         } catch (\Throwable $e) {

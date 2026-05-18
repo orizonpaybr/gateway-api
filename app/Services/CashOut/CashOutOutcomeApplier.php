@@ -37,7 +37,7 @@ final class CashOutOutcomeApplier
             return false;
         }
 
-        $updated = DB::transaction(function () use ($payout, $newStatus, $e2eToSet) {
+        $updated = DB::transaction(function () use ($payout, $newStatus, $e2eToSet, $rawForClientMessage) {
             $locked = SolicitacoesCashOut::where('id', $payout->id)
                 ->lockForUpdate()
                 ->first();
@@ -55,6 +55,11 @@ final class CashOutOutcomeApplier
             $updateData = ['status' => $newStatus];
             if ($e2eToSet !== null && $e2eToSet !== '') {
                 $updateData['end_to_end'] = $e2eToSet;
+            }
+
+            $beneficiaryPatch = CashOutBeneficiaryResolver::patchForModel($rawForClientMessage);
+            if ($beneficiaryPatch !== []) {
+                $updateData = array_merge($updateData, $beneficiaryPatch);
             }
 
             $locked->update($updateData);
@@ -125,7 +130,7 @@ final class CashOutOutcomeApplier
             $status,
             (float) $record->amount,
             $paidAtIso ?? now()->toIso8601String(),
-            ClientWebhookPayloadBuilder::extraForCashOut($record),
+            ClientWebhookPayloadBuilder::extraForCashOut($record, $rawForClientMessage),
             $message
         );
     }
