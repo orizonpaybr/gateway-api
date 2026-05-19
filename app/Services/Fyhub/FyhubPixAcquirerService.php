@@ -322,6 +322,23 @@ class FyhubPixAcquirerService implements PixAcquirerInterface
         }
     }
 
+    /**
+     * GET /accounts/transactions/{transactionId}/details (scope transactions.read).
+     *
+     * @return array{success: bool, data?: array|null, message?: string, status?: int|null}
+     */
+    public function getAccountTransactionDetails(int|string $transactionId): array
+    {
+        if (! $this->contasPixOut->isConfigured()) {
+            return [
+                'success' => false,
+                'message' => 'API FYHUB Contas não configurada.',
+            ];
+        }
+
+        return $this->contasPixOut->getAccountTransactionDetails($transactionId);
+    }
+
     public function getChargeStatus(string $transactionId): array
     {
         $txid = $this->normalizeTxid($transactionId);
