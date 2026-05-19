@@ -148,8 +148,7 @@ final class CashOutOutcomeApplier
         $record->refresh();
 
         if (! $forceWebhook && $this->shouldDeferFyhubCashOutWebhookUntilBeneficiary($record, $status)) {
-            ReconcileFyhubCashOutBeneficiaryJob::dispatch($record->id)
-                ->delay(now()->addSeconds(5));
+            ReconcileFyhubCashOutBeneficiaryJob::dispatch($record->id);
 
             Log::info('[FYHUB][BENEFICIARY] Postback adiado até recebedor estar disponível na FyHub', [
                 'payout_id' => $record->id,
