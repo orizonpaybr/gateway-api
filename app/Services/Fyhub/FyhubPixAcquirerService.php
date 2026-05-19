@@ -346,6 +346,22 @@ class FyhubPixAcquirerService implements PixAcquirerInterface
             }
 
             $providerStatus = strtoupper((string) ($body['status'] ?? 'ATIVA'));
+            $endToEndId = '';
+            $paidAt = null;
+            if (isset($body['pix']) && is_array($body['pix'])) {
+                $pixList = array_is_list($body['pix']) ? $body['pix'] : [$body['pix']];
+                foreach ($pixList as $pix) {
+                    if (! is_array($pix)) {
+                        continue;
+                    }
+                    if ($endToEndId === '' && ! empty($pix['endToEndId'])) {
+                        $endToEndId = trim((string) $pix['endToEndId']);
+                    }
+                    if ($paidAt === null && ! empty($pix['horario'])) {
+                        $paidAt = $pix['horario'];
+                    }
+                }
+            }
 
             return [
                 'success' => true,
@@ -357,6 +373,8 @@ class FyhubPixAcquirerService implements PixAcquirerInterface
                     'loc' => $body['loc'] ?? null,
                     'provider_status' => $providerStatus,
                     'valor' => $body['valor'] ?? null,
+                    'endToEndId' => $endToEndId,
+                    'horario' => $paidAt,
                 ],
             ];
         } catch (\Throwable $e) {

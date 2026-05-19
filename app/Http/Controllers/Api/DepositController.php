@@ -126,6 +126,11 @@ class DepositController extends Controller
             ->first();
 
         if ($deposit) {
+            if ($deposit->status === 'WAITING_FOR_APPROVAL' && $deposit->executor_ordem === 'fyhub') {
+                app(\App\Services\Fyhub\FyhubDepositReconciler::class)->reconcileIfPaid($deposit);
+                $deposit->refresh();
+            }
+
             return response()->json($this->buildStatusResponse($deposit));
         }
 

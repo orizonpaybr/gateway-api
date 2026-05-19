@@ -17,3 +17,8 @@ Schedule::job(new \App\Jobs\ReconcileSimpayDepositsJob)
     ->everyTwoMinutes()
     ->withoutOverlapping()
     ->onOneServer();
+
+Schedule::job(new \App\Jobs\ReconcileFyhubDepositsJob)
+    ->everyTwoMinutes()
+    ->withoutOverlapping()
+    ->onOneServer();
