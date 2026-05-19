@@ -20,6 +20,30 @@ use Illuminate\Support\Facades\Log;
  */
 final class CashOutOutcomeApplier
 {
+    /** @var list<string> */
+    public const TERMINAL_STATUSES = ['COMPLETED', 'FAILED', 'CANCELLED', 'REFUNDED'];
+
+    public static function isTerminalStatus(string $status): bool
+    {
+        return in_array($status, self::TERMINAL_STATUSES, true);
+    }
+
+    /**
+     * Envia postback ao integrador quando o saque já está em status terminal no banco
+     * (ex.: recuperação manual ou webhook inbound após resposta síncrona da API).
+     */
+    public function notifyClientTerminalStatus(
+        SolicitacoesCashOut $record,
+        ?array $rawForClientMessage = null,
+        ?string $paidAtIso = null,
+    ): void {
+        if (! self::isTerminalStatus((string) $record->status)) {
+            return;
+        }
+
+        $this->dispatchCashOutClientWebhook($record, (string) $record->status, $rawForClientMessage, $paidAtIso);
+    }
+
     /**
      * @param  array<string, mixed>|null  $rawForClientMessage  Payload do provedor para mensagem ao cliente
      * @return bool true se o status foi atualizado nesta chamada
@@ -32,8 +56,7 @@ final class CashOutOutcomeApplier
         ?string $paidAtIso = null,
         string $logTag = '[PIX_OUT][OUTCOME]',
     ): bool {
-        $terminalStatuses = ['COMPLETED', 'FAILED', 'CANCELLED', 'REFUNDED'];
-        if (! in_array($newStatus, $terminalStatuses, true)) {
+        if (! self::isTerminalStatus($newStatus)) {
             return false;
         }
 
@@ -46,7 +69,7 @@ final class CashOutOutcomeApplier
                 return false;
             }
 
-            if (in_array($locked->status, ['COMPLETED', 'FAILED', 'CANCELLED', 'REFUNDED'], true)) {
+            if (in_array($locked->status, self::TERMINAL_STATUSES, true)) {
                 return false;
             }
 

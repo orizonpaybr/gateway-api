@@ -11,6 +11,7 @@ use App\Models\Adquirente;
 use App\Models\App;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
+use App\Services\CashOut\CashOutOutcomeApplier;
 use App\Services\ClientWebhookPayloadBuilder;
 use App\Services\Fyhub\FyhubCashOutOutcomeService;
 use App\Services\PixAcquirer\PixAcquirerManager;
@@ -388,7 +389,13 @@ class SaqueController extends Controller
                 ? $acquirerService->resolveInitialPayoutStatus($providerStatus, $e2e)
                 : $acquirerService->mapPayoutStatus($providerStatus);
 
-            DB::transaction(function () use ($withdrawal, $user, $balanceService, $idTxn, $statusMapped, $e2e, $valorTotalDescontar) {
+            // Status terminal na resposta síncrona: gravar PROCESSING e aplicar via OutcomeApplier
+            // (postback baasPostbackUrl + comissão). Gravar COMPLETED direto impede o applier e o poll.
+            $statusForDb = CashOutOutcomeApplier::isTerminalStatus($statusMapped)
+                ? 'PROCESSING'
+                : $statusMapped;
+
+            DB::transaction(function () use ($withdrawal, $user, $balanceService, $idTxn, $statusForDb, $e2e, $valorTotalDescontar) {
                 $w = SolicitacoesCashOut::where('id', $withdrawal->id)->lockForUpdate()->first();
                 if ($w === null) {
                     return;
@@ -398,7 +405,7 @@ class SaqueController extends Controller
                     'idTransaction' => $idTxn,
                     'externalreference' => $idTxn,
                     'end_to_end' => $e2e,
-                    'status' => $statusMapped,
+                    'status' => $statusForDb,
                     'debito_saldo_afiliado' => $dec['debito_saldo_afiliado'],
                     'debito_saldo_principal' => $dec['debito_saldo_principal'],
                 ]);
@@ -406,6 +413,18 @@ class SaqueController extends Controller
 
             $withdrawal->refresh();
             $provisionedAutoWithdrawal = null;
+
+            if (CashOutOutcomeApplier::isTerminalStatus($statusMapped)) {
+                app(CashOutOutcomeApplier::class)->applyTerminalStatusIfNeeded(
+                    $withdrawal,
+                    $statusMapped,
+                    is_array($raw) ? $raw : [],
+                    $e2e,
+                    null,
+                    '[API_PAYOUT][OUTCOME]',
+                );
+                $withdrawal->refresh();
+            }
 
             if ($acquirerService->getReference() === 'simpay') {
                 app(SimpayCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($withdrawal);
