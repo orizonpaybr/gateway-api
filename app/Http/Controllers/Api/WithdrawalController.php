@@ -392,7 +392,10 @@ class WithdrawalController extends Controller
 
         $referenceCode = $payoutResult['referenceCode'] ?? $correlationID;
         $providerStatus = (string) ($payoutResult['status'] ?? 'pending');
-        $statusInterno = $acquirerService->mapPayoutStatus($providerStatus);
+        $payoutE2e = trim((string) (($payoutResult['raw']['endToEndId'] ?? '') ?: ''));
+        $statusInterno = $acquirerService instanceof \App\Services\Fyhub\FyhubPixAcquirerService
+            ? $acquirerService->resolveInitialPayoutStatus($providerStatus, $payoutE2e)
+            : $acquirerService->mapPayoutStatus($providerStatus);
 
         DB::transaction(function () use ($saque, $referenceCode, $statusInterno, $taxaCashOut, $correlationID, $acquirerService, $userSaque) {
             $saqueAtualizado = SolicitacoesCashOut::where('id', $saque->id)

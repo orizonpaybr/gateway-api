@@ -637,7 +637,11 @@ class PixKeyController extends Controller
                 }
 
                 $idTxn = $payoutResult['referenceCode'] ?? $correlationID;
-                $statusMapped = $acquirerService->mapPayoutStatus((string) ($payoutResult['status'] ?? 'pending'));
+                $providerStatus = (string) ($payoutResult['status'] ?? 'pending');
+                $payoutE2e = trim((string) (($payoutResult['raw']['endToEndId'] ?? '') ?: ''));
+                $statusMapped = $acquirerService instanceof \App\Services\Fyhub\FyhubPixAcquirerService
+                    ? $acquirerService->resolveInitialPayoutStatus($providerStatus, $payoutE2e)
+                    : $acquirerService->mapPayoutStatus($providerStatus);
                 $withdrawal = \App\Models\SolicitacoesCashOut::create([
                     'user_id' => $user->user_id ?? $user->username,
                     'externalreference' => $idTxn,
