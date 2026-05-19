@@ -214,20 +214,23 @@ class FyhubContasPixOutService
         return match ($type) {
             'cpf', 'cnpj' => preg_replace('/\D/', '', $key),
             'email' => strtolower($key),
-            'phone' => $this->formatPhonePixKey($key),
-            'random' => strtolower($key),
+            'phone', 'telefone', 'celular' => $this->formatPhonePixKey($key),
+            'random', 'aleatoria', 'evp' => strtolower($key),
             default => $key,
         };
     }
 
     private function formatPhonePixKey(string $key): string
     {
-        $trim = preg_replace('/\s/', '', $key);
-        if (str_starts_with($trim, '+')) {
-            return $trim;
+        $digits = preg_replace('/\D/', '', $key);
+        if ($digits === '') {
+            return trim($key);
         }
 
-        $digits = preg_replace('/\D/', '', $key);
+        if (str_starts_with($digits, '55') && strlen($digits) >= 12) {
+            return '+'.$digits;
+        }
+
         if (strlen($digits) >= 10 && strlen($digits) <= 11) {
             return '+55'.$digits;
         }
