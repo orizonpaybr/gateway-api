@@ -15,15 +15,15 @@ use Illuminate\Support\Facades\Log;
  */
 final class FyhubCashOutBeneficiaryEnricher
 {
-    /** Poll na requisição HTTP (~1s); se achar, postback sai na hora sem fila. */
-    public const SYNC_API_ATTEMPTS = 3;
+    /** Poll na requisição (~3s máx.); se achar, um postback completo na hora. */
+    public const SYNC_API_ATTEMPTS = 8;
 
     public const SYNC_API_SLEEP_MICROSECONDS = 400_000;
 
-    /** Poll no job (várias GETs numa execução — evita 5s+8s de backoff entre tentativas). */
-    public const JOB_API_ATTEMPTS = 12;
+    /** Poll após responder a API (afterResponse), sem esperar queue worker. */
+    public const JOB_API_ATTEMPTS = 20;
 
-    public const JOB_API_SLEEP_MICROSECONDS = 500_000;
+    public const JOB_API_SLEEP_MICROSECONDS = 350_000;
 
     /**
      * @param  array<string, mixed>|null  $raw
@@ -105,6 +105,18 @@ final class FyhubCashOutBeneficiaryEnricher
                 usleep($sleepMicroseconds);
             }
 
+            if ($fyhubPaymentId !== null) {
+                $details = $fyhub->getAccountTransactionDetails($fyhubPaymentId);
+                if ($details['success'] ?? false) {
+                    $fromDetails = FyhubPaymentBeneficiaryReader::creditorFromAccountTransactionDetails(
+                        is_array($details['data'] ?? null) ? $details['data'] : null
+                    );
+                    if ($fromDetails !== []) {
+                        return $fromDetails;
+                    }
+                }
+            }
+
             if ($e2e !== '') {
                 $payment = $fyhub->getPayoutStatus($tid, $e2e);
                 if ($payment['success'] ?? false) {
@@ -123,18 +135,6 @@ final class FyhubCashOutBeneficiaryEnricher
                         'attempt' => $attempt + 1,
                         'message' => $payment['message'] ?? null,
                     ]);
-                }
-            }
-
-            if ($fyhubPaymentId !== null) {
-                $details = $fyhub->getAccountTransactionDetails($fyhubPaymentId);
-                if ($details['success'] ?? false) {
-                    $fromDetails = FyhubPaymentBeneficiaryReader::creditorFromAccountTransactionDetails(
-                        is_array($details['data'] ?? null) ? $details['data'] : null
-                    );
-                    if ($fromDetails !== []) {
-                        return $fromDetails;
-                    }
                 }
             }
         }
