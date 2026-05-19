@@ -154,32 +154,39 @@ class PixKey extends Model
     }
 
     /**
+     * Normaliza valor da chave para persistência / API do adquirente (por tipo).
+     */
+    public static function sanitizeValueForType(string $type, string $value): string
+    {
+        $type = strtolower(trim($type));
+
+        return match ($type) {
+            'cpf', 'cnpj', 'telefone' => preg_replace('/\D/', '', $value),
+            'email' => strtolower(trim($value)),
+            'aleatoria' => strtolower(trim($value)),
+            default => trim($value),
+        };
+    }
+
+    /**
      * Validar formato da chave conforme tipo
      */
     public static function validateKeyFormat($type, $value)
     {
-        $cleanValue = preg_replace('/[^0-9a-zA-Z@.-]/', '', $value);
+        $type = strtolower((string) $type);
+        $sanitized = self::sanitizeValueForType($type, (string) $value);
 
-        switch ($type) {
-            case 'cpf':
-                return preg_match('/^\d{11}$/', $cleanValue);
-            
-            case 'cnpj':
-                return preg_match('/^\d{14}$/', $cleanValue);
-            
-            case 'email':
-                return filter_var($value, FILTER_VALIDATE_EMAIL);
-            
-            case 'telefone':
-                return preg_match('/^\d{10,11}$/', $cleanValue);
-            
-            case 'aleatoria':
-                return preg_match('/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i', $cleanValue) ||
-                       strlen($cleanValue) >= 8;
-            
-            default:
-                return false;
-        }
+        return match ($type) {
+            'cpf' => (bool) preg_match('/^\d{11}$/', $sanitized),
+            'cnpj' => (bool) preg_match('/^\d{14}$/', $sanitized),
+            'email' => filter_var($sanitized, FILTER_VALIDATE_EMAIL) !== false,
+            'telefone' => (bool) preg_match('/^\d{10,11}$/', $sanitized),
+            'aleatoria' => (bool) preg_match(
+                '/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i',
+                $sanitized
+            ) || (bool) preg_match('/^[a-f0-9]{32}$/i', $sanitized),
+            default => false,
+        };
     }
 
     /**

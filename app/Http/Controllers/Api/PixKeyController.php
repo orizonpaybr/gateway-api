@@ -487,12 +487,11 @@ class PixKeyController extends Controller
                 $keyValue = $pixKey->key_value;
                 $keyType = $pixKey->key_type;
             } else {
-                // Chave informada manualmente
-                $keyValue = preg_replace('/[^0-9a-zA-Z@.-]/', '', $request->key_value);
+                // Chave informada manualmente (sanitizar por tipo — não remover letras de chave aleatória/e-mail)
                 $keyType = $request->key_type;
+                $keyValue = PixKey::sanitizeValueForType((string) $keyType, (string) $request->key_value);
 
-                // Validar formato
-                if (! PixKey::validateKeyFormat($keyType, $request->key_value)) {
+                if (! PixKey::validateKeyFormat($keyType, $keyValue)) {
                     return response()->json([
                         'success' => false,
                         'message' => 'Formato de chave PIX inválido',
