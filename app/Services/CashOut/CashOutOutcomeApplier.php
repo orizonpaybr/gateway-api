@@ -151,7 +151,7 @@ final class CashOutOutcomeApplier
             // Roda logo após enviar a resposta HTTP (não depende de queue worker).
             ReconcileFyhubCashOutBeneficiaryJob::dispatchAfterResponse($record->id);
 
-            Log::info('[FYHUB][BENEFICIARY] Postback adiado (poll após resposta da API)', [
+            Log::info('[FYHUB][BENEFICIARY] Postback adiado (poll afterResponse)', [
                 'payout_id' => $record->id,
                 'transaction_id' => $record->idTransaction,
             ]);

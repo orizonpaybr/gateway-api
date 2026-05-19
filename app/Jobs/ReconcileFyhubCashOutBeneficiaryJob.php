@@ -64,6 +64,7 @@ class ReconcileFyhubCashOutBeneficiaryJob implements ShouldBeUnique, ShouldQueue
             null,
             FyhubCashOutBeneficiaryEnricher::JOB_API_ATTEMPTS,
             FyhubCashOutBeneficiaryEnricher::JOB_API_SLEEP_MICROSECONDS,
+            'after_response',
         );
         $payout->refresh();
 
@@ -72,7 +73,7 @@ class ReconcileFyhubCashOutBeneficiaryJob implements ShouldBeUnique, ShouldQueue
         if (trim((string) $payout->beneficiaryname) !== '') {
             $applier->notifyClientTerminalStatus($payout, $raw);
 
-            Log::info('[FYHUB][BENEFICIARY] Postback enviado com dados do recebedor', [
+            Log::info('[FYHUB][BENEFICIARY] Postback enviado (afterResponse)', [
                 'payout_id' => $payout->id,
                 'transaction_id' => $payout->idTransaction,
                 'beneficiaryname' => $payout->beneficiaryname,
