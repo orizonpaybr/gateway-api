@@ -15,12 +15,26 @@ use Illuminate\Support\Facades\Log;
  */
 final class FyhubCashOutBeneficiaryEnricher
 {
+    /** Poll leve na requisição HTTP (não bloqueia workers por segundos). */
+    public const SYNC_API_ATTEMPTS = 2;
+
+    public const SYNC_API_SLEEP_MICROSECONDS = 300_000;
+
+    /** Uma consulta por execução de job; retries espaçados na fila. */
+    public const ASYNC_API_ATTEMPTS = 1;
+
+    public const ASYNC_API_SLEEP_MICROSECONDS = 0;
+
     /**
      * @param  array<string, mixed>|null  $raw
      * @return array<string, mixed>
      */
-    public function enrich(SolicitacoesCashOut $payout, ?array $raw = null): array
-    {
+    public function enrich(
+        SolicitacoesCashOut $payout,
+        ?array $raw = null,
+        ?int $apiAttempts = null,
+        ?int $apiSleepMicroseconds = null,
+    ): array {
         $merged = is_array($raw) ? $raw : [];
 
         if ($payout->executor_ordem !== 'fyhub') {
@@ -30,7 +44,12 @@ final class FyhubCashOutBeneficiaryEnricher
         $beneficiary = FyhubPaymentBeneficiaryReader::creditorFromPayload($merged);
 
         if ($beneficiary === []) {
-            $beneficiary = $this->fetchFromFyhubApis($payout, $merged);
+            $beneficiary = $this->fetchFromFyhubApis(
+                $payout,
+                $merged,
+                $apiAttempts ?? self::SYNC_API_ATTEMPTS,
+                $apiSleepMicroseconds ?? self::SYNC_API_SLEEP_MICROSECONDS,
+            );
         }
 
         if ($beneficiary !== []) {
@@ -61,8 +80,12 @@ final class FyhubCashOutBeneficiaryEnricher
      * @param  array<string, mixed>  $merged
      * @return array{name?: string, document?: string}
      */
-    private function fetchFromFyhubApis(SolicitacoesCashOut $payout, array $merged): array
-    {
+    private function fetchFromFyhubApis(
+        SolicitacoesCashOut $payout,
+        array $merged,
+        int $maxAttempts = self::SYNC_API_ATTEMPTS,
+        int $sleepMicroseconds = self::SYNC_API_SLEEP_MICROSECONDS,
+    ): array {
         $fyhub = app(FyhubPixAcquirerService::class);
         if (! $fyhub->isActive()) {
             return [];
@@ -77,9 +100,9 @@ final class FyhubCashOutBeneficiaryEnricher
         $fyhubPaymentId = FyhubPaymentBeneficiaryReader::paymentId($merged);
 
         // FyHub costuma preencher creditorAccount no GET alguns segundos após LIQUIDATED.
-        for ($attempt = 0; $attempt < 6; $attempt++) {
+        for ($attempt = 0; $attempt < $maxAttempts; $attempt++) {
             if ($attempt > 0) {
-                usleep(500_000);
+                usleep($sleepMicroseconds);
             }
 
             if ($e2e !== '') {

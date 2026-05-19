@@ -5,6 +5,7 @@ namespace App\Services\CashOut;
 use App\Helpers\Helper;
 use App\Helpers\WebhookClientMessages;
 use App\Jobs\ClientWebhookDispatchJob;
+use App\Jobs\ReconcileFyhubCashOutBeneficiaryJob;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
 use App\Services\AffiliateCommissionService;
@@ -145,11 +146,9 @@ final class CashOutOutcomeApplier
 
         $record->refresh();
 
+        // FyHub: poll pesado não roda de novo aqui (evita bloquear worker + N GETs por saque).
+        // Recebedor pendente → ReconcileFyhubCashOutBeneficiaryJob reenvia postback na fila.
         $rawForWebhook = $rawForClientMessage;
-        if ($record->executor_ordem === 'fyhub') {
-            $rawForWebhook = app(FyhubCashOutBeneficiaryEnricher::class)->enrich($record, $rawForClientMessage);
-            $record->refresh();
-        }
 
         $payloadForReason = self::normalizeRawForPixMessage($rawForWebhook);
         $message = WebhookClientMessages::getMessageForStatus($status, 'PIX_OUT', $payloadForReason === [] ? null : $payloadForReason);
@@ -163,6 +162,11 @@ final class CashOutOutcomeApplier
             ClientWebhookPayloadBuilder::extraForCashOut($record, $rawForWebhook),
             $message
         );
+
+        if ($record->executor_ordem === 'fyhub' && trim((string) $record->beneficiaryname) === '') {
+            ReconcileFyhubCashOutBeneficiaryJob::dispatch($record->id)
+                ->delay(now()->addSeconds(5));
+        }
     }
 
     /**

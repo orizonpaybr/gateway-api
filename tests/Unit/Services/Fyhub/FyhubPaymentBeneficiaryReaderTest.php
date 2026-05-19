@@ -53,6 +53,31 @@ class FyhubPaymentBeneficiaryReaderTest extends TestCase
         $this->assertSame('529.982.247-25', $resolved['document']);
     }
 
+    public function test_creditor_when_only_on_root_after_get_payout_status_merge(): void
+    {
+        $raw = [
+            'data' => [
+                'id' => 9537421,
+                'endToEndId' => 'E43978697202605192241161587a469e',
+                'status' => 'LIQUIDATED',
+            ],
+            'id' => 9537421,
+            'creditorAccount' => [
+                'name' => 'Recebedor Nivel Raiz',
+                'document' => '11344769900',
+            ],
+            'debtorAccount' => [
+                'name' => 'Conta Pagadora',
+                'document' => '65374851000140',
+            ],
+        ];
+
+        $resolved = FyhubPaymentBeneficiaryReader::creditorFromPayload($raw);
+
+        $this->assertSame('Recebedor Nivel Raiz', $resolved['name']);
+        $this->assertSame('113.447.699-00', $resolved['document']);
+    }
+
     public function test_creditor_from_account_transaction_details_array(): void
     {
         $details = [

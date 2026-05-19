@@ -24,7 +24,13 @@ final class FyhubCashOutOutcomeService
         string $logTag = '[API_PAYOUT][OUTCOME]',
     ): void {
         $payout->refresh();
-        $mergedRaw = app(FyhubCashOutBeneficiaryEnricher::class)->enrich($payout, $initialRaw);
+        $enricher = app(FyhubCashOutBeneficiaryEnricher::class);
+        $mergedRaw = $enricher->enrich(
+            $payout,
+            $initialRaw,
+            FyhubCashOutBeneficiaryEnricher::SYNC_API_ATTEMPTS,
+            FyhubCashOutBeneficiaryEnricher::SYNC_API_SLEEP_MICROSECONDS,
+        );
         $payout->refresh();
 
         $applier = app(CashOutOutcomeApplier::class);
@@ -40,7 +46,12 @@ final class FyhubCashOutOutcomeService
         if (! $applied) {
             $payout->refresh();
             if (CashOutOutcomeApplier::isTerminalStatus((string) $payout->status)) {
-                $mergedRaw = app(FyhubCashOutBeneficiaryEnricher::class)->enrich($payout, $mergedRaw);
+                $mergedRaw = $enricher->enrich(
+                    $payout,
+                    $mergedRaw,
+                    FyhubCashOutBeneficiaryEnricher::SYNC_API_ATTEMPTS,
+                    FyhubCashOutBeneficiaryEnricher::SYNC_API_SLEEP_MICROSECONDS,
+                );
                 $applier->notifyClientTerminalStatus($payout->fresh(), $mergedRaw);
             }
         }

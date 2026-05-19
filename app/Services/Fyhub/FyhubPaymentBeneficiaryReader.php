@@ -89,15 +89,44 @@ final class FyhubPaymentBeneficiaryReader
             return [];
         }
 
-        if (isset($payload['data']) && is_array($payload['data'])) {
-            return $payload['data'];
-        }
+        $inner = (isset($payload['data']) && is_array($payload['data'])) ? $payload['data'] : [];
+        $hasRootPaymentFields = isset($payload['creditorAccount'])
+            || isset($payload['debtorAccount'])
+            || isset($payload['endToEndId'])
+            || isset($payload['pixKey'])
+            || isset($payload['id']);
 
-        if (isset($payload['creditorAccount']) || isset($payload['endToEndId']) || isset($payload['pixKey'])) {
+        if ($inner === [] && $hasRootPaymentFields) {
             return $payload;
         }
 
-        return [];
+        if ($inner === []) {
+            return [];
+        }
+
+        if (! $hasRootPaymentFields) {
+            return $inner;
+        }
+
+        // getPayoutStatus faz array_merge(envelope, data): creditor pode existir só no nível raiz.
+        $overlayKeys = [
+            'id', 'endToEndId', 'pixKey', 'status', 'creditDebitType',
+            'creditorAccount', 'debtorAccount',
+        ];
+        foreach ($overlayKeys as $key) {
+            if (! array_key_exists($key, $payload)) {
+                continue;
+            }
+            $rootVal = $payload[$key];
+            if ($key === 'creditorAccount' || $key === 'debtorAccount') {
+                if (self::accountToBeneficiary(is_array($rootVal) ? $rootVal : null) === []) {
+                    continue;
+                }
+            }
+            $inner[$key] = $rootVal;
+        }
+
+        return $inner;
     }
 
     /**
