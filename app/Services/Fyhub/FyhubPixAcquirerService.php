@@ -301,6 +301,9 @@ class FyhubPixAcquirerService implements PixAcquirerInterface
                 'endToEndId' => $row['endToEndId'] ?? $e2e,
                 'provider_status' => strtoupper((string) ($row['status'] ?? '')),
             ]);
+            if (isset($payload['data']) && is_array($payload['data'])) {
+                $raw['data'] = array_merge($payload['data'], $row);
+            }
 
             $providerStatus = strtoupper((string) ($row['status'] ?? ''));
 
