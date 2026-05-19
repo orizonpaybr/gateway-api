@@ -13,9 +13,13 @@ use App\Models\User;
 use App\Jobs\ClientWebhookDispatchJob;
 use App\Services\AffiliateCommissionService;
 use App\Services\BalanceService;
+use App\Services\CashOut\CashOutOutcomeApplier;
 use App\Services\ClientWebhookPayloadBuilder;
 use App\Services\FinancialService;
+use App\Services\Fyhub\FyhubCashOutOutcomeService;
+use App\Services\Fyhub\FyhubPixAcquirerService;
 use App\Services\PixAcquirer\PixAcquirerManager;
+use App\Services\Simpay\SimpayCashOutOutcomeService;
 use App\Services\WithdrawalStatsService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -390,50 +394,89 @@ class WithdrawalController extends Controller
             ], 500);
         }
 
-        $referenceCode = $payoutResult['referenceCode'] ?? $correlationID;
+        $idTxnRaw = $payoutResult['referenceCode'] ?? $correlationID;
+        $idTxn = is_string($idTxnRaw) ? trim($idTxnRaw) : (string) $idTxnRaw;
+        if ($idTxn === '') {
+            $idTxn = $correlationID;
+        }
+
+        $raw = is_array($payoutResult['raw'] ?? null) ? $payoutResult['raw'] : [];
+        $e2e = null;
+        if ($raw !== []) {
+            $e = $raw['endToEndId'] ?? $raw['endToEndid'] ?? null;
+            $e2e = is_string($e) && $e !== '' ? $e : null;
+        }
+
         $providerStatus = (string) ($payoutResult['status'] ?? 'pending');
-        $payoutE2e = trim((string) (($payoutResult['raw']['endToEndId'] ?? '') ?: ''));
-        $statusInterno = $acquirerService instanceof \App\Services\Fyhub\FyhubPixAcquirerService
-            ? $acquirerService->resolveInitialPayoutStatus($providerStatus, $payoutE2e)
+        $statusMapped = $acquirerService instanceof FyhubPixAcquirerService
+            ? $acquirerService->resolveInitialPayoutStatus($providerStatus, $e2e)
             : $acquirerService->mapPayoutStatus($providerStatus);
 
-        DB::transaction(function () use ($saque, $referenceCode, $statusInterno, $taxaCashOut, $correlationID, $acquirerService, $userSaque) {
+        $statusForDb = CashOutOutcomeApplier::isTerminalStatus($statusMapped)
+            ? 'PROCESSING'
+            : $statusMapped;
+
+        DB::transaction(function () use ($saque, $idTxn, $statusForDb, $taxaCashOut, $correlationID, $acquirerService, $e2e) {
             $saqueAtualizado = SolicitacoesCashOut::where('id', $saque->id)
                 ->lockForUpdate()
                 ->first();
 
-            if (in_array($saqueAtualizado->status, ['COMPLETED', 'PAID_OUT'], true)) {
+            if ($saqueAtualizado === null || in_array($saqueAtualizado->status, ['COMPLETED', 'PAID_OUT'], true)) {
                 return;
             }
 
             $saqueAtualizado->update([
-                'status' => $statusInterno,
-                'externalreference' => $referenceCode,
-                'idTransaction' => $referenceCode,
+                'status' => $statusForDb,
+                'externalreference' => $idTxn,
+                'idTransaction' => $idTxn,
+                'end_to_end' => $e2e,
                 'executor_ordem' => $acquirerService->getReference(),
                 'taxa_cash_out' => $taxaCashOut,
                 'descricao_externa' => $correlationID,
             ]);
-
-            if ($statusInterno === 'COMPLETED') {
-                $child = User::where('user_id', $userSaque->user_id)->lockForUpdate()->first();
-                if ($child) {
-                    app(AffiliateCommissionService::class)->processCashOutCommission(
-                        $saqueAtualizado->fresh(),
-                        $child
-                    );
-                }
-            }
         });
 
+        $saque->refresh();
+
+        if (CashOutOutcomeApplier::isTerminalStatus($statusMapped)) {
+            if ($acquirerService->getReference() === 'fyhub') {
+                app(FyhubCashOutOutcomeService::class)->applySyncTerminalOutcome(
+                    $saque,
+                    $statusMapped,
+                    $raw,
+                    $e2e,
+                    '[MANUAL_APPROVE][OUTCOME]',
+                );
+            } else {
+                app(CashOutOutcomeApplier::class)->applyTerminalStatusIfNeeded(
+                    $saque,
+                    $statusMapped,
+                    $raw,
+                    $e2e,
+                    null,
+                    '[MANUAL_APPROVE][OUTCOME]',
+                );
+            }
+            $saque->refresh();
+        } elseif ($acquirerService->getReference() === 'fyhub') {
+            app(FyhubCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($saque);
+            $saque->refresh();
+        }
+
+        if ($acquirerService->getReference() === 'simpay') {
+            app(SimpayCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($saque);
+            $saque->refresh();
+        }
+
         Helper::calculaSaldoLiquido($userSaque->user_id);
+        app(\App\Services\PaymentProcessingService::class)->invalidateCachesAfterPayment($saque->user_id);
 
         return response()->json([
             'success' => true,
             'message' => 'Saque aprovado e processado com sucesso.',
             'data' => [
-                'transaction_id' => $referenceCode,
-                'status' => $statusInterno,
+                'transaction_id' => $saque->idTransaction,
+                'status' => $saque->status,
             ],
         ], 200);
     }
@@ -560,6 +603,11 @@ class WithdrawalController extends Controller
     private function dispatchRejectionWebhook(SolicitacoesCashOut $saque): void
     {
         if (empty($saque->callback) || $saque->callback === 'web') {
+            Log::info('[MANUAL_REJECT] Postback não enviado (sem callback no saque)', [
+                'payout_id' => $saque->id,
+                'transaction_id' => $saque->idTransaction,
+            ]);
+
             return;
         }
 
