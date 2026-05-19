@@ -15,18 +15,18 @@ use Illuminate\Support\Facades\Log;
 
 /**
  * Envia o postback COMPLETED ao integrador quando a FyHub já tiver creditorAccount no GET.
- * O postback inicial é adiado (não manda só pixKey) — uma consulta por tentativa na fila.
+ * O postback inicial é adiado (não manda só pixKey). Várias GETs por execução (~6s de poll).
  */
 class ReconcileFyhubCashOutBeneficiaryJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 5;
+    public int $tries = 3;
 
     /** @var array<int, int> */
-    public array $backoff = [5, 8, 12, 15, 20];
+    public array $backoff = [2, 3];
 
-    public int $timeout = 45;
+    public int $timeout = 90;
 
     public int $uniqueFor = 300;
 
@@ -66,8 +66,8 @@ class ReconcileFyhubCashOutBeneficiaryJob implements ShouldBeUnique, ShouldQueue
         $raw = $enricher->enrich(
             $payout,
             null,
-            FyhubCashOutBeneficiaryEnricher::ASYNC_API_ATTEMPTS,
-            FyhubCashOutBeneficiaryEnricher::ASYNC_API_SLEEP_MICROSECONDS,
+            FyhubCashOutBeneficiaryEnricher::JOB_API_ATTEMPTS,
+            FyhubCashOutBeneficiaryEnricher::JOB_API_SLEEP_MICROSECONDS,
         );
         $payout->refresh();
 

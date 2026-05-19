@@ -15,15 +15,15 @@ use Illuminate\Support\Facades\Log;
  */
 final class FyhubCashOutBeneficiaryEnricher
 {
-    /** Poll leve na requisição HTTP (não bloqueia workers por segundos). */
-    public const SYNC_API_ATTEMPTS = 2;
+    /** Poll na requisição HTTP (~1s); se achar, postback sai na hora sem fila. */
+    public const SYNC_API_ATTEMPTS = 3;
 
-    public const SYNC_API_SLEEP_MICROSECONDS = 300_000;
+    public const SYNC_API_SLEEP_MICROSECONDS = 400_000;
 
-    /** Uma consulta por execução de job; retries espaçados na fila. */
-    public const ASYNC_API_ATTEMPTS = 1;
+    /** Poll no job (várias GETs numa execução — evita 5s+8s de backoff entre tentativas). */
+    public const JOB_API_ATTEMPTS = 12;
 
-    public const ASYNC_API_SLEEP_MICROSECONDS = 0;
+    public const JOB_API_SLEEP_MICROSECONDS = 500_000;
 
     /**
      * @param  array<string, mixed>|null  $raw
