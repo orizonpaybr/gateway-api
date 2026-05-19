@@ -297,16 +297,17 @@ class FyhubPixAcquirerService implements PixAcquirerInterface
 
             $payload = is_array($result['data'] ?? null) ? $result['data'] : [];
             $row = is_array($payload['data'] ?? null) ? $payload['data'] : $payload;
+            $raw = array_merge($payload, $row, [
+                'endToEndId' => $row['endToEndId'] ?? $e2e,
+                'provider_status' => strtoupper((string) ($row['status'] ?? '')),
+            ]);
 
             $providerStatus = strtoupper((string) ($row['status'] ?? ''));
 
             return [
                 'success' => true,
                 'status' => $this->mapPayoutStatus($providerStatus !== '' ? $providerStatus : 'PROCESSING'),
-                'raw' => array_merge($row, [
-                    'endToEndId' => $row['endToEndId'] ?? $e2e,
-                    'provider_status' => $providerStatus,
-                ]),
+                'raw' => $raw,
             ];
         } catch (\Throwable $e) {
             Log::error('[FYHUB][PAYOUT_STATUS] Exceção ao consultar pagamento', [

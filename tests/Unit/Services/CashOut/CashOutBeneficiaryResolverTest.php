@@ -47,6 +47,25 @@ class CashOutBeneficiaryResolverTest extends TestCase
         $this->assertSame('987.654.321-00', $resolved['document']);
     }
 
+    public function test_resolves_credit_party_with_tax_id_from_fyhub_contas_get(): void
+    {
+        $raw = [
+            'data' => [
+                'status' => 'LIQUIDATED',
+                'pixKey' => '+5511999999999',
+                'creditParty' => [
+                    'name' => 'Recebedor Credit Party',
+                    'taxId' => '12345678901',
+                ],
+            ],
+        ];
+
+        $resolved = CashOutBeneficiaryResolver::resolve($raw);
+
+        $this->assertSame('Recebedor Credit Party', $resolved['name']);
+        $this->assertSame('123.456.789-01', $resolved['document']);
+    }
+
     public function test_resolves_flat_recipient_fields(): void
     {
         $raw = [
