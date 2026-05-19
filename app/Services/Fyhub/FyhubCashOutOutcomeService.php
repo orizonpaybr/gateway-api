@@ -11,6 +11,42 @@ use App\Services\CashOut\CashOutOutcomeApplier;
 final class FyhubCashOutOutcomeService
 {
     /**
+     * Resposta síncrona COMPLETED: consulta GET até creditorAccount existir e só então aplica status + postback.
+     * Evita postback só com pixKey quando a FyHub ainda não populou o recebedor no GET.
+     *
+     * @param  array<string, mixed>  $initialRaw
+     */
+    public function applySyncTerminalOutcome(
+        SolicitacoesCashOut $payout,
+        string $status,
+        array $initialRaw,
+        ?string $e2e,
+        string $logTag = '[API_PAYOUT][OUTCOME]',
+    ): void {
+        $payout->refresh();
+        $mergedRaw = app(FyhubCashOutBeneficiaryEnricher::class)->enrich($payout, $initialRaw);
+        $payout->refresh();
+
+        $applier = app(CashOutOutcomeApplier::class);
+        $applied = $applier->applyTerminalStatusIfNeeded(
+            $payout,
+            $status,
+            $mergedRaw,
+            $e2e,
+            null,
+            $logTag,
+        );
+
+        if (! $applied) {
+            $payout->refresh();
+            if (CashOutOutcomeApplier::isTerminalStatus((string) $payout->status)) {
+                $mergedRaw = app(FyhubCashOutBeneficiaryEnricher::class)->enrich($payout, $mergedRaw);
+                $applier->notifyClientTerminalStatus($payout->fresh(), $mergedRaw);
+            }
+        }
+    }
+
+    /**
      * @return string|null status interno terminal aplicado ou null se seguir pendente/processando
      */
     public function pollApiAndApplyIfTerminal(

@@ -76,7 +76,8 @@ final class FyhubCashOutBeneficiaryEnricher
 
         $fyhubPaymentId = FyhubPaymentBeneficiaryReader::paymentId($merged);
 
-        for ($attempt = 0; $attempt < 3; $attempt++) {
+        // FyHub costuma preencher creditorAccount no GET alguns segundos após LIQUIDATED.
+        for ($attempt = 0; $attempt < 6; $attempt++) {
             if ($attempt > 0) {
                 usleep(500_000);
             }
