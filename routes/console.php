@@ -18,7 +18,8 @@ Schedule::job(new \App\Jobs\ReconcileSimpayDepositsJob)
     ->withoutOverlapping()
     ->onOneServer();
 
-Schedule::job(new \App\Jobs\ReconcileFyhubDepositsJob)
-    ->everyTwoMinutes()
+// FYHUB cash-in: síncrono no cron (não depende de queue worker para liquidar / postback)
+Schedule::command('fyhub:reconcile-deposits')
+    ->everyMinute()
     ->withoutOverlapping()
     ->onOneServer();
