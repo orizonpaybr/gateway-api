@@ -43,18 +43,26 @@ class ClientWebhookPayloadBuilder
     }
 
     /**
+     * @param  array<string, mixed>|null  $providerRaw  Payload FyHub (GET pagamento / webhook) com dados do recebedor Pix
      * @return array<string, mixed>
-     */
-    /**
-     * @param  array<string, mixed>|null  $providerRaw  Payload do provedor (ex.: FyHub creditorAccount) para sobrescrever recebedor real
      */
     public static function extraForCashOut(SolicitacoesCashOut $w, ?array $providerRaw = null): array
     {
         $extra = ['typeTransaction' => 'PIX_OUT'];
 
         $fromProvider = CashOutBeneficiaryResolver::resolve($providerRaw);
-        $beneficiaryName = $fromProvider['name'] ?? $w->beneficiaryname;
-        $beneficiaryDocument = $fromProvider['document'] ?? $w->beneficiarydocument;
+        // Recebedor = dono da chave Pix (resposta FyHub). Não usar beneficiaryname gravado na criação:
+        // era o nome/CPF do merchant (user_id da API), não o destinatário do PIX.
+        $beneficiaryName = $fromProvider['name'] ?? null;
+        $beneficiaryDocument = $fromProvider['document'] ?? null;
+        if ($beneficiaryName === null && trim((string) $w->beneficiaryname) !== '') {
+            $storedDocDigits = preg_replace('/\D/', '', (string) $w->beneficiarydocument);
+            $pixDigits = preg_replace('/\D/', '', (string) $w->pix);
+            if ($storedDocDigits !== '' && $pixDigits !== '' && $storedDocDigits === $pixDigits) {
+                $beneficiaryName = $w->beneficiaryname;
+                $beneficiaryDocument = $w->beneficiarydocument;
+            }
+        }
         $pixKey = self::resolvePixKeyValue($w, $providerRaw);
 
         $beneficiary = array_filter([

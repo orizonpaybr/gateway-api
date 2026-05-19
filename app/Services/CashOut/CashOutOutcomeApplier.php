@@ -9,6 +9,7 @@ use App\Models\SolicitacoesCashOut;
 use App\Models\User;
 use App\Services\AffiliateCommissionService;
 use App\Services\ClientWebhookPayloadBuilder;
+use App\Services\Fyhub\FyhubCashOutBeneficiaryEnricher;
 use App\Services\PaymentProcessingService;
 use App\Services\WithdrawalFailureRefundService;
 use Illuminate\Support\Facades\DB;
@@ -144,7 +145,13 @@ final class CashOutOutcomeApplier
 
         $record->refresh();
 
-        $payloadForReason = self::normalizeRawForPixMessage($rawForClientMessage);
+        $rawForWebhook = $rawForClientMessage;
+        if ($record->executor_ordem === 'fyhub') {
+            $rawForWebhook = app(FyhubCashOutBeneficiaryEnricher::class)->enrich($record, $rawForClientMessage);
+            $record->refresh();
+        }
+
+        $payloadForReason = self::normalizeRawForPixMessage($rawForWebhook);
         $message = WebhookClientMessages::getMessageForStatus($status, 'PIX_OUT', $payloadForReason === [] ? null : $payloadForReason);
 
         ClientWebhookDispatchJob::send(
@@ -153,7 +160,7 @@ final class CashOutOutcomeApplier
             $status,
             (float) $record->amount,
             $paidAtIso ?? now()->toIso8601String(),
-            ClientWebhookPayloadBuilder::extraForCashOut($record, $rawForClientMessage),
+            ClientWebhookPayloadBuilder::extraForCashOut($record, $rawForWebhook),
             $message
         );
     }
