@@ -7,6 +7,7 @@ use App\Helpers\ApiResponseStandardizer;
 use App\Helpers\Helper;
 use App\Helpers\TaxaFlexivelHelper;
 use App\Http\Controllers\Controller;
+use App\Jobs\ReconcileFyhubDepositJob;
 use App\Models\App;
 use App\Models\Pagarme;
 use App\Models\Solicitacoes;
@@ -640,7 +641,20 @@ class DepositController extends Controller
             'split_percentage' => $request->input('split_percentage'),
         ];
 
-        Solicitacoes::create($cashin);
+        $deposit = Solicitacoes::create($cashin);
+
+        Log::info('DepositController - Cob PIX criada', [
+            'deposit_id' => $deposit->id,
+            'txid' => $idTxn,
+            'user_id' => $user->username,
+            'executor_ordem' => $acquirerService->getReference(),
+            'has_postback' => ! empty($request->postback) && $request->postback !== 'web',
+        ]);
+
+        if ($acquirerService->getReference() === 'fyhub') {
+            ReconcileFyhubDepositJob::dispatch($deposit->id)->delay(now()->addSeconds(45));
+            ReconcileFyhubDepositJob::dispatch($deposit->id)->delay(now()->addSeconds(120));
+        }
 
         return [
             'status' => 200,
