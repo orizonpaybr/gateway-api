@@ -14,9 +14,14 @@ final class CashOutBeneficiaryResolver
      */
     public static function resolve(?array $providerRaw): array
     {
-        $account = self::extractReceiverAccount($providerRaw);
+        $raw = self::flattenProviderPayload($providerRaw);
+        if ($raw === []) {
+            return [];
+        }
+
+        $account = self::extractReceiverAccount($raw);
         if ($account === null) {
-            return self::resolveFromFlatFields($providerRaw);
+            return self::resolveFromFlatFields($raw);
         }
 
         return self::accountToBeneficiary($account);
@@ -89,8 +94,14 @@ final class CashOutBeneficiaryResolver
             return [];
         }
 
-        $nameKeys = ['receiverName', 'recipient_name', 'payeeName', 'creditorName', 'beneficiaryName', 'nomeRecebedor'];
-        $docKeys = ['receiverDocument', 'receiverLegalId', 'recipient_legal_id', 'payeeDocument', 'creditorDocument', 'beneficiaryDocument', 'documentoRecebedor'];
+        $nameKeys = [
+            'receiverName', 'recipient_name', 'payeeName', 'creditorName', 'beneficiaryName', 'nomeRecebedor',
+            'creditPartyName', 'holderName', 'legalName',
+        ];
+        $docKeys = [
+            'receiverDocument', 'receiverLegalId', 'recipient_legal_id', 'payeeDocument', 'creditorDocument',
+            'beneficiaryDocument', 'documentoRecebedor', 'taxId', 'cpfCnpj', 'creditorTaxId', 'creditPartyTaxId',
+        ];
 
         $name = self::firstNonEmptyString($raw, $nameKeys);
         $document = self::firstNonEmptyString($raw, $docKeys);
@@ -155,12 +166,8 @@ final class CashOutBeneficiaryResolver
             return [];
         }
 
-        $name = isset($account['name']) && is_string($account['name'])
-            ? trim($account['name'])
-            : '';
-        $document = isset($account['document']) && (is_string($account['document']) || is_numeric($account['document']))
-            ? trim((string) $account['document'])
-            : '';
+        $name = self::extractNameFromAccount($account);
+        $document = self::extractDocumentDigitsFromAccount($account);
 
         if ($name === '' && $document === '') {
             return [];
@@ -187,16 +194,75 @@ final class CashOutBeneficiaryResolver
             return null;
         }
 
-        $name = isset($account['name']) && is_string($account['name']) ? trim($account['name']) : '';
-        $document = isset($account['document']) && (is_string($account['document']) || is_numeric($account['document']))
-            ? preg_replace('/\D/', '', (string) $account['document'])
-            : '';
+        $name = self::extractNameFromAccount($account);
+        $document = self::extractDocumentDigitsFromAccount($account);
 
         if ($name === '' && $document === '') {
             return null;
         }
 
         return ['name' => $name, 'document' => $document];
+    }
+
+    /**
+     * API Contas FyHub costuma aninhar em data.data e usar taxId / legalName em creditParty.
+     *
+     * @param  array<string, mixed>|null  $raw
+     * @return array<string, mixed>
+     */
+    private static function flattenProviderPayload(?array $raw): array
+    {
+        if ($raw === null || $raw === []) {
+            return [];
+        }
+
+        $flat = $raw;
+        $data = $raw['data'] ?? null;
+        if (is_array($data)) {
+            $flat = array_merge($flat, $data);
+            if (isset($data['data']) && is_array($data['data'])) {
+                $flat = array_merge($flat, $data['data']);
+            }
+        }
+
+        return $flat;
+    }
+
+    /**
+     * @param  array<string, mixed>  $account
+     */
+    private static function extractNameFromAccount(array $account): string
+    {
+        foreach (['name', 'legalName', 'holderName', 'fullName', 'tradeName'] as $key) {
+            if (! isset($account[$key]) || ! is_string($account[$key])) {
+                continue;
+            }
+            $value = trim($account[$key]);
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * @param  array<string, mixed>  $account
+     */
+    private static function extractDocumentDigitsFromAccount(array $account): string
+    {
+        foreach (['document', 'taxId', 'cpfCnpj', 'cpf', 'cnpj', 'legalId', 'identification'] as $key) {
+            if (! isset($account[$key])) {
+                continue;
+            }
+            $digits = preg_replace('/\D/', '', (string) $account[$key]);
+
+            if ($digits !== '') {
+                return $digits;
+            }
+        }
+
+        return '';
     }
 
     /**
