@@ -14,8 +14,8 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Reenvia postback cash-out quando a FyHub ainda não tinha creditorAccount no GET síncrono.
- * Uma consulta por tentativa de job (retries espaçados) — adequado a alto volume de Pix.
+ * Envia o postback COMPLETED ao integrador quando a FyHub já tiver creditorAccount no GET.
+ * O postback inicial é adiado (não manda só pixKey) — uma consulta por tentativa na fila.
  */
 class ReconcileFyhubCashOutBeneficiaryJob implements ShouldBeUnique, ShouldQueue
 {
@@ -83,10 +83,30 @@ class ReconcileFyhubCashOutBeneficiaryJob implements ShouldBeUnique, ShouldQueue
 
         app(CashOutOutcomeApplier::class)->notifyClientTerminalStatus($payout, $raw);
 
-        Log::info('[FYHUB][BENEFICIARY] Postback reenviado com dados do recebedor', [
+        Log::info('[FYHUB][BENEFICIARY] Postback enviado com dados do recebedor', [
             'payout_id' => $payout->id,
             'transaction_id' => $payout->idTransaction,
             'beneficiaryname' => $payout->beneficiaryname,
         ]);
+    }
+
+    public function failed(?\Throwable $exception): void
+    {
+        $payout = SolicitacoesCashOut::find($this->payoutId);
+        if ($payout === null || empty($payout->callback) || $payout->callback === 'web') {
+            return;
+        }
+
+        if (trim((string) $payout->beneficiaryname) !== '') {
+            return;
+        }
+
+        Log::error('[FYHUB][BENEFICIARY] Tentativas esgotadas; postback parcial (sem nome/documento)', [
+            'payout_id' => $payout->id,
+            'transaction_id' => $payout->idTransaction,
+            'error' => $exception?->getMessage(),
+        ]);
+
+        app(CashOutOutcomeApplier::class)->notifyClientTerminalStatus($payout, null, null, true);
     }
 }
