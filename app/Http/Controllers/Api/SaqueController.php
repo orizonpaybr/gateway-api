@@ -376,14 +376,17 @@ class SaqueController extends Controller
             if ($idTxn === '') {
                 $idTxn = $correlationID;
             }
-            $statusMapped = $acquirerService->mapPayoutStatus((string) ($payoutResult['status'] ?? 'pending'));
-
             $raw = $payoutResult['raw'] ?? [];
             $e2e = null;
             if (is_array($raw)) {
                 $e = $raw['endToEndId'] ?? $raw['endToEndid'] ?? null;
                 $e2e = is_string($e) && $e !== '' ? $e : null;
             }
+
+            $providerStatus = (string) ($payoutResult['status'] ?? 'pending');
+            $statusMapped = $acquirerService instanceof \App\Services\Fyhub\FyhubPixAcquirerService
+                ? $acquirerService->resolveInitialPayoutStatus($providerStatus, $e2e)
+                : $acquirerService->mapPayoutStatus($providerStatus);
 
             DB::transaction(function () use ($withdrawal, $user, $balanceService, $idTxn, $statusMapped, $e2e, $valorTotalDescontar) {
                 $w = SolicitacoesCashOut::where('id', $withdrawal->id)->lockForUpdate()->first();

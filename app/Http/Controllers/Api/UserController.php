@@ -234,6 +234,7 @@ class UserController extends Controller
                 $saquesQuery->whereIn('status', [
                     'PAID_OUT',
                     'COMPLETED',
+                    'PROCESSING',
                     'REFUNDED',
                     'PARTIALLY_REFUNDED',
                 ]);
