@@ -14,17 +14,13 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Envia o postback COMPLETED ao integrador quando a FyHub já tiver creditorAccount no GET.
- * O postback inicial é adiado (não manda só pixKey). Várias GETs por execução (~6s de poll).
+ * Postback COMPLETED com recebedor — poll agressivo numa execução (afterResponse).
  */
 class ReconcileFyhubCashOutBeneficiaryJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 3;
-
-    /** @var array<int, int> */
-    public array $backoff = [2, 3];
+    public int $tries = 1;
 
     public int $timeout = 90;
 
@@ -71,42 +67,25 @@ class ReconcileFyhubCashOutBeneficiaryJob implements ShouldBeUnique, ShouldQueue
         );
         $payout->refresh();
 
-        if (trim((string) $payout->beneficiaryname) === '') {
-            Log::warning('[FYHUB][BENEFICIARY] Job: recebedor ainda indisponível, nova tentativa agendada', [
-                'payout_id' => $payout->id,
-                'transaction_id' => $payout->idTransaction,
-                'attempt' => $this->attempts(),
-            ]);
-
-            throw new \RuntimeException('FyHub creditorAccount ainda não disponível.');
-        }
-
-        app(CashOutOutcomeApplier::class)->notifyClientTerminalStatus($payout, $raw);
-
-        Log::info('[FYHUB][BENEFICIARY] Postback enviado com dados do recebedor', [
-            'payout_id' => $payout->id,
-            'transaction_id' => $payout->idTransaction,
-            'beneficiaryname' => $payout->beneficiaryname,
-        ]);
-    }
-
-    public function failed(?\Throwable $exception): void
-    {
-        $payout = SolicitacoesCashOut::find($this->payoutId);
-        if ($payout === null || empty($payout->callback) || $payout->callback === 'web') {
-            return;
-        }
+        $applier = app(CashOutOutcomeApplier::class);
 
         if (trim((string) $payout->beneficiaryname) !== '') {
+            $applier->notifyClientTerminalStatus($payout, $raw);
+
+            Log::info('[FYHUB][BENEFICIARY] Postback enviado com dados do recebedor', [
+                'payout_id' => $payout->id,
+                'transaction_id' => $payout->idTransaction,
+                'beneficiaryname' => $payout->beneficiaryname,
+            ]);
+
             return;
         }
 
-        Log::error('[FYHUB][BENEFICIARY] Tentativas esgotadas; postback parcial (sem nome/documento)', [
+        Log::warning('[FYHUB][BENEFICIARY] Poll esgotado; postback parcial (sem nome/documento)', [
             'payout_id' => $payout->id,
             'transaction_id' => $payout->idTransaction,
-            'error' => $exception?->getMessage(),
         ]);
 
-        app(CashOutOutcomeApplier::class)->notifyClientTerminalStatus($payout, null, null, true);
+        $applier->notifyClientTerminalStatus($payout, $raw, null, true);
     }
 }
