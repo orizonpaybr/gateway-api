@@ -4,17 +4,153 @@ namespace App\Services\CashOut;
 
 /**
  * Extrai nome e documento do recebedor real (credor Pix) a partir do payload do provedor.
- * FyHub Contas: creditorAccount no webhook TRANSFER e na consulta de pagamento.
+ * FyHub Contas: consulta GET /pix/payments/{e2e} e webhooks TRANSFER.
  */
 final class CashOutBeneficiaryResolver
 {
     /**
      * @param  array<string, mixed>|null  $providerRaw
-     * @return array{name: string, document: string}|array{}
+     * @return array{name?: string, document?: string}
      */
     public static function resolve(?array $providerRaw): array
     {
-        $account = self::extractCreditorAccount($providerRaw);
+        $account = self::extractReceiverAccount($providerRaw);
+        if ($account === null) {
+            return self::resolveFromFlatFields($providerRaw);
+        }
+
+        return self::accountToBeneficiary($account);
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $providerRaw
+     * @return array{beneficiaryname?: string, beneficiarydocument?: string}
+     */
+    public static function patchForModel(?array $providerRaw): array
+    {
+        $resolved = self::resolve($providerRaw);
+        $patch = [];
+
+        if (isset($resolved['name'])) {
+            $patch['beneficiaryname'] = $resolved['name'];
+        }
+        if (isset($resolved['document'])) {
+            $patch['beneficiarydocument'] = $resolved['document'];
+        }
+
+        return $patch;
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $raw
+     * @return array<string, mixed>|null
+     */
+    private static function extractReceiverAccount(?array $raw): ?array
+    {
+        if ($raw === null || $raw === []) {
+            return null;
+        }
+
+        $debtor = self::normalizeAccountBlock(self::pickAccount($raw, [
+            'debtorAccount',
+            'debtor',
+            'payerAccount',
+            'payer',
+        ]));
+
+        $receiverCandidates = [
+            self::pickAccount($raw, ['creditParty', 'creditPartyAccount', 'receiverAccount', 'receiver', 'payee', 'payeeAccount', 'beneficiary', 'beneficiaryAccount', 'counterparty', 'counterParty']),
+            self::pickAccount($raw, ['creditorAccount', 'creditor']),
+            self::pickAccount(self::nestedData($raw), ['creditParty', 'receiverAccount', 'creditorAccount', 'creditor']),
+        ];
+
+        foreach ($receiverCandidates as $candidate) {
+            $normalized = self::normalizeAccountBlock($candidate);
+            if ($normalized === null) {
+                continue;
+            }
+            if ($debtor !== null && self::accountsMatch($normalized, $debtor)) {
+                continue;
+            }
+
+            return $normalized;
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $raw
+     * @return array{name?: string, document?: string}
+     */
+    private static function resolveFromFlatFields(?array $raw): array
+    {
+        if ($raw === null || $raw === []) {
+            return [];
+        }
+
+        $nameKeys = ['receiverName', 'recipient_name', 'payeeName', 'creditorName', 'beneficiaryName', 'nomeRecebedor'];
+        $docKeys = ['receiverDocument', 'receiverLegalId', 'recipient_legal_id', 'payeeDocument', 'creditorDocument', 'beneficiaryDocument', 'documentoRecebedor'];
+
+        $name = self::firstNonEmptyString($raw, $nameKeys);
+        $document = self::firstNonEmptyString($raw, $docKeys);
+
+        if ($name === '' && $document === '') {
+            return [];
+        }
+
+        $out = [];
+        if ($name !== '') {
+            $out['name'] = $name;
+        }
+        if ($document !== '') {
+            $out['document'] = self::formatDocumentForDisplay($document);
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param  array<string, mixed>  $raw
+     * @param  list<string>  $keys
+     */
+    private static function pickAccount(array $raw, array $keys): ?array
+    {
+        foreach ($keys as $key) {
+            if (! isset($raw[$key])) {
+                continue;
+            }
+            $block = $raw[$key];
+            if (is_array($block) && $block !== []) {
+                return $block;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $raw
+     * @return array<string, mixed>
+     */
+    private static function nestedData(array $raw): array
+    {
+        $data = $raw['data'] ?? null;
+        if (! is_array($data)) {
+            return [];
+        }
+
+        $inner = $data['data'] ?? null;
+
+        return is_array($inner) ? array_merge($data, $inner) : $data;
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $account
+     * @return array{name?: string, document?: string}
+     */
+    private static function accountToBeneficiary(?array $account): array
+    {
         if ($account === null) {
             return [];
         }
@@ -42,60 +178,57 @@ final class CashOutBeneficiaryResolver
     }
 
     /**
-     * Campos para persistir em solicitacoes_cash_out.
-     *
-     * @param  array<string, mixed>|null  $providerRaw
-     * @return array{beneficiaryname?: string, beneficiarydocument?: string}
+     * @param  array<string, mixed>|null  $account
+     * @return array{name: string, document: string}|null
      */
-    public static function patchForModel(?array $providerRaw): array
+    private static function normalizeAccountBlock(?array $account): ?array
     {
-        $resolved = self::resolve($providerRaw);
-        $patch = [];
-
-        if (isset($resolved['name'])) {
-            $patch['beneficiaryname'] = $resolved['name'];
-        }
-        if (isset($resolved['document'])) {
-            $patch['beneficiarydocument'] = $resolved['document'];
+        if ($account === null || $account === []) {
+            return null;
         }
 
-        return $patch;
+        $name = isset($account['name']) && is_string($account['name']) ? trim($account['name']) : '';
+        $document = isset($account['document']) && (is_string($account['document']) || is_numeric($account['document']))
+            ? preg_replace('/\D/', '', (string) $account['document'])
+            : '';
+
+        if ($name === '' && $document === '') {
+            return null;
+        }
+
+        return ['name' => $name, 'document' => $document];
     }
 
     /**
-     * @param  array<string, mixed>|null  $raw
-     * @return array<string, mixed>|null
+     * @param  array{name: string, document: string}  $a
+     * @param  array{name: string, document: string}  $b
      */
-    private static function extractCreditorAccount(?array $raw): ?array
+    private static function accountsMatch(array $a, array $b): bool
     {
-        if ($raw === null || $raw === []) {
-            return null;
+        if ($a['document'] !== '' && $b['document'] !== '' && $a['document'] === $b['document']) {
+            return true;
         }
 
-        $direct = $raw['creditorAccount'] ?? null;
-        if (is_array($direct) && $direct !== []) {
-            return $direct;
-        }
+        return $a['name'] !== '' && $b['name'] !== '' && strcasecmp($a['name'], $b['name']) === 0;
+    }
 
-        $data = $raw['data'] ?? null;
-        if (! is_array($data)) {
-            return null;
-        }
-
-        $nested = $data['creditorAccount'] ?? null;
-        if (is_array($nested) && $nested !== []) {
-            return $nested;
-        }
-
-        $inner = $data['data'] ?? null;
-        if (is_array($inner)) {
-            $innerAccount = $inner['creditorAccount'] ?? null;
-            if (is_array($innerAccount) && $innerAccount !== []) {
-                return $innerAccount;
+    /**
+     * @param  array<string, mixed>  $raw
+     * @param  list<string>  $keys
+     */
+    private static function firstNonEmptyString(array $raw, array $keys): string
+    {
+        foreach ($keys as $key) {
+            if (! isset($raw[$key])) {
+                continue;
+            }
+            $v = $raw[$key];
+            if (is_string($v) && trim($v) !== '') {
+                return trim($v);
             }
         }
 
-        return null;
+        return '';
     }
 
     private static function formatDocumentForDisplay(string $document): string

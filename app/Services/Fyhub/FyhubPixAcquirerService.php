@@ -216,15 +216,12 @@ class FyhubPixAcquirerService implements PixAcquirerInterface
                 'success' => true,
                 'referenceCode' => $referenceCode,
                 'status' => $providerStatus,
-                'raw' => [
+                'raw' => array_merge($data, [
                     'endToEndId' => $e2e !== '' ? $e2e : null,
                     'id' => $numericId,
                     'idempotencyKey' => $idempotencyKey,
-                    'eventDate' => $data['eventDate'] ?? null,
-                    'type' => $data['type'] ?? null,
-                    'payment' => $data['payment'] ?? null,
                     'http_status' => $result['status'] ?? null,
-                ],
+                ]),
             ];
         } catch (\Throwable $e) {
             Log::error('[FYHUB][PAYOUT] Exceção ao iniciar Pix na API Contas', [
@@ -306,16 +303,10 @@ class FyhubPixAcquirerService implements PixAcquirerInterface
             return [
                 'success' => true,
                 'status' => $this->mapPayoutStatus($providerStatus !== '' ? $providerStatus : 'PROCESSING'),
-                'raw' => [
+                'raw' => array_merge($row, [
                     'endToEndId' => $row['endToEndId'] ?? $e2e,
-                    'id' => $row['id'] ?? null,
-                    'idempotencyKey' => $row['idempotencyKey'] ?? null,
                     'provider_status' => $providerStatus,
-                    'errorCode' => $row['errorCode'] ?? null,
-                    'payment' => $row['payment'] ?? null,
-                    'creditorAccount' => $row['creditorAccount'] ?? null,
-                    'pixKey' => $row['pixKey'] ?? null,
-                ],
+                ]),
             ];
         } catch (\Throwable $e) {
             Log::error('[FYHUB][PAYOUT_STATUS] Exceção ao consultar pagamento', [
