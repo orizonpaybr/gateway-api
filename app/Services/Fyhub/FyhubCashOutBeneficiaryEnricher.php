@@ -15,15 +15,15 @@ use Illuminate\Support\Facades\Log;
  */
 final class FyhubCashOutBeneficiaryEnricher
 {
-    /** Poll na requisição (~3s máx.); se achar, um postback completo na hora. */
-    public const SYNC_API_ATTEMPTS = 8;
+    /** Poll na requisição; meta ~4s quando a FyHub liberar o creditor cedo. */
+    public const SYNC_API_ATTEMPTS = 14;
 
-    public const SYNC_API_SLEEP_MICROSECONDS = 400_000;
+    public const SYNC_API_SLEEP_MICROSECONDS = 200_000;
 
-    /** Poll após responder a API (afterResponse), sem esperar queue worker. */
-    public const JOB_API_ATTEMPTS = 20;
+    /** Poll afterResponse (só se o sync não achou). */
+    public const JOB_API_ATTEMPTS = 12;
 
-    public const JOB_API_SLEEP_MICROSECONDS = 350_000;
+    public const JOB_API_SLEEP_MICROSECONDS = 200_000;
 
     /**
      * @param  array<string, mixed>|null  $raw
@@ -34,6 +34,7 @@ final class FyhubCashOutBeneficiaryEnricher
         ?array $raw = null,
         ?int $apiAttempts = null,
         ?int $apiSleepMicroseconds = null,
+        ?string $pollPhase = null,
     ): array {
         $merged = is_array($raw) ? $raw : [];
 
@@ -49,6 +50,7 @@ final class FyhubCashOutBeneficiaryEnricher
                 $merged,
                 $apiAttempts ?? self::SYNC_API_ATTEMPTS,
                 $apiSleepMicroseconds ?? self::SYNC_API_SLEEP_MICROSECONDS,
+                $pollPhase ?? 'sync',
             );
         }
 
@@ -59,16 +61,17 @@ final class FyhubCashOutBeneficiaryEnricher
                 'beneficiarydocument' => $beneficiary['document'] ?? '',
             ]);
 
-            Log::info('[FYHUB][BENEFICIARY] Recebedor atualizado na transação', [
+            Log::info('[FYHUB][BENEFICIARY] Recebedor gravado na transação', [
                 'payout_id' => $payout->id,
                 'transaction_id' => $payout->idTransaction,
+                'poll_phase' => $pollPhase,
                 'beneficiaryname' => $beneficiary['name'] ?? null,
-                'beneficiarydocument' => $beneficiary['document'] ?? null,
             ]);
         } else {
-            Log::warning('[FYHUB][BENEFICIARY] Recebedor não encontrado nas APIs FyHub', [
+            Log::warning('[FYHUB][BENEFICIARY] Recebedor não encontrado no poll', [
                 'payout_id' => $payout->id,
                 'transaction_id' => $payout->idTransaction,
+                'poll_phase' => $pollPhase,
                 'end_to_end' => $payout->end_to_end,
             ]);
         }
@@ -85,12 +88,14 @@ final class FyhubCashOutBeneficiaryEnricher
         array $merged,
         int $maxAttempts = self::SYNC_API_ATTEMPTS,
         int $sleepMicroseconds = self::SYNC_API_SLEEP_MICROSECONDS,
+        string $pollPhase = 'sync',
     ): array {
         $fyhub = app(FyhubPixAcquirerService::class);
         if (! $fyhub->isActive()) {
             return [];
         }
 
+        $startedAt = microtime(true);
         $e2e = trim((string) ($payout->end_to_end ?? ''));
         $tid = trim((string) ($payout->idTransaction ?? ''));
         if ($e2e === '' && str_starts_with($tid, 'E')) {
@@ -99,22 +104,9 @@ final class FyhubCashOutBeneficiaryEnricher
 
         $fyhubPaymentId = FyhubPaymentBeneficiaryReader::paymentId($merged);
 
-        // FyHub costuma preencher creditorAccount no GET alguns segundos após LIQUIDATED.
         for ($attempt = 0; $attempt < $maxAttempts; $attempt++) {
             if ($attempt > 0) {
                 usleep($sleepMicroseconds);
-            }
-
-            if ($fyhubPaymentId !== null) {
-                $details = $fyhub->getAccountTransactionDetails($fyhubPaymentId);
-                if ($details['success'] ?? false) {
-                    $fromDetails = FyhubPaymentBeneficiaryReader::creditorFromAccountTransactionDetails(
-                        is_array($details['data'] ?? null) ? $details['data'] : null
-                    );
-                    if ($fromDetails !== []) {
-                        return $fromDetails;
-                    }
-                }
             }
 
             if ($e2e !== '') {
@@ -125,21 +117,62 @@ final class FyhubCashOutBeneficiaryEnricher
 
                     $fromPayment = FyhubPaymentBeneficiaryReader::creditorFromPayload($paymentRaw);
                     if ($fromPayment !== []) {
+                        $this->logCreditorFound($pollPhase, $attempt + 1, 'payment', $startedAt, $payout);
+
                         return $fromPayment;
                     }
 
                     $fyhubPaymentId = $fyhubPaymentId ?? FyhubPaymentBeneficiaryReader::paymentId($paymentRaw);
                 } else {
                     Log::warning('[FYHUB][BENEFICIARY] GET /pix/payments falhou', [
+                        'poll_phase' => $pollPhase,
                         'end_to_end' => $e2e,
                         'attempt' => $attempt + 1,
                         'message' => $payment['message'] ?? null,
                     ]);
                 }
             }
+
+            // Extrato só após termos id e o GET pagamento ainda sem creditor (evita 2 HTTP sempre).
+            if ($fyhubPaymentId !== null) {
+                $details = $fyhub->getAccountTransactionDetails($fyhubPaymentId);
+                if ($details['success'] ?? false) {
+                    $fromDetails = FyhubPaymentBeneficiaryReader::creditorFromAccountTransactionDetails(
+                        is_array($details['data'] ?? null) ? $details['data'] : null
+                    );
+                    if ($fromDetails !== []) {
+                        $this->logCreditorFound($pollPhase, $attempt + 1, 'details', $startedAt, $payout);
+
+                        return $fromDetails;
+                    }
+                }
+            }
         }
 
+        Log::info('[FYHUB][BENEFICIARY] Poll encerrado sem creditor', [
+            'poll_phase' => $pollPhase,
+            'transaction_id' => $payout->idTransaction,
+            'attempts' => $maxAttempts,
+            'elapsed_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+        ]);
+
         return [];
+    }
+
+    private function logCreditorFound(
+        string $pollPhase,
+        int $attempt,
+        string $source,
+        float $startedAt,
+        SolicitacoesCashOut $payout,
+    ): void {
+        Log::info('[FYHUB][BENEFICIARY] Creditor disponível na FyHub', [
+            'poll_phase' => $pollPhase,
+            'source' => $source,
+            'attempt' => $attempt,
+            'elapsed_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+            'transaction_id' => $payout->idTransaction,
+        ]);
     }
 
     /**

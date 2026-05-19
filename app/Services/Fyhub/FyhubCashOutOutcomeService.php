@@ -30,6 +30,7 @@ final class FyhubCashOutOutcomeService
             $initialRaw,
             FyhubCashOutBeneficiaryEnricher::SYNC_API_ATTEMPTS,
             FyhubCashOutBeneficiaryEnricher::SYNC_API_SLEEP_MICROSECONDS,
+            'sync',
         );
         $payout->refresh();
 
@@ -51,6 +52,7 @@ final class FyhubCashOutOutcomeService
                     $mergedRaw,
                     FyhubCashOutBeneficiaryEnricher::SYNC_API_ATTEMPTS,
                     FyhubCashOutBeneficiaryEnricher::SYNC_API_SLEEP_MICROSECONDS,
+                    'sync',
                 );
                 $applier->notifyClientTerminalStatus($payout->fresh(), $mergedRaw);
             }
