@@ -3,12 +3,15 @@
 namespace App\Services\Fyhub;
 
 use App\Models\SolicitacoesCashOut;
-use App\Services\CashOut\CashOutBeneficiaryResolver;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Garante nome/documento do recebedor Pix real (DICT) antes do postback ao integrador.
- * A resposta síncrona do POST /pix/payments/dict não traz creditorAccount; a consulta GET sim.
+ * Preenche nome/documento do recebedor antes do postback ao integrador.
+ *
+ * Fontes (doc FyHub Contas):
+ * 1. Payload já recebido (webhook TRANSFER com data.creditorAccount)
+ * 2. GET /pix/payments/{endToEndId} → data.creditorAccount
+ * 3. GET /accounts/transactions/{id}/details → creditorAccount (fallback)
  */
 final class FyhubCashOutBeneficiaryEnricher
 {
@@ -24,58 +27,30 @@ final class FyhubCashOutBeneficiaryEnricher
             return $merged;
         }
 
-        if ($this->hasBeneficiaryName($merged)) {
-            return $merged;
+        $beneficiary = FyhubPaymentBeneficiaryReader::creditorFromPayload($merged);
+
+        if ($beneficiary === []) {
+            $beneficiary = $this->fetchFromFyhubApis($payout, $merged);
         }
 
-        $fyhub = app(FyhubPixAcquirerService::class);
-        if (! $fyhub->isActive()) {
-            return $merged;
-        }
+        if ($beneficiary !== []) {
+            $merged = $this->injectCreditorIntoPayload($merged, $beneficiary);
+            $payout->update([
+                'beneficiaryname' => $beneficiary['name'] ?? '',
+                'beneficiarydocument' => $beneficiary['document'] ?? '',
+            ]);
 
-        $e2e = trim((string) ($payout->end_to_end ?? ''));
-        $tid = trim((string) ($payout->idTransaction ?? ''));
-
-        $apiRaw = [];
-        for ($attempt = 0; $attempt < 2; $attempt++) {
-            if ($attempt > 0) {
-                usleep(400_000);
-            }
-
-            $result = $fyhub->getPayoutStatus($tid, $e2e !== '' ? $e2e : null);
-            if (! ($result['success'] ?? false)) {
-                Log::warning('[FYHUB][BENEFICIARY] Não foi possível consultar pagamento para recebedor', [
-                    'payout_id' => $payout->id,
-                    'transaction_id' => $tid,
-                    'attempt' => $attempt + 1,
-                    'message' => $result['message'] ?? null,
-                ]);
-
-                continue;
-            }
-
-            $apiRaw = is_array($result['raw'] ?? null) ? $result['raw'] : [];
-            $merged = array_merge($merged, $apiRaw);
-
-            if ($this->hasBeneficiaryName($merged)) {
-                break;
-            }
-        }
-
-        $patch = CashOutBeneficiaryResolver::patchForModel($merged);
-        if ($patch !== []) {
-            $payout->update($patch);
             Log::info('[FYHUB][BENEFICIARY] Recebedor atualizado na transação', [
                 'payout_id' => $payout->id,
-                'transaction_id' => $tid,
-                'beneficiaryname' => $patch['beneficiaryname'] ?? null,
-                'beneficiarydocument' => $patch['beneficiarydocument'] ?? null,
+                'transaction_id' => $payout->idTransaction,
+                'beneficiaryname' => $beneficiary['name'] ?? null,
+                'beneficiarydocument' => $beneficiary['document'] ?? null,
             ]);
-        } elseif ($apiRaw !== []) {
-            Log::warning('[FYHUB][BENEFICIARY] Consulta sem creditor/receiver utilizável', [
+        } else {
+            Log::warning('[FYHUB][BENEFICIARY] Recebedor não encontrado nas APIs FyHub', [
                 'payout_id' => $payout->id,
-                'transaction_id' => $tid,
-                'raw_keys' => array_keys($apiRaw),
+                'transaction_id' => $payout->idTransaction,
+                'end_to_end' => $payout->end_to_end,
             ]);
         }
 
@@ -84,11 +59,95 @@ final class FyhubCashOutBeneficiaryEnricher
 
     /**
      * @param  array<string, mixed>  $merged
+     * @return array{name?: string, document?: string}
      */
-    private function hasBeneficiaryName(array $merged): bool
+    private function fetchFromFyhubApis(SolicitacoesCashOut $payout, array $merged): array
     {
-        $resolved = CashOutBeneficiaryResolver::resolve($merged);
+        $fyhub = app(FyhubPixAcquirerService::class);
+        if (! $fyhub->isActive()) {
+            return [];
+        }
 
-        return isset($resolved['name']) && trim((string) $resolved['name']) !== '';
+        $e2e = trim((string) ($payout->end_to_end ?? ''));
+        $tid = trim((string) ($payout->idTransaction ?? ''));
+        if ($e2e === '' && str_starts_with($tid, 'E')) {
+            $e2e = $tid;
+        }
+
+        $fyhubPaymentId = FyhubPaymentBeneficiaryReader::paymentId($merged);
+
+        for ($attempt = 0; $attempt < 3; $attempt++) {
+            if ($attempt > 0) {
+                usleep(500_000);
+            }
+
+            if ($e2e !== '') {
+                $payment = $fyhub->getPayoutStatus($tid, $e2e);
+                if ($payment['success'] ?? false) {
+                    $paymentRaw = is_array($payment['raw'] ?? null) ? $payment['raw'] : [];
+                    $merged = array_merge($merged, $paymentRaw);
+
+                    $fromPayment = FyhubPaymentBeneficiaryReader::creditorFromPayload($paymentRaw);
+                    if ($fromPayment !== []) {
+                        return $fromPayment;
+                    }
+
+                    $fyhubPaymentId = $fyhubPaymentId ?? FyhubPaymentBeneficiaryReader::paymentId($paymentRaw);
+                } else {
+                    Log::warning('[FYHUB][BENEFICIARY] GET /pix/payments falhou', [
+                        'end_to_end' => $e2e,
+                        'attempt' => $attempt + 1,
+                        'message' => $payment['message'] ?? null,
+                    ]);
+                }
+            }
+
+            if ($fyhubPaymentId !== null) {
+                $details = $fyhub->getAccountTransactionDetails($fyhubPaymentId);
+                if ($details['success'] ?? false) {
+                    $fromDetails = FyhubPaymentBeneficiaryReader::creditorFromAccountTransactionDetails(
+                        is_array($details['data'] ?? null) ? $details['data'] : null
+                    );
+                    if ($fromDetails !== []) {
+                        return $fromDetails;
+                    }
+                }
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * Garante creditorAccount no payload para o ClientWebhookPayloadBuilder.
+     *
+     * @param  array<string, mixed>  $merged
+     * @param  array{name?: string, document?: string}  $beneficiary
+     * @return array<string, mixed>
+     */
+    private function injectCreditorIntoPayload(array $merged, array $beneficiary): array
+    {
+        $documentDigits = isset($beneficiary['document'])
+            ? preg_replace('/\D/', '', (string) $beneficiary['document'])
+            : '';
+
+        $creditorAccount = array_filter([
+            'name' => $beneficiary['name'] ?? null,
+            'document' => $documentDigits !== '' ? $documentDigits : null,
+        ], fn ($v) => $v !== null && $v !== '');
+
+        $data = FyhubPaymentBeneficiaryReader::paymentData($merged);
+        if ($data === []) {
+            $data = $merged;
+        }
+        $data['creditorAccount'] = array_merge(
+            is_array($data['creditorAccount'] ?? null) ? $data['creditorAccount'] : [],
+            $creditorAccount
+        );
+
+        $merged['data'] = $data;
+        $merged['creditorAccount'] = $data['creditorAccount'];
+
+        return $merged;
     }
 }

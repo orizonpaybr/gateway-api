@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
 use App\Services\CashOut\CashOutBeneficiaryResolver;
+use App\Services\Fyhub\FyhubPaymentBeneficiaryReader;
 
 /**
  * Monta o payload extra enviado ao cliente integrado (webhook Coratri → cliente).
@@ -50,7 +51,10 @@ class ClientWebhookPayloadBuilder
     {
         $extra = ['typeTransaction' => 'PIX_OUT'];
 
-        $fromProvider = CashOutBeneficiaryResolver::resolve($providerRaw);
+        $fromProvider = FyhubPaymentBeneficiaryReader::creditorFromPayload($providerRaw);
+        if ($fromProvider === []) {
+            $fromProvider = CashOutBeneficiaryResolver::resolve($providerRaw);
+        }
         // Recebedor = dono da chave Pix (resposta FyHub). Não usar beneficiaryname gravado na criação:
         // era o nome/CPF do merchant (user_id da API), não o destinatário do PIX.
         $beneficiaryName = $fromProvider['name'] ?? null;

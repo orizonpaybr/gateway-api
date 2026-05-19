@@ -2,9 +2,11 @@
 
 namespace App\Services\CashOut;
 
+use App\Services\Fyhub\FyhubPaymentBeneficiaryReader;
+
 /**
  * Extrai nome e documento do recebedor real (credor Pix) a partir do payload do provedor.
- * FyHub Contas: consulta GET /pix/payments/{e2e} e webhooks TRANSFER.
+ * FyHub Contas: data.creditorAccount (GET /pix/payments, webhook TRANSFER).
  */
 final class CashOutBeneficiaryResolver
 {
@@ -14,6 +16,11 @@ final class CashOutBeneficiaryResolver
      */
     public static function resolve(?array $providerRaw): array
     {
+        $fromFyhub = FyhubPaymentBeneficiaryReader::creditorFromPayload($providerRaw);
+        if ($fromFyhub !== []) {
+            return $fromFyhub;
+        }
+
         $raw = self::flattenProviderPayload($providerRaw);
         if ($raw === []) {
             return [];
@@ -63,10 +70,11 @@ final class CashOutBeneficiaryResolver
             'payer',
         ]));
 
+        // Doc FyHub cash-out: recebedor = creditorAccount (cash-out DEBIT na conta Coratri).
         $receiverCandidates = [
-            self::pickAccount($raw, ['creditParty', 'creditPartyAccount', 'receiverAccount', 'receiver', 'payee', 'payeeAccount', 'beneficiary', 'beneficiaryAccount', 'counterparty', 'counterParty']),
             self::pickAccount($raw, ['creditorAccount', 'creditor']),
-            self::pickAccount(self::nestedData($raw), ['creditParty', 'receiverAccount', 'creditorAccount', 'creditor']),
+            self::pickAccount(self::nestedData($raw), ['creditorAccount', 'creditor']),
+            self::pickAccount($raw, ['creditParty', 'creditPartyAccount', 'receiverAccount', 'receiver', 'payee', 'payeeAccount', 'beneficiary', 'beneficiaryAccount', 'counterparty', 'counterParty']),
         ];
 
         foreach ($receiverCandidates as $candidate) {

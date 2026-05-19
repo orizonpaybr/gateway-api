@@ -90,6 +90,35 @@ class FyhubContasPixOutService
     }
 
     /**
+     * GET /accounts/transactions/{transactionId}/details — creditorAccount com name/document.
+     *
+     * @return array{success:bool,data?:array|null,message?:string,status?:int}
+     */
+    public function getAccountTransactionDetails(int|string $transactionId): array
+    {
+        $id = trim((string) $transactionId);
+        if ($id === '' || ! ctype_digit($id)) {
+            return ['success' => false, 'message' => 'transactionId numérico obrigatório.'];
+        }
+
+        $response = $this->client->get('/accounts/transactions/'.rawurlencode($id).'/details');
+
+        $status = $response->status();
+        $body = $response->json();
+
+        if ($response->successful() && is_array($body)) {
+            return ['success' => true, 'data' => $body, 'status' => $status];
+        }
+
+        return [
+            'success' => false,
+            'message' => self::messageFromBody(is_array($body) ? $body : null),
+            'data' => is_array($body) ? $body : null,
+            'status' => $status,
+        ];
+    }
+
+    /**
      * @return array{success:bool,data?:array|null,message?:string,status?:int}
      */
     public function getPaymentByIdempotencyKey(string $idempotencyKey): array
