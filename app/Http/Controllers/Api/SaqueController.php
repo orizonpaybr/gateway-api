@@ -415,24 +415,31 @@ class SaqueController extends Controller
             $provisionedAutoWithdrawal = null;
 
             if (CashOutOutcomeApplier::isTerminalStatus($statusMapped)) {
-                app(CashOutOutcomeApplier::class)->applyTerminalStatusIfNeeded(
-                    $withdrawal,
-                    $statusMapped,
-                    is_array($raw) ? $raw : [],
-                    $e2e,
-                    null,
-                    '[API_PAYOUT][OUTCOME]',
-                );
+                if ($acquirerService->getReference() === 'fyhub') {
+                    app(FyhubCashOutOutcomeService::class)->applySyncTerminalOutcome(
+                        $withdrawal,
+                        $statusMapped,
+                        is_array($raw) ? $raw : [],
+                        $e2e,
+                    );
+                } else {
+                    app(CashOutOutcomeApplier::class)->applyTerminalStatusIfNeeded(
+                        $withdrawal,
+                        $statusMapped,
+                        is_array($raw) ? $raw : [],
+                        $e2e,
+                        null,
+                        '[API_PAYOUT][OUTCOME]',
+                    );
+                }
+                $withdrawal->refresh();
+            } elseif ($acquirerService->getReference() === 'fyhub') {
+                app(FyhubCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($withdrawal);
                 $withdrawal->refresh();
             }
 
             if ($acquirerService->getReference() === 'simpay') {
                 app(SimpayCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($withdrawal);
-                $withdrawal->refresh();
-            }
-
-            if ($acquirerService->getReference() === 'fyhub') {
-                app(FyhubCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($withdrawal);
                 $withdrawal->refresh();
             }
 
