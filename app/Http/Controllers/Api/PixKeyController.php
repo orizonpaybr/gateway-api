@@ -541,6 +541,7 @@ class PixKeyController extends Controller
                         'cash_out_liquido' => $cashOutLiquido,
                         'descricao_transacao' => 'MANUAL',
                         'executor_ordem' => null,
+                        'callback' => 'web',
                     ]);
 
                     $balanceService = app(\App\Services\BalanceService::class);
