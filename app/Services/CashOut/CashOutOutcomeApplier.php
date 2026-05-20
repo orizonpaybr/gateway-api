@@ -141,7 +141,8 @@ final class CashOutOutcomeApplier
         ?string $paidAtIso,
         bool $forceWebhook = false,
     ): void {
-        if (empty($record->callback) || $record->callback === 'web') {
+        $callbackUrl = CashOutClientCallbackResolver::resolve($record);
+        if ($callbackUrl === null) {
             return;
         }
 
@@ -165,7 +166,7 @@ final class CashOutOutcomeApplier
         $message = WebhookClientMessages::getMessageForStatus($status, 'PIX_OUT', $payloadForReason === [] ? null : $payloadForReason);
 
         ClientWebhookDispatchJob::send(
-            $record->callback,
+            $callbackUrl,
             $record->idTransaction,
             $status,
             (float) $record->amount,

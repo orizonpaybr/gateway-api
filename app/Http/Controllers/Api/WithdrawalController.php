@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Jobs\ClientWebhookDispatchJob;
 use App\Services\AffiliateCommissionService;
 use App\Services\BalanceService;
+use App\Services\CashOut\CashOutClientCallbackResolver;
 use App\Services\CashOut\CashOutOutcomeApplier;
 use App\Services\ClientWebhookPayloadBuilder;
 use App\Services\FinancialService;
@@ -602,24 +603,32 @@ class WithdrawalController extends Controller
      */
     private function dispatchRejectionWebhook(SolicitacoesCashOut $saque): void
     {
-        if (empty($saque->callback) || $saque->callback === 'web') {
-            Log::info('[MANUAL_REJECT] Postback não enviado (sem callback no saque)', [
+        $callbackUrl = CashOutClientCallbackResolver::resolve($saque);
+        if ($callbackUrl === null) {
+            Log::info('[MANUAL_REJECT] Postback não enviado (sem URL de callback)', [
                 'payout_id' => $saque->id,
                 'transaction_id' => $saque->idTransaction,
+                'user_id' => $saque->user_id,
             ]);
 
             return;
         }
 
         ClientWebhookDispatchJob::send(
-            $saque->callback,
+            $callbackUrl,
             $saque->idTransaction ?? $saque->externalreference,
             'CANCELLED',
             (float) $saque->amount,
             now()->toIso8601String(),
             ClientWebhookPayloadBuilder::extraForCashOut($saque),
-            'Saque rejeitado, entre em contato com o suporte.'
+            'Saque rejeitado.'
         );
+
+        Log::info('[MANUAL_REJECT] Postback CANCELLED enviado', [
+            'payout_id' => $saque->id,
+            'transaction_id' => $saque->idTransaction,
+            'callback' => $callbackUrl,
+        ]);
     }
 
     /**
