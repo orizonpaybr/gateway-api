@@ -18,6 +18,10 @@ use App\Services\PixAcquirer\PixAcquirerManager;
 use App\Services\Simpay\SimpayAuthService;
 use App\Services\Simpay\SimpayCpfService;
 use App\Services\Simpay\SimpayPixAcquirerService;
+use App\Services\Treeal\TreealAuthService;
+use App\Services\Treeal\TreealPixAcquirerService;
+use App\Services\TreealContas\TreealContasApiClient;
+use App\Services\TreealContas\TreealContasAuthService;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -63,6 +67,21 @@ class AppServiceProvider extends ServiceProvider
                 $app->make(FyhubContasPixOutService::class),
             );
         });
+
+        $this->app->singleton(TreealAuthService::class);
+
+        $this->app->singleton(TreealContasAuthService::class);
+
+        $this->app->singleton(TreealContasApiClient::class, function ($app) {
+            return new TreealContasApiClient($app->make(TreealContasAuthService::class));
+        });
+
+        $this->app->singleton(TreealPixAcquirerService::class, function ($app) {
+            return new TreealPixAcquirerService(
+                $app->make(TreealAuthService::class),
+                $app->make(TreealContasAuthService::class),
+            );
+        });
     }
 
     /**
@@ -75,6 +94,9 @@ class AppServiceProvider extends ServiceProvider
 
         $this->app->make(PixAcquirerManager::class)
             ->register('fyhub', FyhubPixAcquirerService::class);
+
+        $this->app->make(PixAcquirerManager::class)
+            ->register('treeal', TreealPixAcquirerService::class);
 
         // Registrar Observers para monitorar mudanças de status
         Solicitacoes::observe(SolicitacoesObserver::class);
