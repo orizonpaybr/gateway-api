@@ -3,6 +3,7 @@
 namespace App\Helpers;
 
 use App\Services\Fyhub\FyhubMtlsOptions;
+use App\Services\Treeal\TreealMtlsOptions;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Http\Client\Response;
 
@@ -86,6 +87,10 @@ class SecureHttp
                     $client = $client->withOptions(FyhubMtlsOptions::build());
                 }
 
+                if (self::isTreealPixUrl($url) && TreealMtlsOptions::isConfigured()) {
+                    $client = $client->withOptions(TreealMtlsOptions::build());
+                }
+
                 $response = $client->{strtolower($method)}($url, $data);
 
                 // Se a requisição foi bem-sucedida, retorna
@@ -140,6 +145,10 @@ class SecureHttp
             $fallback = $fallback->withOptions(FyhubMtlsOptions::build());
         }
 
+        if (self::isTreealPixUrl($url) && TreealMtlsOptions::isConfigured()) {
+            $fallback = $fallback->withOptions(TreealMtlsOptions::build());
+        }
+
         return $fallback->{strtolower($method)}($url, $data);
     }
 
@@ -155,6 +164,22 @@ class SecureHttp
         }
 
         return str_contains($url, 'api.qrcode.fyhub.com.br');
+    }
+
+    /**
+     * Detecta se a URL pertence à API PIX TREEAL (cash-in mTLS).
+     */
+    private static function isTreealPixUrl(string $url): bool
+    {
+        $base = trim((string) config('treeal.base_url', ''));
+
+        if ($base !== '' && str_starts_with($url, rtrim($base, '/'))) {
+            return true;
+        }
+
+        return str_contains($url, 'api.pix-h.treeal.com')
+            || str_contains($url, 'pix.treeal.com')
+            || str_contains($url, 'api.qrcodes-h.sulcredi.coop.br');
     }
 
     /**

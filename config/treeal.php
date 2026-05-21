@@ -12,7 +12,7 @@ return [
     |
     */
 
-    'base_url' => env('TREEAL_BASE_URL', 'https://api.qrcodes-h.sulcredi.coop.br'),
+    'base_url' => env('TREEAL_BASE_URL', 'https://api.pix-h.treeal.com'),
 
     'client_id' => env('TREEAL_CLIENT_ID'),
 
@@ -24,7 +24,34 @@ return [
 
     'pix_key' => env('TREEAL_PIX_KEY'),
 
+    'charge_expiration_seconds' => (int) env('TREEAL_CHARGE_EXPIRATION_SECONDS', 3600),
+
+    'allow_amount_change' => (bool) env('TREEAL_ALLOW_AMOUNT_CHANGE', false),
+
+    'refund_nature' => env('TREEAL_REFUND_NATURE', 'ORIGINAL'),
+
+    'use_managed_locations' => (bool) env('TREEAL_USE_MANAGED_LOCATIONS', false),
+
     'webhook_rate_limit_per_minute' => (int) env('TREEAL_WEBHOOK_RATE_LIMIT_PER_MINUTE', 18000),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Webhook CashIn (POST {webhookUrl}/pix)
+    |--------------------------------------------------------------------------
+    |
+    | webhook_base_url: URL registrada na Treeal via PUT /webhook/{chave}.
+    | Default: {APP_URL}/treeal/webhook → callback em /treeal/webhook/pix
+    |
+    | webhook_auth_header / webhook_auth_value: header customizado recomendado
+    | pela Treeal para identificar webhooks legítimos.
+    |
+    */
+
+    'webhook_base_url' => env('TREEAL_WEBHOOK_BASE_URL'),
+
+    'webhook_auth_header' => env('TREEAL_WEBHOOK_AUTH_HEADER'),
+
+    'webhook_auth_value' => env('TREEAL_WEBHOOK_AUTH_VALUE'),
 
     /*
     |--------------------------------------------------------------------------

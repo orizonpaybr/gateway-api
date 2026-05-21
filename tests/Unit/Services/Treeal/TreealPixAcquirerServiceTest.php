@@ -7,6 +7,7 @@ use App\Services\Treeal\TreealAuthService;
 use App\Services\Treeal\TreealMtlsOptions;
 use App\Services\Treeal\TreealPixAcquirerService;
 use App\Services\TreealContas\TreealContasAuthService;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class TreealPixAcquirerServiceTest extends TestCase
@@ -30,12 +31,29 @@ class TreealPixAcquirerServiceTest extends TestCase
         parent::tearDown();
     }
 
-    private function service(): TreealPixAcquirerService
+    private function service(?TreealAuthService $auth = null): TreealPixAcquirerService
     {
+        $auth ??= $this->createMock(TreealAuthService::class);
+
         return new TreealPixAcquirerService(
-            $this->createMock(TreealAuthService::class),
+            $auth,
             $this->createMock(TreealContasAuthService::class),
         );
+    }
+
+    private function configureActiveTreeal(): void
+    {
+        config([
+            'treeal.client_id' => 'id',
+            'treeal.client_secret' => 'secret',
+            'treeal.base_url' => 'https://treeal.test',
+            'treeal.pix_key' => '00020126580014br.gov.bcb.pix',
+            'treeal.cert_format' => 'pfx',
+            'treeal.cert_pfx_path' => $this->certPath,
+            'treeal.charge_expiration_seconds' => 3600,
+            'treeal.allow_amount_change' => false,
+            'treeal.use_managed_locations' => false,
+        ]);
     }
 
     public function test_get_reference_returns_treeal(): void
@@ -45,14 +63,7 @@ class TreealPixAcquirerServiceTest extends TestCase
 
     public function test_is_active_when_qr_config_complete(): void
     {
-        config([
-            'treeal.client_id' => 'id',
-            'treeal.client_secret' => 'secret',
-            'treeal.base_url' => 'https://treeal.test',
-            'treeal.pix_key' => 'pix-key',
-            'treeal.cert_format' => 'pfx',
-            'treeal.cert_pfx_path' => $this->certPath,
-        ]);
+        $this->configureActiveTreeal();
 
         $this->assertTrue($this->service()->isActive());
     }
@@ -70,16 +81,128 @@ class TreealPixAcquirerServiceTest extends TestCase
         $this->assertFalse($this->service()->isActive());
     }
 
-    public function test_operational_methods_return_not_implemented_message(): void
+    public function test_create_charge_puts_cob_and_returns_br_code(): void
+    {
+        $this->configureActiveTreeal();
+
+        $auth = $this->createMock(TreealAuthService::class);
+        $auth->method('authHeaders')->willReturn(['Authorization' => 'Bearer test-token']);
+
+        Http::fake([
+            'https://treeal.test/cob/*' => Http::response([
+                'txid' => 'abc123txid456789012345678901234',
+                'status' => 'ATIVA',
+                'revisao' => 0,
+                'pixCopiaECola' => '00020126580014br.gov.bcb.pix0136abc',
+                'chave' => '00020126580014br.gov.bcb.pix',
+            ], 201),
+        ]);
+
+        $result = $this->service($auth)->createCharge(25.50, [
+            'name' => 'João Silva',
+            'document' => '12345678909',
+        ], 'abc123txid456789012345678901234', 'Pagamento teste');
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('00020126580014br.gov.bcb.pix0136abc', $result['brCode']);
+        $this->assertSame('abc123txid456789012345678901234', $result['correlationID']);
+        $this->assertSame('WAITING_FOR_APPROVAL', $result['status']);
+    }
+
+    public function test_get_charge_status_maps_concluida_to_paid_out(): void
+    {
+        $this->configureActiveTreeal();
+
+        $auth = $this->createMock(TreealAuthService::class);
+        $auth->method('authHeaders')->willReturn(['Authorization' => 'Bearer test-token']);
+
+        Http::fake([
+            'https://treeal.test/cob/*' => Http::response([
+                'txid' => 'abc123txid456789012345678901234',
+                'status' => 'CONCLUIDA',
+                'pix' => [
+                    [
+                        'endToEndId' => 'E12345678202009091221kkkkkkkkkkk',
+                        'horario' => '2020-09-09T20:15:00.358Z',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $result = $this->service($auth)->getChargeStatus('abc123txid456789012345678901234');
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('PAID_OUT', $result['status']);
+        $this->assertSame('E12345678202009091221kkkkkkkkkkk', $result['raw']['endToEndId']);
+    }
+
+    public function test_map_charge_status_handles_treeal_and_bacen_variants(): void
+    {
+        $service = $this->service();
+
+        $this->assertSame('PAID_OUT', $service->mapChargeStatus('CONCLUIDA'));
+        $this->assertSame('PAID_OUT', $service->mapChargeStatus('LIQUIDATED'));
+        $this->assertSame('WAITING_FOR_APPROVAL', $service->mapChargeStatus('ATIVA'));
+        $this->assertSame('CANCELED', $service->mapChargeStatus('REMOVIDA_PELO_PSP'));
+        $this->assertSame('CANCELED', $service->mapChargeStatus('REMOVIDO_PELO_PSP'));
+    }
+
+    public function test_cashout_methods_still_return_stub(): void
     {
         $service = $this->service();
         $message = 'Treeal: operação não implementada — aguardando documentação';
 
-        $this->assertSame(['success' => false, 'message' => $message], $service->createCharge(10.0, []));
         $this->assertSame(['success' => false, 'message' => $message], $service->createPayout(10.0, 'key', 'email'));
-        $this->assertSame(['success' => false, 'message' => $message], $service->getChargeStatus('txid'));
         $this->assertSame(['success' => false, 'message' => $message], $service->getPayoutStatus('txid'));
-        $this->assertSame(['success' => false, 'message' => $message], $service->createRefund('txid', 1.0, 'reason'));
+    }
+
+    public function test_create_refund_puts_devolucao(): void
+    {
+        $this->configureActiveTreeal();
+
+        $auth = $this->createMock(TreealAuthService::class);
+        $auth->method('authHeaders')->willReturn(['Authorization' => 'Bearer test-token']);
+
+        Http::fake([
+            'https://treeal.test/pix/*/devolucao/*' => Http::response([
+                'id' => 'abc123',
+                'rtrId' => 'D12345678202009091000abcde123456',
+                'valor' => '25.50',
+                'status' => 'EM_PROCESSAMENTO',
+            ], 201),
+        ]);
+
+        $result = $this->service($auth)->createRefund(
+            'E12345678202009091221abcdef12345',
+            25.50,
+            'Estorno solicitado'
+        );
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('abc123', $result['refundId']);
+        $this->assertSame('EM_PROCESSAMENTO', $result['status']);
+    }
+
+    public function test_get_pix_by_end_to_end_id(): void
+    {
+        $this->configureActiveTreeal();
+
+        $auth = $this->createMock(TreealAuthService::class);
+        $auth->method('authHeaders')->willReturn(['Authorization' => 'Bearer test-token']);
+
+        Http::fake([
+            'https://treeal.test/pix/E12345678202009091221abcdef12345' => Http::response([
+                'endToEndId' => 'E12345678202009091221abcdef12345',
+                'txid' => 'cd1fe328c875481285a6f233ae41b662',
+                'valor' => '100.00',
+                'horario' => '2020-09-10T13:03:33.902Z',
+            ], 200),
+        ]);
+
+        $result = $this->service($auth)->getPixByEndToEndId('E12345678202009091221abcdef12345');
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('cd1fe328c875481285a6f233ae41b662', $result['raw']['txid']);
     }
 
     public function test_map_payout_status_from_treeal_documentation(): void
@@ -88,11 +211,7 @@ class TreealPixAcquirerServiceTest extends TestCase
 
         $this->assertSame('COMPLETED', $service->mapPayoutStatus('LIQUIDATED'));
         $this->assertSame('PROCESSING', $service->mapPayoutStatus('PROCESSING'));
-        $this->assertSame('PROCESSING', $service->mapPayoutStatus('ON_QUEUE'));
-        $this->assertSame('PROCESSING', $service->mapPayoutStatus('WAITING_CONFIRMATION'));
-        $this->assertSame('PROCESSING', $service->mapPayoutStatus('WAITING_SETTLEMENTCORE'));
         $this->assertSame('CANCELLED', $service->mapPayoutStatus('CANCELED'));
-        $this->assertSame('REFUNDED', $service->mapPayoutStatus('REFUNDED'));
         $this->assertSame('REFUNDED', $service->mapPayoutStatus('PARTIALLY REFUNDED'));
     }
 

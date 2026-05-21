@@ -8,6 +8,7 @@ use App\Helpers\Helper;
 use App\Helpers\TaxaFlexivelHelper;
 use App\Http\Controllers\Controller;
 use App\Jobs\ReconcileFyhubDepositJob;
+use App\Jobs\ReconcileTreealDepositJob;
 use App\Models\App;
 use App\Models\Pagarme;
 use App\Models\Solicitacoes;
@@ -129,6 +130,11 @@ class DepositController extends Controller
         if ($deposit) {
             if ($deposit->status === 'WAITING_FOR_APPROVAL' && $deposit->executor_ordem === 'fyhub') {
                 app(\App\Services\Fyhub\FyhubDepositReconciler::class)->reconcileIfPaid($deposit);
+                $deposit->refresh();
+            }
+
+            if ($deposit->status === 'WAITING_FOR_APPROVAL' && $deposit->executor_ordem === 'treeal') {
+                app(\App\Services\Treeal\TreealDepositReconciler::class)->reconcileIfPaid($deposit);
                 $deposit->refresh();
             }
 
@@ -654,6 +660,11 @@ class DepositController extends Controller
         if ($acquirerService->getReference() === 'fyhub') {
             ReconcileFyhubDepositJob::dispatch($deposit->id)->delay(now()->addSeconds(45));
             ReconcileFyhubDepositJob::dispatch($deposit->id)->delay(now()->addSeconds(120));
+        }
+
+        if ($acquirerService->getReference() === 'treeal') {
+            ReconcileTreealDepositJob::dispatch($deposit->id)->delay(now()->addSeconds(45));
+            ReconcileTreealDepositJob::dispatch($deposit->id)->delay(now()->addSeconds(120));
         }
 
         return [
