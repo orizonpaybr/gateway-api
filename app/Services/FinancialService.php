@@ -819,8 +819,8 @@ class FinancialService
         }
 
         $acq = strtolower(trim((string) ($deposit->adquirente_ref ?? $deposit->executor_ordem ?? '')));
-        if (! in_array($acq, ['simpay', 'fyhub'], true)) {
-            throw new \Exception('Estorno disponível apenas para depósitos Simpay/Fyhub.', 422);
+        if (! in_array($acq, ['simpay', 'fyhub', 'treeal'], true)) {
+            throw new \Exception('Estorno disponível apenas para depósitos Simpay/Fyhub/Treeal.', 422);
         }
 
         $st = strtoupper((string) $deposit->status);
@@ -832,13 +832,13 @@ class FinancialService
         }
 
         $tid = trim((string) ($deposit->idTransaction ?? ''));
-        if ($acq === 'fyhub') {
+        if (in_array($acq, ['fyhub', 'treeal'], true)) {
             $tid = trim((string) ($deposit->end_to_end ?? ''));
         }
         if ($tid === '') {
             throw new \Exception(
-                $acq === 'fyhub'
-                    ? 'Depósito FYHUB sem endToEndId para devolução.'
+                in_array($acq, ['fyhub', 'treeal'], true)
+                    ? 'Depósito '.strtoupper($acq).' sem endToEndId para devolução.'
                     : 'Transação sem identificador na adquirente.',
                 422
             );

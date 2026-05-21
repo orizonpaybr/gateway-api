@@ -23,3 +23,8 @@ Schedule::command('fyhub:reconcile-deposits')
     ->everyMinute()
     ->withoutOverlapping()
     ->onOneServer();
+
+Schedule::command('treeal:reconcile-deposits')
+    ->everyMinute()
+    ->withoutOverlapping()
+    ->onOneServer();

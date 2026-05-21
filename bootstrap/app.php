@@ -54,6 +54,11 @@ return Application::configure(basePath: dirname(__DIR__))
             return Limit::perMinute((int) config('fyhub_contas.webhook_rate_limit_per_minute', 18000))
                 ->by('fyhub-contas-webhook|'.$request->ip());
         });
+
+        RateLimiter::for('treeal-webhook', function (Request $request) {
+            return Limit::perMinute((int) config('treeal.webhook_rate_limit_per_minute', 18000))
+                ->by('treeal-webhook|'.$request->ip());
+        });
     })
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->append([
@@ -63,6 +68,7 @@ return Application::configure(basePath: dirname(__DIR__))
             '/pagarme/*',
             '/simpay/*',
             '/fyhub/*',
+            '/treeal/*',
             '/callback',
             '/callback/*',
             '/checkout/webhook/*',

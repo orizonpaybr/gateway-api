@@ -13,7 +13,7 @@ return new class extends Migration
                 'adquirente' => 'TREEAL',
                 'status' => 0,
                 'is_default' => 0,
-                'url' => 'https://api.qrcodes-h.sulcredi.coop.br',
+                'url' => 'https://api.pix-h.treeal.com',
                 'updated_at' => now(),
                 'created_at' => now(),
             ]

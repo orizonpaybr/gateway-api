@@ -397,6 +397,23 @@ class UserController extends Controller
                     app(\App\Services\Fyhub\FyhubDepositReconciler::class)->reconcileIfPaid($pendingFyhubDeposit);
                     \Illuminate\Support\Facades\Cache::forget($cacheKey);
                 }
+
+                $pendingTreealDeposit = \App\Models\Solicitacoes::where('user_id', $user->username)
+                    ->where('status', 'WAITING_FOR_APPROVAL')
+                    ->where('executor_ordem', 'treeal')
+                    ->where(function ($query) use ($idNumerico, $isNumericId) {
+                        if ($isNumericId) {
+                            $query->where('id', (int) $idNumerico);
+                        }
+                        $query->orWhere('idTransaction', $idNumerico)
+                            ->orWhere('externalreference', $idNumerico);
+                    })
+                    ->first();
+
+                if ($pendingTreealDeposit) {
+                    app(\App\Services\Treeal\TreealDepositReconciler::class)->reconcileIfPaid($pendingTreealDeposit);
+                    \Illuminate\Support\Facades\Cache::forget($cacheKey);
+                }
             }
 
             $transactionData = \Illuminate\Support\Facades\Cache::remember($cacheKey, 300, function() use ($user, $idNumerico, $soDeposito, $soSaque, $isNumericId) {

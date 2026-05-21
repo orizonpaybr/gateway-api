@@ -20,6 +20,7 @@ use App\Services\Simpay\SimpayCpfService;
 use App\Services\Simpay\SimpayPixAcquirerService;
 use App\Services\Treeal\TreealAuthService;
 use App\Services\Treeal\TreealPixAcquirerService;
+use App\Services\Treeal\TreealWebhookRegistrationService;
 use App\Services\TreealContas\TreealContasApiClient;
 use App\Services\TreealContas\TreealContasAuthService;
 use Illuminate\Support\ServiceProvider;
@@ -81,6 +82,10 @@ class AppServiceProvider extends ServiceProvider
                 $app->make(TreealAuthService::class),
                 $app->make(TreealContasAuthService::class),
             );
+        });
+
+        $this->app->singleton(TreealWebhookRegistrationService::class, function ($app) {
+            return new TreealWebhookRegistrationService($app->make(TreealAuthService::class));
         });
     }
 
