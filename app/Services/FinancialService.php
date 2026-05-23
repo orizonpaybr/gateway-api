@@ -234,7 +234,7 @@ class FinancialService
             // Select apenas campos necessários para reduzir memória e I/O
             $query = Solicitacoes::with(['user:id,user_id,name,username'])
                 ->select([
-                    'id', 'user_id', 'idTransaction', 'amount', 'deposito_liquido',
+                    'id', 'user_id', 'idTransaction', 'end_to_end', 'amount', 'deposito_liquido',
                     'status', 'date', 'method', 'client_name', 'created_at',
                     'adquirente_ref', 'executor_ordem',
                 ])
@@ -793,17 +793,17 @@ class FinancialService
             return false;
         }
 
-        $tid = trim((string) ($item->idTransaction ?? ''));
-        if (in_array($acq, ['fyhub', 'treeal'], true)) {
-            $tid = trim((string) ($item->end_to_end ?? ''));
-        }
-        if ($tid === '') {
+        $st = strtoupper((string) ($item->status ?? ''));
+        if (! in_array($st, ['PAID_OUT', 'COMPLETED'], true)) {
             return false;
         }
 
-        $st = strtoupper((string) ($item->status ?? ''));
+        if ($acq === 'treeal') {
+            return trim((string) ($item->end_to_end ?? '')) !== '';
+        }
 
-        return in_array($st, ['PAID_OUT', 'COMPLETED'], true);
+        // Simpay / Fyhub: idTransaction (comportamento original da UI)
+        return trim((string) ($item->idTransaction ?? '')) !== '';
     }
 
     /**
