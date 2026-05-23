@@ -19,7 +19,7 @@ class CustoAdquirentePixHelper
         return match ($adquirenteReferencia) {
             'fyhub' => (float) config('fyhub.custo_fixo_transacao', 0.04),
             'simpay' => (float) config('simpay.custo_fixo_transacao', 0.035),
-            'treeal' => (float) config('treeal.custo_fixo_transacao', 0.04),
+            'treeal' => (float) config('treeal.custo_fixo_transacao', 0.03),
             default => 0.0,
         };
     }

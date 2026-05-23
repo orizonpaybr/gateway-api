@@ -94,6 +94,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'check.pin' => \App\Http\Middleware\CheckPin::class,
             'secure.cors' => \App\Http\Middleware\SecureCors::class,
             'throttle.fyhub.pix' => \App\Http\Middleware\ThrottleFyhubPixThroughput::class,
+            'throttle.treeal.pix' => \App\Http\Middleware\ThrottleTreealPixThroughput::class,
         ]);
 
         // Aplicar CORS seguro globalmente nas rotas API

@@ -62,7 +62,18 @@ return [
     |
     */
 
-    'custo_fixo_transacao' => (float) env('TREEAL_CUSTO_FIXO_TRANSACAO', 0.04),
+    'custo_fixo_transacao' => (float) env('TREEAL_CUSTO_FIXO_TRANSACAO', 0.03),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Limite de throughput informado pela TREEAL (transações por segundo)
+    |--------------------------------------------------------------------------
+    |
+    | Aplicado nas rotas PIX quando a adquirente padrão do usuário é treeal.
+    |
+    */
+
+    'rate_limit_per_second' => (int) env('TREEAL_RATE_LIMIT_PER_SECOND', 300),
 
     /*
     |--------------------------------------------------------------------------
