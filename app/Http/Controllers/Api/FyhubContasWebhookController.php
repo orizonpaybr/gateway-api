@@ -177,19 +177,14 @@ class FyhubContasWebhookController extends Controller
             return response()->json(['received' => true, 'processed' => false, 'reason' => 'payout_not_found']);
         }
 
-        if (in_array($payout->status, ['COMPLETED', 'FAILED', 'CANCELLED', 'REFUNDED'], true)) {
-            return response()->json(['received' => true, 'processed' => false, 'reason' => 'already_terminal']);
-        }
-
         $txn = is_array($data['transaction'] ?? null) ? $data['transaction'] : [];
         $rawForClient = array_merge($data, $txn);
 
         $e2e = trim((string) ($data['endToEndId'] ?? ''));
         $createdAt = isset($data['createdAt']) && is_string($data['createdAt']) ? $data['createdAt'] : null;
 
-        $updated = app(CashOutOutcomeApplier::class)->applyTerminalStatusIfNeeded(
+        $updated = app(CashOutOutcomeApplier::class)->applyValidationFailureIfNeeded(
             $payout,
-            'FAILED',
             $rawForClient,
             $e2e !== '' ? $e2e : null,
             $createdAt,

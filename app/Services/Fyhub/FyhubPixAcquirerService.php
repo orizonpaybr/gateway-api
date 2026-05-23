@@ -249,14 +249,7 @@ class FyhubPixAcquirerService implements PixAcquirerInterface
 
     public function resolveInitialPayoutStatus(string $providerStatus, ?string $endToEndId = null): string
     {
-        $mapped = $this->mapPayoutStatus($providerStatus);
-        $e2e = trim((string) ($endToEndId ?? ''));
-
-        if ($mapped === 'PROCESSING' && $e2e !== '') {
-            return 'COMPLETED';
-        }
-
-        return $mapped;
+        return $this->mapPayoutStatus($providerStatus);
     }
 
     public function getPayoutStatus(string $transactionId, ?string $e2eId = null): array

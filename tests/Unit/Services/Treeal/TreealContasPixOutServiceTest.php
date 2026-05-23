@@ -28,6 +28,20 @@ class TreealContasPixOutServiceTest extends TestCase
         $this->assertSame('12345678909', $body['creditorDocument']);
     }
 
+    public function test_format_pix_key_for_dict_normalizes_phone_email_and_evp(): void
+    {
+        $service = new TreealContasPixOutService($this->createMock(TreealContasApiClient::class));
+
+        $this->assertSame('+5584999518869', $service->formatPixKeyForDict('84999518869', 'telefone'));
+        $this->assertSame('+5584999518869', $service->formatPixKeyForDict('(84) 99951-8869', 'phone'));
+        $this->assertSame('cliente@email.com', $service->formatPixKeyForDict('Cliente@Email.com', 'email'));
+        $this->assertSame(
+            'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+            $service->formatPixKeyForDict('A1B2C3D4-E5F6-7890-ABCD-EF1234567890', 'aleatoria')
+        );
+        $this->assertSame('12345678909', $service->formatPixKeyForDict('123.456.789-09', 'cpf'));
+    }
+
     public function test_initiate_payment_by_dict_sends_idempotency_header(): void
     {
         $client = $this->createMock(TreealContasApiClient::class);

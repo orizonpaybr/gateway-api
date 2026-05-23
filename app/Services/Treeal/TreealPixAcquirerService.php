@@ -276,6 +276,11 @@ class TreealPixAcquirerService implements PixAcquirerInterface
 
         try {
             $formattedKey = $this->contasPixOut->formatPixKeyForDict($pixKey, $pixKeyType);
+            Log::info('[TREEAL][PAYOUT] Chave Pix formatada para DICT', [
+                'pix_key_type' => $pixKeyType,
+                'pix_key_raw' => $pixKey,
+                'pix_key_formatted' => $formattedKey,
+            ]);
             $body = $this->contasPixOut->buildDictPaymentBody(
                 $formattedKey,
                 $amountReais,
@@ -344,6 +349,7 @@ class TreealPixAcquirerService implements PixAcquirerInterface
             'LIQUIDATED' => 'COMPLETED',
             'CANCELED', 'CANCELLED' => 'CANCELLED',
             'REFUNDED', 'PARTIALLY_REFUNDED' => 'REFUNDED',
+            'ERROR', 'FAILED', 'REJECTED' => 'FAILED',
             'PROCESSING', 'ON_QUEUE', 'WAITING_CONFIRMATION', 'WAITING_SETTLEMENTCORE' => 'PROCESSING',
             default => 'PROCESSING',
         };
@@ -351,14 +357,7 @@ class TreealPixAcquirerService implements PixAcquirerInterface
 
     public function resolveInitialPayoutStatus(string $providerStatus, ?string $endToEndId = null): string
     {
-        $mapped = $this->mapPayoutStatus($providerStatus);
-        $e2e = trim((string) ($endToEndId ?? ''));
-
-        if ($mapped === 'PROCESSING' && $e2e !== '') {
-            return 'COMPLETED';
-        }
-
-        return $mapped;
+        return $this->mapPayoutStatus($providerStatus);
     }
 
     public function getPayoutStatus(string $transactionId, ?string $e2eId = null): array

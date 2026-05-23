@@ -132,6 +132,113 @@ final class CashOutOutcomeApplier
     }
 
     /**
+     * Falha de validação DICT (webhook CASHOUT REJECTED): pode reverter COMPLETED prematuro.
+     *
+     * @param  array<string, mixed>|null  $rawForClientMessage
+     */
+    public function applyValidationFailureIfNeeded(
+        SolicitacoesCashOut $payout,
+        ?array $rawForClientMessage = null,
+        ?string $e2eToSet = null,
+        ?string $paidAtIso = null,
+        string $logTag = '[PIX_OUT][VALIDATION_FAILURE]',
+    ): bool {
+        $current = SolicitacoesCashOut::find($payout->id);
+        if (! $current) {
+            return false;
+        }
+
+        if (in_array($current->status, ['FAILED', 'CANCELLED', 'REFUNDED'], true)) {
+            return false;
+        }
+
+        if ($current->status === 'COMPLETED') {
+            return $this->revertFalsePositiveCompletionToFailed(
+                $current,
+                $rawForClientMessage,
+                $e2eToSet,
+                $paidAtIso,
+                $logTag,
+            );
+        }
+
+        return $this->applyTerminalStatusIfNeeded(
+            $current,
+            'FAILED',
+            $rawForClientMessage,
+            $e2eToSet,
+            $paidAtIso,
+            $logTag,
+        );
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $rawForClientMessage
+     */
+    private function revertFalsePositiveCompletionToFailed(
+        SolicitacoesCashOut $payout,
+        ?array $rawForClientMessage,
+        ?string $e2eToSet,
+        ?string $paidAtIso,
+        string $logTag,
+    ): bool {
+        $updated = DB::transaction(function () use ($payout, $rawForClientMessage, $e2eToSet) {
+            $locked = SolicitacoesCashOut::where('id', $payout->id)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $locked || $locked->status !== 'COMPLETED') {
+                return false;
+            }
+
+            $updateData = ['status' => 'FAILED'];
+            if ($e2eToSet !== null && $e2eToSet !== '') {
+                $updateData['end_to_end'] = $e2eToSet;
+            }
+
+            $beneficiaryPatch = CashOutBeneficiaryResolver::patchForModel($rawForClientMessage);
+            if ($beneficiaryPatch !== []) {
+                $updateData = array_merge($updateData, $beneficiaryPatch);
+            }
+
+            $locked->update($updateData);
+
+            WithdrawalFailureRefundService::creditBackAfterFalsePositiveCompletion($locked->fresh());
+
+            try {
+                app(AffiliateCommissionService::class)->reverseCashOutCommissionForFailedWithdrawal($locked->fresh());
+            } catch (\Throwable $e) {
+                Log::error($logTag.' Falha ao reverter comissão após COMPLETED prematuro', [
+                    'payout_id' => $locked->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            return true;
+        });
+
+        if (! $updated) {
+            return false;
+        }
+
+        Log::warning($logTag.' COMPLETED prematuro revertido para FAILED', [
+            'payout_id' => $payout->id,
+            'transaction_id' => $payout->idTransaction,
+        ]);
+
+        $fresh = SolicitacoesCashOut::find($payout->id);
+        if ($fresh === null) {
+            return true;
+        }
+
+        Helper::calculaSaldoLiquido($fresh->user_id);
+        app(PaymentProcessingService::class)->invalidateCachesAfterPayment($fresh->user_id);
+        $this->dispatchCashOutClientWebhook($fresh, 'FAILED', $rawForClientMessage, $paidAtIso);
+
+        return true;
+    }
+
+    /**
      * @param  array<string, mixed>|null  $rawForClientMessage
      */
     private function dispatchCashOutClientWebhook(
