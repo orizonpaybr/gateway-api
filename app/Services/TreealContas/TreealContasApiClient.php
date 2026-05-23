@@ -32,6 +32,14 @@ class TreealContasApiClient
     }
 
     /**
+     * @param  array<string, string>  $extraHeaders
+     */
+    public function delete(string $path, array $extraHeaders = []): Response
+    {
+        return $this->request('DELETE', $path, ['headers' => $extraHeaders]);
+    }
+
+    /**
      * @param  array{query?: array<string, mixed>, json?: array<string, mixed>, headers?: array<string, string>}  $options
      */
     private function request(string $method, string $path, array $options = []): Response
@@ -57,6 +65,8 @@ class TreealContasApiClient
             } elseif ($method === 'POST') {
                 $json = $options['json'] ?? [];
                 $response = $client->asJson()->post($url, $json);
+            } elseif ($method === 'DELETE') {
+                $response = $client->delete($url);
             } else {
                 throw new \InvalidArgumentException('Método não suportado: '.$method);
             }
@@ -70,6 +80,8 @@ class TreealContasApiClient
 
                 if ($method === 'GET') {
                     $response = $client->get($url, $options['query'] ?? []);
+                } elseif ($method === 'DELETE') {
+                    $response = $client->delete($url);
                 } else {
                     $response = $client->asJson()->post($url, $options['json'] ?? []);
                 }

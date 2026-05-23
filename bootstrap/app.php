@@ -59,6 +59,11 @@ return Application::configure(basePath: dirname(__DIR__))
             return Limit::perMinute((int) config('treeal.webhook_rate_limit_per_minute', 18000))
                 ->by('treeal-webhook|'.$request->ip());
         });
+
+        RateLimiter::for('treeal-contas-webhook', function (Request $request) {
+            return Limit::perMinute((int) config('treeal_contas.webhook_rate_limit_per_minute', 18000))
+                ->by('treeal-contas-webhook|'.$request->ip());
+        });
     })
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->append([

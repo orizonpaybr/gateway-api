@@ -6,11 +6,13 @@ use App\Helpers\PixApiErrorTypes;
 use App\Helpers\SecureHttp;
 use App\Services\PixAcquirer\PixAcquirerInterface;
 use App\Services\TreealContas\TreealContasAuthService;
+use App\Services\TreealContas\TreealContasPixOutService;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class TreealPixAcquirerService implements PixAcquirerInterface
 {
-    private const CASHOUT_STUB_MESSAGE = 'Treeal: operação não implementada — aguardando documentação';
+    private const CASHOUT_NOT_CONFIGURED = 'Cash-out TREEAL depende da API Contas: configure TREEAL_CONTAS_* (OAuth + certificado mTLS).';
 
     private string $baseUrl;
     private int $timeout;
@@ -18,6 +20,7 @@ class TreealPixAcquirerService implements PixAcquirerInterface
     public function __construct(
         private readonly TreealAuthService $auth,
         private readonly TreealContasAuthService $contasAuth,
+        private readonly TreealContasPixOutService $contasPixOut,
     ) {
         $this->baseUrl = rtrim((string) config('treeal.base_url'), '/');
         $this->timeout = (int) config('treeal.timeout', 30);
@@ -260,7 +263,77 @@ class TreealPixAcquirerService implements PixAcquirerInterface
         ?string $recipientName = null,
         ?string $recipientDocument = null
     ): array {
-        return $this->cashOutStub();
+        if (! $this->contasPixOut->isConfigured()) {
+            return [
+                'success' => false,
+                'message' => self::CASHOUT_NOT_CONFIGURED,
+            ];
+        }
+
+        $idempotencyKey = ($correlationId !== null && trim($correlationId) !== '')
+            ? trim($correlationId)
+            : (string) Str::uuid();
+
+        try {
+            $formattedKey = $this->contasPixOut->formatPixKeyForDict($pixKey, $pixKeyType);
+            $body = $this->contasPixOut->buildDictPaymentBody(
+                $formattedKey,
+                $amountReais,
+                $description,
+                $recipientDocument
+            );
+
+            $result = $this->contasPixOut->initiatePaymentByDict($idempotencyKey, $body);
+
+            if (! ($result['success'] ?? false)) {
+                Log::error('[TREEAL][PAYOUT] Falha ao iniciar Pix pela API Contas', [
+                    'status' => $result['status'] ?? null,
+                    'message' => $result['message'] ?? null,
+                ]);
+
+                return [
+                    'success' => false,
+                    'message' => $result['message'] ?? 'Não foi possível iniciar o pagamento Pix na TREEAL Contas.',
+                    'raw' => $result['data'] ?? [],
+                ];
+            }
+
+            $data = is_array($result['data'] ?? null) ? $result['data'] : [];
+            $e2e = trim((string) ($data['endToEndId'] ?? ''));
+            $numericId = $data['id'] ?? null;
+            $referenceCode = $e2e !== '' ? $e2e : (string) ($numericId ?? $idempotencyKey);
+            $providerStatus = strtoupper((string) ($data['status'] ?? 'PROCESSING'));
+            if ($providerStatus === '') {
+                $providerStatus = 'PROCESSING';
+            }
+
+            Log::info('[TREEAL][PAYOUT] Ordem aceita (API Contas)', [
+                'end_to_end' => $e2e !== '' ? $e2e : null,
+                'id' => $numericId,
+                'idempotency_key' => $idempotencyKey,
+            ]);
+
+            return [
+                'success' => true,
+                'referenceCode' => $referenceCode,
+                'status' => $providerStatus,
+                'raw' => array_merge($data, [
+                    'endToEndId' => $e2e !== '' ? $e2e : null,
+                    'id' => $numericId,
+                    'idempotencyKey' => $idempotencyKey,
+                    'http_status' => $result['status'] ?? null,
+                ]),
+            ];
+        } catch (\Throwable $e) {
+            Log::error('[TREEAL][PAYOUT] Exceção ao iniciar Pix na API Contas', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => 'Erro ao conectar com TREEAL Contas: '.$e->getMessage(),
+            ];
+        }
     }
 
     public function mapPayoutStatus(string $providerStatus): string
@@ -276,9 +349,82 @@ class TreealPixAcquirerService implements PixAcquirerInterface
         };
     }
 
+    public function resolveInitialPayoutStatus(string $providerStatus, ?string $endToEndId = null): string
+    {
+        $mapped = $this->mapPayoutStatus($providerStatus);
+        $e2e = trim((string) ($endToEndId ?? ''));
+
+        if ($mapped === 'PROCESSING' && $e2e !== '') {
+            return 'COMPLETED';
+        }
+
+        return $mapped;
+    }
+
     public function getPayoutStatus(string $transactionId, ?string $e2eId = null): array
     {
-        return $this->cashOutStub();
+        if (! $this->contasPixOut->isConfigured()) {
+            return [
+                'success' => false,
+                'message' => self::CASHOUT_NOT_CONFIGURED,
+            ];
+        }
+
+        $e2e = trim((string) ($e2eId ?? ''));
+        $tid = trim((string) $transactionId);
+        if ($e2e === '' && str_starts_with($tid, 'E') && strlen($tid) > 10) {
+            $e2e = $tid;
+        }
+        if ($e2e === '' && $tid !== '') {
+            $e2e = $tid;
+        }
+
+        if ($e2e === '') {
+            return [
+                'success' => false,
+                'message' => 'Informe endToEndId ou transaction_id (end-to-end) para consultar o pagamento na TREEAL Contas.',
+            ];
+        }
+
+        try {
+            $result = $this->contasPixOut->getPaymentByEndToEndId($e2e);
+
+            if (! ($result['success'] ?? false)) {
+                return [
+                    'success' => false,
+                    'message' => $result['message'] ?? 'Pagamento não encontrado na TREEAL Contas.',
+                    'http_status' => $result['status'] ?? null,
+                ];
+            }
+
+            $payload = is_array($result['data'] ?? null) ? $result['data'] : [];
+            $row = is_array($payload['data'] ?? null) ? $payload['data'] : $payload;
+            $raw = array_merge($payload, $row, [
+                'endToEndId' => $row['endToEndId'] ?? $e2e,
+                'provider_status' => strtoupper((string) ($row['status'] ?? '')),
+            ]);
+            if (isset($payload['data']) && is_array($payload['data'])) {
+                $raw['data'] = array_merge($payload['data'], $row);
+            }
+
+            $providerStatus = strtoupper((string) ($row['status'] ?? ''));
+
+            return [
+                'success' => true,
+                'status' => $this->mapPayoutStatus($providerStatus !== '' ? $providerStatus : 'PROCESSING'),
+                'raw' => $raw,
+            ];
+        } catch (\Throwable $e) {
+            Log::error('[TREEAL][PAYOUT_STATUS] Exceção ao consultar pagamento', [
+                'end_to_end' => $e2e,
+                'error' => $e->getMessage(),
+            ]);
+
+            return [
+                'success' => false,
+                'message' => 'Erro ao conectar com TREEAL Contas: '.$e->getMessage(),
+            ];
+        }
     }
 
     public function createRefund(string $transactionId, float $amount, string $reason): array
@@ -467,16 +613,5 @@ class TreealPixAcquirerService implements PixAcquirerInterface
         }
 
         return substr($normalized, 0, 35);
-    }
-
-    /**
-     * @return array{success: false, message: string}
-     */
-    private function cashOutStub(): array
-    {
-        return [
-            'success' => false,
-            'message' => self::CASHOUT_STUB_MESSAGE,
-        ];
     }
 }
