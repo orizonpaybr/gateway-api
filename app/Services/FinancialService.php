@@ -784,24 +784,30 @@ class FinancialService
     }
 
     /**
-     * Estorno PIX (Simpay) permitido na UI admin.
+     * Estorno PIX (Simpay/Fyhub/Treeal) permitido na UI admin.
      */
     private function depositPodeEstornar(Solicitacoes $item): bool
     {
         $acq = strtolower(trim((string) ($item->adquirente_ref ?? $item->executor_ordem ?? '')));
-        if (! in_array($acq, ['simpay', 'fyhub'], true)) {
+        if (! in_array($acq, ['simpay', 'fyhub', 'treeal'], true)) {
             return false;
         }
-        if (trim((string) ($item->idTransaction ?? '')) === '') {
+
+        $tid = trim((string) ($item->idTransaction ?? ''));
+        if (in_array($acq, ['fyhub', 'treeal'], true)) {
+            $tid = trim((string) ($item->end_to_end ?? ''));
+        }
+        if ($tid === '') {
             return false;
         }
+
         $st = strtoupper((string) ($item->status ?? ''));
 
         return in_array($st, ['PAID_OUT', 'COMPLETED'], true);
     }
 
     /**
-     * Solicita estorno na adquirente (Simpay/Fyhub) e atualiza depósito/saldo localmente.
+     * Solicita estorno na adquirente (Simpay/Fyhub/Treeal) e atualiza depósito/saldo localmente.
      *
      * @throws \Exception com código HTTP em $e->getCode() quando aplicável
      */
