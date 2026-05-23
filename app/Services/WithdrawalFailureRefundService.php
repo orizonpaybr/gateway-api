@@ -21,7 +21,15 @@ class WithdrawalFailureRefundService
      * Credita de volta o mesmo total debitado por BalanceService::decrementCombinedBalance.
      * Preferimos `valor_total_descontado` gravado no débito; se ausente (registros antigos), amount + taxa_cash_out.
      * Chamar dentro da mesma transação DB que atualiza o status do saque, com User lockado se possível.
+     *
+     * Estorno quando o saque foi marcado COMPLETED cedo demais (e2e na resposta síncrona)
+     * e o webhook CASHOUT REJECTED confirmou falha na validação DICT.
      */
+    public static function creditBackAfterFalsePositiveCompletion(SolicitacoesCashOut $cashOut): void
+    {
+        self::creditBackAmount($cashOut, 'COMPLETED', 'FAILED');
+    }
+
     public static function creditBackIfApplicable(
         SolicitacoesCashOut $cashOut,
         string $previousStatus,
@@ -40,6 +48,14 @@ class WithdrawalFailureRefundService
             return;
         }
 
+        self::creditBackAmount($cashOut, $previousStatus, $newStatus);
+    }
+
+    private static function creditBackAmount(
+        SolicitacoesCashOut $cashOut,
+        string $previousStatus,
+        string $newStatus,
+    ): void {
         $pelaLinha = (float) $cashOut->amount + (float) ($cashOut->taxa_cash_out ?? 0);
         $valorDevolver = $cashOut->valor_total_descontado !== null && (float) $cashOut->valor_total_descontado > 0
             ? (float) $cashOut->valor_total_descontado
@@ -97,13 +113,15 @@ class WithdrawalFailureRefundService
             'debito_saldo_principal' => $debPr,
         ]);
 
-        try {
-            app(AffiliateCommissionService::class)->reverseCashOutCommissionForFailedWithdrawal($cashOut);
-        } catch (\Throwable $e) {
-            Log::error('[WITHDRAWAL_REFUND] Estorno ao usuário ok, mas falhou reversão de comissão afiliado (não deve abortar o estorno)', [
-                'cash_out_id' => $cashOut->id,
-                'error' => $e->getMessage(),
-            ]);
+        if ($previousStatus !== 'COMPLETED') {
+            try {
+                app(AffiliateCommissionService::class)->reverseCashOutCommissionForFailedWithdrawal($cashOut);
+            } catch (\Throwable $e) {
+                Log::error('[WITHDRAWAL_REFUND] Estorno ao usuário ok, mas falhou reversão de comissão afiliado (não deve abortar o estorno)', [
+                    'cash_out_id' => $cashOut->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
     }
 }

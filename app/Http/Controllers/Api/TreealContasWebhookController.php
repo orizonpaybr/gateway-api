@@ -46,6 +46,9 @@ class TreealContasWebhookController extends Controller
             'status' => $data['status'] ?? null,
             'txId' => $data['txId'] ?? null,
             'endToEndId' => $data['endToEndId'] ?? null,
+            'errorCode' => $data['errorCode'] ?? null,
+            'rejectionReason' => $data['rejectionReason'] ?? null,
+            'message' => $data['message'] ?? null,
         ]);
 
         if ($type === '' || $data === []) {
@@ -172,19 +175,23 @@ class TreealContasWebhookController extends Controller
             return response()->json(['received' => true, 'processed' => false, 'reason' => 'payout_not_found']);
         }
 
-        if (in_array($payout->status, ['COMPLETED', 'FAILED', 'CANCELLED', 'REFUNDED'], true)) {
-            return response()->json(['received' => true, 'processed' => false, 'reason' => 'already_terminal']);
-        }
-
         $txn = is_array($data['transaction'] ?? null) ? $data['transaction'] : [];
         $rawForClient = array_merge($data, $txn);
 
         $e2e = trim((string) ($data['endToEndId'] ?? ''));
         $createdAt = isset($data['createdAt']) && is_string($data['createdAt']) ? $data['createdAt'] : null;
 
-        $updated = app(CashOutOutcomeApplier::class)->applyTerminalStatusIfNeeded(
+        Log::warning('[TREEAL_CONTAS][WEBHOOK][CASHOUT] Falha de validação DICT', [
+            'payout_id' => $payout->id,
+            'payout_status' => $payout->status,
+            'end_to_end' => $e2e !== '' ? $e2e : null,
+            'errorCode' => $rawForClient['errorCode'] ?? null,
+            'rejectionReason' => $rawForClient['rejectionReason'] ?? null,
+            'message' => $rawForClient['message'] ?? null,
+        ]);
+
+        $updated = app(CashOutOutcomeApplier::class)->applyValidationFailureIfNeeded(
             $payout,
-            'FAILED',
             $rawForClient,
             $e2e !== '' ? $e2e : null,
             $createdAt,

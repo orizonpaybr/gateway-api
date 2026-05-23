@@ -17,10 +17,10 @@ class FyhubInitialPayoutStatusTest extends TestCase
         );
     }
 
-    public function test_resolve_initial_payout_status_promotes_processing_when_e2e_present(): void
+    public function test_resolve_initial_payout_status_keeps_processing_when_e2e_present(): void
     {
         $this->assertSame(
-            'COMPLETED',
+            'PROCESSING',
             $this->service()->resolveInitialPayoutStatus('PROCESSING', 'E4397869720260519000408508c56c02')
         );
     }
