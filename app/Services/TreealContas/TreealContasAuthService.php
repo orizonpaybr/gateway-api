@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 /**
- * OAuth 2.0 Client Credentials da API Contas Treeal (form-urlencoded + mTLS).
+ * OAuth 2.0 Client Credentials da API Contas Treeal / ONZ (JSON body + mTLS).
  *
  * Token independente do CashIn (API QR).
  */
@@ -38,6 +38,7 @@ class TreealContasAuthService
         return [
             'Authorization' => 'Bearer '.$this->getAccessToken(),
             'Accept' => 'application/json',
+            'Content-Type' => 'application/json',
         ];
     }
 
@@ -56,18 +57,17 @@ class TreealContasAuthService
         $baseUrl = rtrim((string) config('treeal_contas.base_url'), '/');
         $timeout = (int) config('treeal_contas.timeout', 30);
         $buffer = (int) config('treeal_contas.token_cache_buffer_seconds', 30);
-        $scope = trim((string) config('treeal_contas.scope', ''));
 
         if ($clientId === '' || $clientSecret === '' || $baseUrl === '') {
             throw new \RuntimeException('Credenciais TREEAL Contas (client_id / client_secret / base_url) não configuradas.');
         }
 
         $payload = [
-            'client_id' => $clientId,
-            'client_secret' => $clientSecret,
-            'grant_type' => 'client_credentials',
+            'clientId' => $clientId,
+            'clientSecret' => $clientSecret,
+            'grantType' => 'client_credentials',
         ];
-
+        $scope = trim((string) config('treeal_contas.scope', ''));
         if ($scope !== '') {
             $payload['scope'] = $scope;
         }
@@ -84,15 +84,16 @@ class TreealContasAuthService
         try {
             $response = Http::timeout($timeout)
                 ->withOptions($mtls)
-                ->asForm()
                 ->acceptJson()
+                ->asJson()
                 ->post($url, $payload);
 
             $body = $response->json();
+            $token = self::extractAccessToken(is_array($body) ? $body : null);
 
-            if (! $response->successful() || ! is_array($body) || empty($body['access_token'])) {
+            if (! $response->successful() || $token === null) {
                 $msg = is_array($body)
-                    ? ($body['message'] ?? $body['detail'] ?? $body['error_description'] ?? 'Resposta inesperada')
+                    ? ($body['detail'] ?? $body['title'] ?? $body['message'] ?? 'Resposta inesperada')
                     : 'Resposta inesperada';
 
                 Log::error('[TREEAL_CONTAS][AUTH] Falha ao obter token', [
@@ -103,21 +104,62 @@ class TreealContasAuthService
                 throw new \RuntimeException('TREEAL Contas auth falhou: '.$msg);
             }
 
-            $expiresIn = max(1, (int) ($body['expires_in'] ?? 300));
-            $cacheSeconds = max(1, $expiresIn - $buffer);
-            Cache::put(self::CACHE_KEY, (string) $body['access_token'], now()->addSeconds($cacheSeconds));
+            $ttlSeconds = self::resolveTokenTtlSeconds(is_array($body) ? $body : [], $buffer);
+            Cache::put(self::CACHE_KEY, $token, now()->addSeconds(max(60, $ttlSeconds)));
 
-            Log::info('[TREEAL_CONTAS][AUTH] Token obtido', [
-                'expires_in' => $expiresIn,
-                'cache_seconds' => $cacheSeconds,
-            ]);
+            Log::info('[TREEAL_CONTAS][AUTH] Token obtido', ['cache_seconds' => max(60, $ttlSeconds)]);
 
-            return (string) $body['access_token'];
+            return $token;
         } catch (\RuntimeException $e) {
             throw $e;
         } catch (\Throwable $e) {
             Log::error('[TREEAL_CONTAS][AUTH] Erro de conexão', ['error' => $e->getMessage()]);
             throw new \RuntimeException('Não foi possível conectar à API TREEAL Contas: '.$e->getMessage(), 0, $e);
         }
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $body
+     */
+    private static function extractAccessToken(?array $body): ?string
+    {
+        if ($body === null) {
+            return null;
+        }
+
+        if (! empty($body['accessToken']) && is_string($body['accessToken'])) {
+            return $body['accessToken'];
+        }
+
+        if (! empty($body['access_token']) && is_string($body['access_token'])) {
+            return $body['access_token'];
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $body
+     */
+    private static function resolveTokenTtlSeconds(array $body, int $buffer): int
+    {
+        if (isset($body['expiresAt']) && is_numeric($body['expiresAt']) && (float) $body['expiresAt'] > 0) {
+            $ts = (float) $body['expiresAt'];
+            if ($ts > 1e12) {
+                $ts = $ts / 1000;
+            }
+
+            return max(120, (int) floor($ts - time()) - $buffer);
+        }
+
+        if (isset($body['expiresIn']) && is_numeric($body['expiresIn'])) {
+            return max(120, (int) $body['expiresIn'] - $buffer);
+        }
+
+        if (isset($body['expires_in']) && is_numeric($body['expires_in'])) {
+            return max(120, (int) $body['expires_in'] - $buffer);
+        }
+
+        return 3600 - min($buffer, 300);
     }
 }

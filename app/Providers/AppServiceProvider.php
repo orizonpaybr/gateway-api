@@ -19,10 +19,13 @@ use App\Services\Simpay\SimpayAuthService;
 use App\Services\Simpay\SimpayCpfService;
 use App\Services\Simpay\SimpayPixAcquirerService;
 use App\Services\Treeal\TreealAuthService;
+use App\Services\Treeal\TreealCashOutOutcomeService;
 use App\Services\Treeal\TreealPixAcquirerService;
 use App\Services\Treeal\TreealWebhookRegistrationService;
 use App\Services\TreealContas\TreealContasApiClient;
 use App\Services\TreealContas\TreealContasAuthService;
+use App\Services\TreealContas\TreealContasPixOutService;
+use App\Services\TreealContas\TreealContasWebhookRegistrationService;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -77,10 +80,24 @@ class AppServiceProvider extends ServiceProvider
             return new TreealContasApiClient($app->make(TreealContasAuthService::class));
         });
 
+        $this->app->singleton(TreealContasPixOutService::class, function ($app) {
+            return new TreealContasPixOutService($app->make(TreealContasApiClient::class));
+        });
+
+        $this->app->singleton(TreealContasWebhookRegistrationService::class, function ($app) {
+            return new TreealContasWebhookRegistrationService(
+                $app->make(TreealContasApiClient::class),
+                $app->make(TreealContasAuthService::class),
+            );
+        });
+
+        $this->app->singleton(TreealCashOutOutcomeService::class);
+
         $this->app->singleton(TreealPixAcquirerService::class, function ($app) {
             return new TreealPixAcquirerService(
                 $app->make(TreealAuthService::class),
                 $app->make(TreealContasAuthService::class),
+                $app->make(TreealContasPixOutService::class),
             );
         });
 

@@ -7,6 +7,7 @@ use App\Services\Treeal\TreealAuthService;
 use App\Services\Treeal\TreealMtlsOptions;
 use App\Services\Treeal\TreealPixAcquirerService;
 use App\Services\TreealContas\TreealContasAuthService;
+use App\Services\TreealContas\TreealContasPixOutService;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -31,13 +32,16 @@ class TreealPixAcquirerServiceTest extends TestCase
         parent::tearDown();
     }
 
-    private function service(?TreealAuthService $auth = null): TreealPixAcquirerService
-    {
+    private function service(
+        ?TreealAuthService $auth = null,
+        ?TreealContasPixOutService $contasPixOut = null
+    ): TreealPixAcquirerService {
         $auth ??= $this->createMock(TreealAuthService::class);
 
         return new TreealPixAcquirerService(
             $auth,
             $this->createMock(TreealContasAuthService::class),
+            $contasPixOut ?? $this->createMock(TreealContasPixOutService::class),
         );
     }
 
@@ -147,13 +151,67 @@ class TreealPixAcquirerServiceTest extends TestCase
         $this->assertSame('CANCELED', $service->mapChargeStatus('REMOVIDO_PELO_PSP'));
     }
 
-    public function test_cashout_methods_still_return_stub(): void
+    public function test_create_payout_returns_not_configured_without_contas_credentials(): void
     {
-        $service = $this->service();
-        $message = 'Treeal: operação não implementada — aguardando documentação';
+        $contasPixOut = $this->createMock(TreealContasPixOutService::class);
+        $contasPixOut->method('isConfigured')->willReturn(false);
 
-        $this->assertSame(['success' => false, 'message' => $message], $service->createPayout(10.0, 'key', 'email'));
-        $this->assertSame(['success' => false, 'message' => $message], $service->getPayoutStatus('txid'));
+        $result = $this->service(null, $contasPixOut)->createPayout(10.0, 'key@test.com', 'email');
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('TREEAL_CONTAS', $result['message']);
+    }
+
+    public function test_create_payout_initiates_dict_payment(): void
+    {
+        $contasPixOut = $this->createMock(TreealContasPixOutService::class);
+        $contasPixOut->method('isConfigured')->willReturn(true);
+        $contasPixOut->method('formatPixKeyForDict')->willReturn('key@test.com');
+        $contasPixOut->method('buildDictPaymentBody')->willReturn([
+            'pixKey' => 'key@test.com',
+            'payment' => ['currency' => 'BRL', 'amount' => 10.0],
+        ]);
+        $contasPixOut->method('initiatePaymentByDict')->willReturn([
+            'success' => true,
+            'status' => 202,
+            'data' => [
+                'endToEndId' => 'E4397869720260519000408508c56c02',
+                'status' => 'PROCESSING',
+                'id' => 12345,
+            ],
+        ]);
+
+        $result = $this->service(null, $contasPixOut)->createPayout(
+            10.0,
+            'key@test.com',
+            'email',
+            'Saque teste',
+            'corr123'
+        );
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('E4397869720260519000408508c56c02', $result['referenceCode']);
+        $this->assertSame('PROCESSING', $result['status']);
+    }
+
+    public function test_get_payout_status_queries_by_end_to_end_id(): void
+    {
+        $contasPixOut = $this->createMock(TreealContasPixOutService::class);
+        $contasPixOut->method('isConfigured')->willReturn(true);
+        $contasPixOut->method('getPaymentByEndToEndId')->willReturn([
+            'success' => true,
+            'data' => [
+                'data' => [
+                    'endToEndId' => 'E4397869720260519000408508c56c02',
+                    'status' => 'LIQUIDATED',
+                ],
+            ],
+        ]);
+
+        $result = $this->service(null, $contasPixOut)->getPayoutStatus('E4397869720260519000408508c56c02');
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('COMPLETED', $result['status']);
     }
 
     public function test_create_refund_puts_devolucao(): void

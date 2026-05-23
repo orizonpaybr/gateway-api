@@ -11,7 +11,7 @@ return new class extends Migration
             ['referencia' => 'treeal'],
             [
                 'adquirente' => 'TREEAL',
-                'status' => 0,
+                'status' => 1,
                 'is_default' => 0,
                 'url' => 'https://api.pix-h.treeal.com',
                 'updated_at' => now(),
