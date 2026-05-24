@@ -522,7 +522,7 @@ class PixKeyController extends Controller
                 // o saque só existe no banco se o débito também for aplicado.
                 $withdrawal = \Illuminate\Support\Facades\DB::transaction(function () use (
                     $user, $idempotencyKey, $amount, $keyValue, $keyType,
-                    $taxaCashOut, $cashOutLiquido, $valorTotalDescontar
+                    $taxaCashOut, $cashOutLiquido, $valorTotalDescontar, $adquirenteDefault
                 ) {
                     $w = \App\Models\SolicitacoesCashOut::create([
                         'user_id' => $user->user_id ?? $user->username,
@@ -540,7 +540,7 @@ class PixKeyController extends Controller
                         'valor_total_descontado' => round($valorTotalDescontar, 4),
                         'cash_out_liquido' => $cashOutLiquido,
                         'descricao_transacao' => 'MANUAL',
-                        'executor_ordem' => null,
+                        'executor_ordem' => $adquirenteDefault,
                         'callback' => 'web',
                     ]);
 
