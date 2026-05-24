@@ -231,7 +231,8 @@ class SaqueController extends Controller
                     $taxaCashOut,
                     $cashOutLiquido,
                     $valorTotalDescontar,
-                    $clientPostbackUrl
+                    $clientPostbackUrl,
+                    $default
                 ) {
                     $w = SolicitacoesCashOut::create([
                         'user_id' => $user->user_id ?? $user->username,
