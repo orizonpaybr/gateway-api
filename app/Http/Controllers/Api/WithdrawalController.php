@@ -303,13 +303,9 @@ class WithdrawalController extends Controller
             // Valor + taxa já foram debitados na criação do saque; na aprovação só enviamos ao adquirente e atualizamos o registro
             $taxaEfetiva = $this->getTaxaEfetivaSaque($saque);
 
-            // Determinar adquirente baseado no executor_ordem ou adquirente padrão
-            $adquirente = $saque->executor_ordem ?? Helper::adquirenteDefault();
-
-            // Se não tem executor_ordem, usar adquirente padrão
-            if (! $saque->executor_ordem) {
-                $adquirente = Helper::adquirenteDefault();
-            }
+            // Adquirente do usuário do saque (manual nasce com executor_ordem null)
+            $adquirente = $saque->executor_ordem
+                ?: Helper::adquirenteDefault($userSaque->user_id, 'pix');
 
             if (! $adquirente) {
                 return response()->json([
@@ -324,6 +320,13 @@ class WithdrawalController extends Controller
                     'message' => 'Este método de pagamento não suporta saques PIX.',
                 ], 500);
             }
+
+            Log::info('[MANUAL_APPROVE] Enviando saque ao adquirente', [
+                'payout_id' => $saque->id,
+                'user_id' => $userSaque->user_id,
+                'adquirente' => $adquirente,
+                'callback' => $saque->callback,
+            ]);
 
             $response = $this->approveWithPixAcquirer($adquirente, $saque, $userSaque, $taxaEfetiva);
             if ($response->getStatusCode() === 200) {

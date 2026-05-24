@@ -249,7 +249,7 @@ class SaqueController extends Controller
                         'valor_total_descontado' => round($valorTotalDescontar, 4),
                         'cash_out_liquido' => $cashOutLiquido,
                         'descricao_transacao' => 'MANUAL',
-                        'executor_ordem' => null,
+                        'executor_ordem' => $default,
                         'callback' => $clientPostbackUrl,
                     ]);
 
