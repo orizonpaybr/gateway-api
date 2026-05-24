@@ -97,18 +97,21 @@ class SaqueController extends Controller
 
         $saldoRealDisponivel = $saldoDisponivel - (float) $valoresEmMediacao;
 
-        if ($saldoRealDisponivel < (float) $request->amount) {
+        $amountSolicitado = (float) $request->amount;
+        $taxaPreview = TaxaSaqueHelper::calcularTaxaSaque($amountSolicitado, $setting, $user, $isInterfaceWeb, false, $default);
+        $valorTotalNecessario = (float) $taxaPreview['valor_total_descontar'];
+
+        if ($saldoRealDisponivel < $valorTotalNecessario) {
             $this->dispatchWebhookFalhaSaldoCoratri(
                 $request,
                 $user,
-                (float) $request->amount,
-                $saldoRealDisponivel
+                $amountSolicitado,
             );
 
             return response()->json([
                 'status' => 'error',
                 'message' => 'Não foi possível sacar, entre em contato com o suporte.',
-            ], 401);
+            ], 400);
         }
 
         try {
@@ -212,6 +215,8 @@ class SaqueController extends Controller
             $balanceService = app(\App\Services\BalanceService::class);
             $saldoTotalDisponivel = $balanceService->getTotalAvailableBalance($user);
             if ($saldoTotalDisponivel < $valorTotalDescontar) {
+                $this->dispatchWebhookFalhaSaldoCoratri($request, $user, $amount);
+
                 return response()->json([
                     'status' => 'error',
                     'message' => 'Não foi possível sacar, entre em contato com o suporte.',
@@ -507,11 +512,10 @@ class SaqueController extends Controller
     }
 
     /**
-     * Dispara webhook de falha por saldo insuficiente na conta Coratri do usuário.
-     * Só usa saldo da Coratri (conta do usuário); nunca expõe dados do AdquirentePIX/conta master.
-     * Só é chamado quando a falha é por saldo Coratri; em falhas do AdquirentePIX mantemos mensagem genérica.
+     * Webhook FAILED quando o saldo Coratri do usuário não cobre valor + taxa.
+     * Mensagem genérica (não expõe saldo nem conta master Treeal/Fyhub).
      */
-    private function dispatchWebhookFalhaSaldoCoratri(Request $request, User $user, float $amountRequested, float $saldoCoratriDisponivel): void
+    private function dispatchWebhookFalhaSaldoCoratri(Request $request, User $user, float $amountRequested): void
     {
         $callbackUrl = $request->filled('baasPostbackUrl') && $request->baasPostbackUrl !== 'web'
             ? $request->baasPostbackUrl
@@ -521,8 +525,7 @@ class SaqueController extends Controller
         }
 
         $idTransaction = 'PAYOUT_API_'.preg_replace('/[^a-zA-Z0-9]/', '', Str::uuid()->toString());
-        $messageWebhook = 'Saldo insuficiente. Você tentou sacar R$ '.number_format($amountRequested, 2, ',', '.')
-            .', seu saldo disponível é R$ '.number_format($saldoCoratriDisponivel, 2, ',', '.').'.';
+        $messageWebhook = 'Não foi possível sacar, entre em contato com o suporte.';
 
         try {
             $row = SolicitacoesCashOut::create([
@@ -551,6 +554,13 @@ class SaqueController extends Controller
                 ClientWebhookPayloadBuilder::extraForCashOut($row),
                 $messageWebhook
             );
+
+            Log::info('[PIXOUT][WEBHOOK] Postback FAILED por saldo Coratri insuficiente', [
+                'user_id' => $user->username,
+                'amount' => $amountRequested,
+                'callback' => $callbackUrl,
+                'transaction_id' => $idTransaction,
+            ]);
         } catch (\Throwable $e) {
             Log::warning('SaqueController::dispatchWebhookFalhaSaldoCoratri - Erro ao criar registro ou disparar webhook', [
                 'error' => $e->getMessage(),
