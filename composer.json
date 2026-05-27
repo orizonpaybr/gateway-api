@@ -22,11 +22,12 @@
         "predis/predis": "^3.2",
         "simplesoftwareio/simple-qrcode": "^4.2",
         "symfony/console": ">=7.3.0 <7.4",
-        "symfony/http-foundation": ">=7.3.7 <7.4",
+        "symfony/http-foundation": "^7.4.13",
         "symfony/mailer": "^7.4.12",
         "symfony/mime": "^7.4.12",
+        "symfony/polyfill-intl-idn": "^1.38.1",
         "symfony/process": ">=7.3.11 <7.4",
-        "symfony/routing": "^7.4.12",
+        "symfony/routing": "^7.4.13",
         "symfony/yaml": "^7.4.12"
     },
     "require-dev": {
