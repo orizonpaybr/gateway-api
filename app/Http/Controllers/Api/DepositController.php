@@ -571,11 +571,23 @@ class DepositController extends Controller
         }
 
         $correlationId = preg_replace('/[^a-zA-Z0-9]/', '', Str::uuid()->toString());
+        $debtor = $this->resolvePixDebtorFromRequest($request, $user);
+
+        if ((float) $request->amount >= 0.10 && strlen($debtor['document']) < 11) {
+            return [
+                'status' => 422,
+                'data' => [
+                    'status' => 'error',
+                    'message' => 'CPF/CNPJ do devedor é obrigatório para depósitos PIX a partir de R$ 0,10. Informe debtor_document_number ou complete o cadastro.',
+                ],
+            ];
+        }
+
         $customer = [
-            'name' => $request->debtor_name,
-            'email' => $request->email,
-            'document' => (string) ($request->debtor_document_number ?? ''),
-            'phone' => (string) ($request->phone ?? ''),
+            'name' => $debtor['name'],
+            'email' => $debtor['email'],
+            'document' => $debtor['document'],
+            'phone' => $debtor['phone'],
         ];
 
         $chargeResult = $acquirerService->createCharge(
@@ -616,18 +628,15 @@ class DepositController extends Controller
             ? 'WAITING_FOR_APPROVAL'
             : ($chargeResult['status'] ?? 'WAITING_FOR_APPROVAL');
 
-        $phoneForStorage = trim((string) ($request->phone ?? ''));
-        if ($phoneForStorage === '') {
-            $phoneForStorage = 'N/A';
-        }
+        $phoneForStorage = $debtor['phone'] !== '' ? $debtor['phone'] : 'N/A';
 
         $cashin = [
             'user_id' => $user->username,
             'externalreference' => $idTxn,
             'amount' => $request->amount,
-            'client_name' => $request->debtor_name,
-            'client_document' => $request->debtor_document_number,
-            'client_email' => $request->email,
+            'client_name' => $debtor['name'],
+            'client_document' => $debtor['document'],
+            'client_email' => $debtor['email'],
             'client_telefone' => $phoneForStorage,
             'date' => Carbon::now(),
             'status' => $statusCharge,
@@ -676,6 +685,43 @@ class DepositController extends Controller
                 'qr_code' => $brCode,
                 'qr_code_image_url' => $chargeResult['qrCodeImage'] ?? null,
             ],
+        ];
+    }
+
+    /**
+     * Dados do devedor para cobrança PIX (API + dashboard).
+     * TREEAL exige objeto devedor (nome + CPF/CNPJ) em cobranças a partir de R$ 0,10.
+     * Se o cliente não enviar debtor_document_number, usa cpf_cnpj do usuário autenticado.
+     *
+     * @return array{name: string, document: string, email: string, phone: string}
+     */
+    private function resolvePixDebtorFromRequest(Request $request, $user): array
+    {
+        $document = preg_replace('/\D/', '', (string) ($request->debtor_document_number ?? ''));
+        if ($document === '') {
+            $document = preg_replace('/\D/', '', (string) ($user->cpf_cnpj ?? ''));
+        }
+
+        $name = trim((string) ($request->debtor_name ?? ''));
+        if ($name === '') {
+            $name = trim((string) ($user->name ?? $user->username ?? ''));
+        }
+
+        $email = trim((string) ($request->email ?? ''));
+        if ($email === '') {
+            $email = trim((string) ($user->email ?? ''));
+        }
+
+        $phone = preg_replace('/\D/', '', (string) ($request->phone ?? ''));
+        if ($phone === '') {
+            $phone = preg_replace('/\D/', '', (string) ($user->telefone ?? ''));
+        }
+
+        return [
+            'name' => $name,
+            'document' => $document,
+            'email' => $email,
+            'phone' => $phone,
         ];
     }
 
