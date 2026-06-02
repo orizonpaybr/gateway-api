@@ -123,33 +123,34 @@ class DepositController extends Controller
 
     public function statusDeposito(Request $request)
     {
-        $deposit = Solicitacoes::where('idTransaction', $request->idTransaction)
-            ->orWhere('externalreference', $request->idTransaction)
-            ->first();
+        $transactionId = trim((string) $request->input('idTransaction', ''));
+        if ($transactionId === '') {
+            return response()->json(['status' => 'NOT_FOUND']);
+        }
 
+        $deposit = $this->findSolicitacaoByTransactionId($transactionId);
         if ($deposit) {
-            if ($deposit->status === 'WAITING_FOR_APPROVAL' && $deposit->executor_ordem === 'fyhub') {
-                app(\App\Services\Fyhub\FyhubDepositReconciler::class)->reconcileIfPaid($deposit);
-                $deposit->refresh();
-            }
-
-            if ($deposit->status === 'WAITING_FOR_APPROVAL' && $deposit->executor_ordem === 'treeal') {
-                app(\App\Services\Treeal\TreealDepositReconciler::class)->reconcileIfPaid($deposit);
-                $deposit->refresh();
-            }
-
             return response()->json($this->buildStatusResponse($deposit));
         }
 
-        $cashOut = SolicitacoesCashOut::where('idTransaction', $request->idTransaction)
-            ->orWhere('externalreference', $request->idTransaction)
-            ->first();
-
+        $cashOut = $this->findCashOutByTransactionId($transactionId);
         if ($cashOut) {
             return response()->json($this->buildStatusResponse($cashOut));
         }
 
         return response()->json(['status' => 'NOT_FOUND']);
+    }
+
+    private function findSolicitacaoByTransactionId(string $transactionId): ?Solicitacoes
+    {
+        return Solicitacoes::where('idTransaction', $transactionId)->first()
+            ?? Solicitacoes::where('externalreference', $transactionId)->first();
+    }
+
+    private function findCashOutByTransactionId(string $transactionId): ?SolicitacoesCashOut
+    {
+        return SolicitacoesCashOut::where('idTransaction', $transactionId)->first()
+            ?? SolicitacoesCashOut::where('externalreference', $transactionId)->first();
     }
 
     private function buildStatusResponse($transaction): array
