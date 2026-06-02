@@ -29,8 +29,9 @@ return Application::configure(basePath: dirname(__DIR__))
 
         RateLimiter::for('status-check', function (Request $request) {
             $key = $request->input('token') ?? $request->input('idTransaction') ?? $request->ip();
+            $perMinute = max(30, (int) config('saque.status_check_rate_limit_per_minute', 120));
 
-            return Limit::perMinutes(15, 10000)->by('status|'.$key);
+            return Limit::perMinute($perMinute)->by('status|'.$key);
         });
 
         RateLimiter::for('simpay-webhook', function (Request $request) {
