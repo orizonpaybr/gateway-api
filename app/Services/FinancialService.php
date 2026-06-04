@@ -216,12 +216,20 @@ class FinancialService
     }
 
     /**
-     * Filtro de status em depósitos (tela unificada: "Pago" inclui COMPLETED).
+     * Filtro de status em depósitos (Relatórios de Entradas / transações unificadas).
+     * UI "Pendente" envia PENDING, mas PIX IN pendente fica WAITING_FOR_APPROVAL (e variantes).
      */
     private function applyDepositStatusFilter($query, string $status): void
     {
         if ($status === 'PAID_OUT') {
             $query->whereIn('status', ['PAID_OUT', 'COMPLETED']);
+
+            return;
+        }
+
+        if ($status === 'PENDING' || $status === 'WAITING_FOR_APPROVAL') {
+            $query->whereIn('status', ['WAITING_FOR_APPROVAL', 'PENDING', 'NEW', 'CREATED']);
+
             return;
         }
 
@@ -234,14 +242,21 @@ class FinancialService
      */
     private function applyWithdrawalStatusFilter($query, string $status): void
     {
-        if ($status === 'WAITING_FOR_APPROVAL' || $status === 'PENDING') {
-            $query->whereIn('status', ['PENDING']);
+        if ($status === 'PAID_OUT') {
+            $query->whereIn('status', ['PAID_OUT', 'COMPLETED', 'PROCESSING']);
 
             return;
         }
 
-        if ($status === 'PAID_OUT') {
-            $query->whereIn('status', ['PAID_OUT', 'COMPLETED', 'PROCESSING']);
+        if ($status === 'FAILED' || $status === 'CANCELLED') {
+            $query->where('status', $status);
+
+            return;
+        }
+
+        // Transações unificadas (depósitos): pendente usa WAITING_FOR_APPROVAL
+        if ($status === 'WAITING_FOR_APPROVAL' || $status === 'PENDING') {
+            $query->whereIn('status', ['PENDING']);
 
             return;
         }
