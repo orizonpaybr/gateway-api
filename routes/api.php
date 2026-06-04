@@ -170,7 +170,11 @@ Route::middleware(['verify.jwt'])->group(function () {
     Route::middleware(['throttle:5,1'])->post('integration/regenerate-secret', [App\Http\Controllers\Api\IntegrationController::class, 'regenerateSecret']);
     Route::middleware(['throttle:20,1'])->group(function () {
         Route::post('integration/allowed-ips', [App\Http\Controllers\Api\IntegrationController::class, 'addAllowedIP']);
-        Route::delete('integration/allowed-ips/{ip}', [App\Http\Controllers\Api\IntegrationController::class, 'removeAllowedIP']);
+        // IP no body (CIDR contém "/" — não pode ir na URL por limitação do nginx)
+        Route::delete('integration/allowed-ips', [App\Http\Controllers\Api\IntegrationController::class, 'removeAllowedIP']);
+        // Legado: apenas IPv4 sem barra no path
+        Route::delete('integration/allowed-ips/{ip}', [App\Http\Controllers\Api\IntegrationController::class, 'removeAllowedIP'])
+            ->where('ip', '[0-9.]+');
     });
 });
 

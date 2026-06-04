@@ -341,19 +341,20 @@ class IntegrationController extends Controller
      * Remover IP autorizado
      * 
      * @OA\Delete(
-     *     path="/api/integration/allowed-ips/{ip}",
+     *     path="/api/integration/allowed-ips",
      *     tags={"Integration"},
      *     security={{"bearerAuth":{}}},
-     *     @OA\Parameter(
-     *         name="ip",
-     *         in="path",
-     *         required=true,
-     *         @OA\Schema(type="string")
+     *     @OA\RequestBody(
+     *         @OA\JsonContent(
+     *             required={"ip"},
+     *             @OA\Property(property="ip", type="string", example="74.220.48.0/24"),
+     *             @OA\Property(property="pin", type="string", example="123456")
+     *         )
      *     ),
      *     @OA\Response(response="200", description="IP removido")
      * )
      */
-    public function removeAllowedIP(Request $request, $ip)
+    public function removeAllowedIP(Request $request, ?string $ip = null)
     {
         try {
             $user = $request->user() ?? $request->user_auth;
@@ -365,7 +366,18 @@ class IntegrationController extends Controller
                 ], 401);
             }
 
-            $ip = trim(urldecode((string) $ip));
+            $ip = $this->resolveAllowedIpFromRemoveRequest($request, $ip);
+
+            if ($ip === null || $ip === '') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'O IP é obrigatório',
+                ], 400);
+            }
+
+            if (str_contains($ip, '/')) {
+                $ip = IPManagementTrait::normalizeAllowedIP($ip);
+            }
 
             if (! IPManagementTrait::isValidIP($ip)) {
                 return response()->json([
@@ -450,6 +462,25 @@ class IntegrationController extends Controller
                 'message' => 'Erro ao remover IP'
             ], 500);
         }
+    }
+
+    /**
+     * Resolve IP da remoção: body JSON (preferido para CIDR) ou path legado.
+     */
+    private function resolveAllowedIpFromRemoveRequest(Request $request, ?string $pathIp): ?string
+    {
+        if ($pathIp !== null && $pathIp !== '') {
+            return trim(urldecode($pathIp));
+        }
+
+        $body = json_decode($request->getContent(), true);
+        if (! is_array($body)) {
+            $body = [];
+        }
+
+        $fromBody = $request->input('ip') ?? ($body['ip'] ?? null);
+
+        return is_string($fromBody) ? trim($fromBody) : null;
     }
 
     /**
