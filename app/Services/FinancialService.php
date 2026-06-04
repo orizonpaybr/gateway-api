@@ -229,26 +229,24 @@ class FinancialService
     }
 
     /**
-     * Status de saque na listagem unificada — mesma regra de getWithdrawals (Relatórios de Saídas).
+     * Filtro de status em saques (Relatórios de Saídas / transações unificadas).
+     * UI "Pago" envia PAID_OUT, mas a maioria dos PIX OUT recentes fica COMPLETED ou PROCESSING.
      */
     private function applyWithdrawalStatusFilter($query, string $status): void
     {
-        $normalized = $this->normalizeWithdrawalStatusFilter($status);
-        if ($normalized) {
-            $query->where('status', $normalized);
-        }
-    }
+        if ($status === 'WAITING_FOR_APPROVAL' || $status === 'PENDING') {
+            $query->whereIn('status', ['PENDING']);
 
-    /**
-     * Depósitos usam WAITING_FOR_APPROVAL; saques usam PENDING na tabela.
-     */
-    private function normalizeWithdrawalStatusFilter(?string $status): ?string
-    {
-        if ($status === 'WAITING_FOR_APPROVAL') {
-            return 'PENDING';
+            return;
         }
 
-        return $status;
+        if ($status === 'PAID_OUT') {
+            $query->whereIn('status', ['PAID_OUT', 'COMPLETED', 'PROCESSING']);
+
+            return;
+        }
+
+        $query->where('status', $status);
     }
 
     private function resolveTransactionUserLookup(Collection $rows): array
@@ -560,7 +558,7 @@ class FinancialService
     {
         $page = max(1, (int) ($filters['page'] ?? 1));
         $limit = min(max(1, (int) ($filters['limit'] ?? 20)), 100);
-        $status = $this->normalizeWithdrawalStatusFilter($filters['status'] ?? null);
+        $status = $filters['status'] ?? null;
         $busca = $filters['busca'] ?? null;
         $dataInicio = $filters['data_inicio'] ?? null;
         $dataFim = $filters['data_fim'] ?? null;
@@ -588,7 +586,7 @@ class FinancialService
                     'beneficiaryname', // CORRIGIDO: Incluir para busca
                     'created_at',
                 ])
-                ->when($status, fn ($q) => $q->where('status', $status))
+                ->when($status, fn ($q) => $this->applyWithdrawalStatusFilter($q, $status))
                 ->when($busca, fn($q) => $this->applyWithdrawalSearch($q, $busca))
                 ->tap(fn ($q) => $this->applyFinancialDateRangeFilter($q, $dataInicio, $dataFim))
                 ->orderBy('date', 'desc');
