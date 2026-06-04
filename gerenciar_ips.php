@@ -9,6 +9,7 @@
 require_once 'vendor/autoload.php';
 
 use App\Models\User;
+use App\Traits\IPManagementTrait;
 
 function mostrarAjuda() {
     echo "=== GERENCIADOR DE IPs PERMITIDOS ===\n\n";
@@ -54,12 +55,13 @@ function adicionarIP($username, $ip) {
         return;
     }
     
-    // Validar IP
-    if (!filter_var($ip, FILTER_VALIDATE_IP)) {
-        echo "❌ IP '$ip' inválido.\n";
+    if (!IPManagementTrait::isValidIP($ip)) {
+        echo "❌ IP '$ip' inválido (use IPv4, CIDR ou wildcard).\n";
         return;
     }
-    
+
+    $ip = IPManagementTrait::normalizeAllowedIP($ip);
+
     $currentIPs = json_decode($user->ips_saque_permitidos ?? '[]', true);
     
     if (in_array($ip, $currentIPs)) {
@@ -115,15 +117,16 @@ function configurarIPs($username, $ipsJson) {
         return;
     }
     
-    // Validar todos os IPs
+    $normalized = [];
     foreach ($ips as $ip) {
-        if (!filter_var($ip, FILTER_VALIDATE_IP)) {
+        if (!is_string($ip) || !IPManagementTrait::isValidIP($ip)) {
             echo "❌ IP '$ip' inválido.\n";
             return;
         }
+        $normalized[] = IPManagementTrait::normalizeAllowedIP($ip);
     }
-    
-    $user->ips_saque_permitidos = json_encode($ips);
+
+    $user->ips_saque_permitidos = json_encode($normalized);
     $user->save();
     
     echo "✅ IPs configurados para o usuário '$username'.\n";

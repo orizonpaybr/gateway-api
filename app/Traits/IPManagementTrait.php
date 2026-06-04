@@ -36,8 +36,8 @@ trait IPManagementTrait
             }
         }
         
-        // Verificar se é um IP global primeiro
-        if (in_array($clientIP, $globalIPs)) {
+        // Verificar IPs globais (exato, CIDR ou wildcard)
+        if (! empty($globalIPs) && self::checkIPInList($clientIP, $globalIPs)) {
             return true;
         }
 
@@ -122,10 +122,27 @@ trait IPManagementTrait
      */
     public static function isIPInCIDR(string $ip, string $cidr): bool
     {
-        list($subnet, $mask) = explode('/', $cidr);
-        
-        if (!filter_var($ip, FILTER_VALIDATE_IP)) {
+        if (! filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
             return false;
+        }
+
+        $parts = explode('/', trim($cidr), 2);
+        if (count($parts) !== 2) {
+            return false;
+        }
+
+        [$subnet, $maskBits] = $parts;
+        if (! filter_var($subnet, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) || ! ctype_digit($maskBits)) {
+            return false;
+        }
+
+        $mask = (int) $maskBits;
+        if ($mask < 0 || $mask > 32) {
+            return false;
+        }
+
+        if ($mask === 0) {
+            return true;
         }
 
         $ipLong = ip2long($ip);
@@ -246,6 +263,12 @@ trait IPManagementTrait
     public static function addAllowedIP(User $user, string $ip): bool
     {
         try {
+            $ip = self::normalizeAllowedIP(trim($ip));
+
+            if (! self::isValidIP($ip)) {
+                return false;
+            }
+
             // Recarregar usuário do banco para garantir dados atualizados
             $user = User::where('username', $user->username)->first();
             if (!$user) {
@@ -389,29 +412,103 @@ trait IPManagementTrait
     }
 
     /**
-     * Valida se um IP é válido
+     * Normaliza entrada para formato canônico (rede + máscara em CIDR).
+     */
+    public static function normalizeAllowedIP(string $ip): string
+    {
+        $ip = trim($ip);
+
+        if (! str_contains($ip, '/')) {
+            return $ip;
+        }
+
+        $parts = explode('/', $ip, 2);
+        if (count($parts) !== 2 || ! self::isValidIPv4Octets($parts[0])) {
+            return $ip;
+        }
+
+        $mask = (int) $parts[1];
+        if ($mask < 0 || $mask > 32) {
+            return $ip;
+        }
+
+        if ($mask === 0) {
+            return '0.0.0.0/0';
+        }
+
+        $subnetLong = ip2long($parts[0]);
+        $maskLong = (-1 << (32 - $mask));
+
+        return long2ip($subnetLong & $maskLong).'/'.$mask;
+    }
+
+    /**
+     * Valida se um IP, CIDR ou wildcard é permitido na allowlist.
      */
     public static function isValidIP(string $ip): bool
     {
-        // Verificar IP simples
-        if (filter_var($ip, FILTER_VALIDATE_IP)) {
-            return true;
+        $ip = trim($ip);
+
+        if ($ip === '') {
+            return false;
         }
 
-        // Verificar CIDR
         if (str_contains($ip, '/')) {
-            list($subnet, $mask) = explode('/', $ip);
-            if (filter_var($subnet, FILTER_VALIDATE_IP) && is_numeric($mask) && $mask >= 0 && $mask <= 32) {
-                return true;
+            return self::isValidCidr($ip);
+        }
+
+        if (str_contains($ip, '*')) {
+            return self::isValidWildcardIPv4($ip);
+        }
+
+        return self::isValidIPv4Octets($ip);
+    }
+
+    private static function isValidIPv4Octets(string $ip): bool
+    {
+        if (! preg_match('/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/', $ip, $matches)) {
+            return false;
+        }
+
+        for ($i = 1; $i <= 4; $i++) {
+            $octet = (int) $matches[$i];
+            if ($octet < 0 || $octet > 255) {
+                return false;
             }
         }
 
-        // Verificar wildcard
-        if (str_contains($ip, '*')) {
-            $pattern = str_replace('*', '.*', preg_quote($ip, '/'));
-            return preg_match('/^' . $pattern . '$/', '192.168.1.1') !== false;
+        return filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false;
+    }
+
+    private static function isValidCidr(string $cidr): bool
+    {
+        $parts = explode('/', trim($cidr), 2);
+        if (count($parts) !== 2 || str_contains($parts[0], '*')) {
+            return false;
         }
 
-        return false;
+        $mask = $parts[1];
+        if (! ctype_digit($mask)) {
+            return false;
+        }
+
+        $maskInt = (int) $mask;
+        if ($maskInt < 0 || $maskInt > 32) {
+            return false;
+        }
+
+        return self::isValidIPv4Octets($parts[0]);
+    }
+
+    private static function isValidWildcardIPv4(string $ip): bool
+    {
+        if (str_contains($ip, '/')) {
+            return false;
+        }
+
+        $pattern = str_replace('*', '0', $ip);
+
+        return self::isValidIPv4Octets($pattern)
+            && preg_match('/^(\d{1,3}|\*)(\.(\d{1,3}|\*)){3}$/', $ip) === 1;
     }
 }
