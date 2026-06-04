@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\UsersKey;
+use App\Rules\AllowedIpEntry;
 use App\Traits\IPManagementTrait;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -231,7 +232,7 @@ class IntegrationController extends Controller
      *     @OA\RequestBody(
      *         @OA\JsonContent(
      *             required={"ip"},
-     *             @OA\Property(property="ip", type="string", example="192.168.1.1")
+             *             @OA\Property(property="ip", type="string", example="74.220.48.0/24")
      *         )
      *     ),
      *     @OA\Response(response="200", description="IP adicionado")
@@ -251,11 +252,10 @@ class IntegrationController extends Controller
 
             // Construir regras de validação de forma condicional
             $rules = [
-                'ip' => 'required|ip'
+                'ip' => ['required', 'string', 'max:64', new AllowedIpEntry()],
             ];
             $messages = [
                 'ip.required' => 'O IP é obrigatório',
-                'ip.ip' => 'Formato de IP inválido'
             ];
 
             // Se 2FA estiver ativo, exigir PIN
@@ -286,19 +286,19 @@ class IntegrationController extends Controller
                 }
             }
 
-            $ip = $request->input('ip');
-            
+            $ip = IPManagementTrait::normalizeAllowedIP((string) $request->input('ip'));
+
             // Buscar usuário atualizado
             $userRefreshed = User::where('username', $user->username)->first();
-            
+
             if (!$userRefreshed) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Usuário não encontrado'
                 ], 404);
             }
-            
-            $result = \App\Traits\IPManagementTrait::addAllowedIP($userRefreshed, $ip);
+
+            $result = IPManagementTrait::addAllowedIP($userRefreshed, $ip);
             
             if (!$result) {
                 return response()->json([
@@ -367,8 +367,7 @@ class IntegrationController extends Controller
 
             $ip = trim(urldecode((string) $ip));
 
-            // Validar formato do IP
-            if (!filter_var($ip, FILTER_VALIDATE_IP)) {
+            if (! IPManagementTrait::isValidIP($ip)) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Formato de IP inválido'

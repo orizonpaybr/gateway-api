@@ -204,7 +204,7 @@ class GatewaySettingsService
             
             // Configurações de Segurança
             'global_ips' => 'nullable|array',
-            'global_ips.*' => 'nullable|string|ip',
+            'global_ips.*' => ['nullable', 'string', 'max:64', new \App\Rules\AllowedIpEntry()],
         ];
     }
 }

@@ -95,7 +95,8 @@ class App extends Model
     public function isIpWhitelisted(string $ip): bool
     {
         $globalIps = $this->global_ips ?? [];
-        return in_array($ip, $globalIps);
+
+        return \App\Traits\IPManagementTrait::checkIPInList($ip, $globalIps);
     }
 
     /**
