@@ -55,29 +55,266 @@ class FinancialService
         // Cache key baseado nos filtros (TTL curto para atualização rápida na tela Transações Financeiras)
         $cacheKey = $this->getTransactionsCacheKey($filters);
 
-        return Cache::remember($cacheKey, self::CACHE_TTL_TRANSACTIONS_VIEW, function () use (
-            $page, $limit, $status, $tipo, $busca, $dataInicio, $dataFim
-        ) {
-            $deposits = $this->getDepositsQuery($status, $busca, $dataInicio, $dataFim, $tipo);
-            $withdrawals = $this->getWithdrawalsQuery($status, $busca, $dataInicio, $dataFim, $tipo);
+        return Cache::remember($cacheKey, self::CACHE_TTL_TRANSACTIONS_VIEW, function () use ($filters, $tipo) {
+            // Saques/depósitos isolados: mesma lógica das telas Relatórios de Saídas/Entradas
+            if ($tipo === 'saque') {
+                $result = $this->getWithdrawals($filters);
+                $result['data'] = array_map(
+                    static fn (array $row) => array_merge($row, ['tipo' => 'saque']),
+                    $result['data']
+                );
 
-            // Mesclar e ordenar
-            $allTransactions = $deposits->merge($withdrawals)
-                ->sortByDesc('created_at')
-                ->values();
+                return $result;
+            }
 
-            // Paginar manualmente (já que mesclamos duas coleções)
-            $total = $allTransactions->count();
-            $transactions = $allTransactions->forPage($page, $limit)->values();
+            if ($tipo === 'deposito') {
+                $result = $this->getDeposits($filters);
+                $result['data'] = array_map(
+                    static fn (array $row) => array_merge($row, ['tipo' => 'deposito']),
+                    $result['data']
+                );
 
-            return [
-                'data' => $transactions->toArray(),
-                'current_page' => (int) $page,
-                'last_page' => (int) ceil($total / $limit),
-                'per_page' => (int) $limit,
-                'total' => $total,
-            ];
+                return $result;
+            }
+
+            return $this->fetchPaginatedAllTransactions(
+                (int) ($filters['page'] ?? 1),
+                (int) min($filters['limit'] ?? 20, 100),
+                $filters['status'] ?? null,
+                null,
+                $filters['busca'] ?? null,
+                $filters['data_inicio'] ?? null,
+                $filters['data_fim'] ?? null
+            );
         });
+    }
+
+    /**
+     * Lista unificada depósitos + saques com paginação no banco (evita carregar tabela inteira em memória).
+     */
+    private function fetchPaginatedAllTransactions(
+        int $page,
+        int $limit,
+        ?string $status,
+        ?string $tipo,
+        ?string $busca,
+        ?string $dataInicio,
+        ?string $dataFim
+    ): array {
+        $page = max(1, $page);
+        $limit = min(max(1, $limit), 100);
+        $offset = ($page - 1) * $limit;
+
+        $depositosQuery = $this->buildAdminDepositsUnionQuery($status, $busca, $dataInicio, $dataFim);
+        $saquesQuery = $this->buildAdminWithdrawalsUnionQuery($status, $busca, $dataInicio, $dataFim);
+
+        if ($tipo === 'deposito') {
+            $unionQuery = $depositosQuery;
+        } elseif ($tipo === 'saque') {
+            $unionQuery = $saquesQuery;
+        } else {
+            $unionQuery = $depositosQuery->unionAll($saquesQuery);
+        }
+
+        $total = (int) DB::query()->fromSub($unionQuery, 'transactions')->count();
+
+        $rows = DB::query()
+            ->fromSub($unionQuery, 'transactions')
+            ->orderBy('date', 'desc')
+            ->orderBy('created_at', 'desc')
+            ->skip($offset)
+            ->take($limit)
+            ->get();
+
+        $userLookup = $this->resolveTransactionUserLookup($rows);
+
+        $data = $rows->map(fn ($row) => $this->formatTransactionFromUnionRow($row, $userLookup))->values()->all();
+
+        return [
+            'data' => $data,
+            'current_page' => $page,
+            'last_page' => (int) max(1, (int) ceil($total / $limit)),
+            'per_page' => $limit,
+            'total' => $total,
+        ];
+    }
+
+    private function buildAdminDepositsUnionQuery(
+        ?string $status,
+        ?string $busca,
+        ?string $dataInicio,
+        ?string $dataFim
+    ) {
+        $query = Solicitacoes::query()
+            ->select([
+                'id',
+                'user_id',
+                'idTransaction',
+                'amount',
+                'deposito_liquido as valor_liquido',
+                'status',
+                'date',
+                'created_at',
+                DB::raw("COALESCE(method, 'pix') as meio"),
+                DB::raw("'deposito' as tipo"),
+            ])
+            ->when($status, fn ($q) => $this->applyDepositStatusFilter($q, $status))
+            ->when($busca, fn ($q) => $this->applyDepositSearch($q, $busca))
+            ->tap(fn ($q) => $this->applyFinancialDateRangeFilter($q, $dataInicio, $dataFim));
+
+        return $query;
+    }
+
+    private function buildAdminWithdrawalsUnionQuery(
+        ?string $status,
+        ?string $busca,
+        ?string $dataInicio,
+        ?string $dataFim
+    ) {
+        $query = SolicitacoesCashOut::query()
+            ->select([
+                'id',
+                'user_id',
+                'idTransaction',
+                'amount',
+                'cash_out_liquido as valor_liquido',
+                'status',
+                'date',
+                'created_at',
+                DB::raw("'pix' as meio"),
+                DB::raw("'saque' as tipo"),
+            ])
+            ->when($status, fn ($q) => $this->applyWithdrawalStatusFilter($q, $status))
+            ->when($busca, fn ($q) => $this->applyWithdrawalSearch($q, $busca))
+            ->tap(fn ($q) => $this->applyFinancialDateRangeFilter($q, $dataInicio, $dataFim));
+
+        return $query;
+    }
+
+    /**
+     * Filtro de período alinhado ao extrato/admin (whereBetween com hora).
+     */
+    private function applyFinancialDateRangeFilter($query, ?string $dataInicio, ?string $dataFim): void
+    {
+        if ($dataInicio && $dataFim) {
+            $inicio = strlen($dataInicio) === 10 ? $dataInicio . ' 00:00:00' : $dataInicio;
+            $fim = strlen($dataFim) === 10 ? $dataFim . ' 23:59:59' : $dataFim;
+            $query->whereBetween('date', [$inicio, $fim]);
+
+            return;
+        }
+
+        if ($dataInicio) {
+            $inicio = strlen($dataInicio) === 10 ? $dataInicio . ' 00:00:00' : $dataInicio;
+            $query->where('date', '>=', $inicio);
+        }
+
+        if ($dataFim) {
+            $fim = strlen($dataFim) === 10 ? $dataFim . ' 23:59:59' : $dataFim;
+            $query->where('date', '<=', $fim);
+        }
+    }
+
+    /**
+     * Filtro de status em depósitos (tela unificada: "Pago" inclui COMPLETED).
+     */
+    private function applyDepositStatusFilter($query, string $status): void
+    {
+        if ($status === 'PAID_OUT') {
+            $query->whereIn('status', ['PAID_OUT', 'COMPLETED']);
+            return;
+        }
+
+        $query->where('status', $status);
+    }
+
+    /**
+     * Status de saque na listagem unificada — mesma regra de getWithdrawals (Relatórios de Saídas).
+     */
+    private function applyWithdrawalStatusFilter($query, string $status): void
+    {
+        $normalized = $this->normalizeWithdrawalStatusFilter($status);
+        if ($normalized) {
+            $query->where('status', $normalized);
+        }
+    }
+
+    /**
+     * Depósitos usam WAITING_FOR_APPROVAL; saques usam PENDING na tabela.
+     */
+    private function normalizeWithdrawalStatusFilter(?string $status): ?string
+    {
+        if ($status === 'WAITING_FOR_APPROVAL') {
+            return 'PENDING';
+        }
+
+        return $status;
+    }
+
+    private function resolveTransactionUserLookup(Collection $rows): array
+    {
+        $identifiers = $rows->pluck('user_id')->filter()->unique()->values()->all();
+        if ($identifiers === []) {
+            return ['by_user_id' => [], 'by_username' => []];
+        }
+
+        $byUserId = User::query()
+            ->select(['user_id', 'username'])
+            ->whereIn('user_id', $identifiers)
+            ->get()
+            ->keyBy('user_id');
+
+        $byUsername = User::query()
+            ->select(['user_id', 'username'])
+            ->whereIn('username', $identifiers)
+            ->get()
+            ->keyBy('username');
+
+        return [
+            'by_user_id' => $byUserId,
+            'by_username' => $byUsername,
+        ];
+    }
+
+    private function formatTransactionFromUnionRow(object $row, array $userLookup): array
+    {
+        $tipo = $row->tipo ?? 'deposito';
+        $isDeposit = $tipo === 'deposito';
+        $status = (string) ($row->status ?? '');
+
+        $valorLiquido = (float) ($row->valor_liquido ?? 0);
+        if (! $isDeposit && $valorLiquido == 0.0) {
+            $valorLiquido = (float) ($row->amount ?? 0);
+        }
+
+        $userId = $row->user_id ?? '';
+        $clienteId = $userId;
+        if (isset($userLookup['by_user_id'][$userId])) {
+            $clienteId = $userLookup['by_user_id'][$userId]->username;
+        } elseif (isset($userLookup['by_username'][$userId])) {
+            $clienteId = $userLookup['by_username'][$userId]->username;
+        }
+
+        $transacaoId = $row->idTransaction ?? null;
+        if (! $isDeposit && empty($transacaoId)) {
+            $transacaoId = 'dep_' . $row->id;
+        }
+
+        return [
+            'id' => (int) $row->id,
+            'tipo' => $tipo,
+            'meio' => $row->meio ?? ($isDeposit ? 'pix' : 'pix'),
+            'cliente_id' => $clienteId,
+            'transacao_id' => $transacaoId,
+            'valor_total' => (float) ($row->amount ?? 0),
+            'valor_liquido' => $valorLiquido,
+            'status' => $status,
+            'status_legivel' => $isDeposit
+                ? $this->getStatusLabel($status)
+                : $this->getWithdrawalStatusLabel($status),
+            'data' => $row->date,
+            'created_at' => $row->created_at,
+        ];
     }
 
     /**
@@ -238,10 +475,9 @@ class FinancialService
                     'status', 'date', 'method', 'client_name', 'created_at',
                     'adquirente_ref', 'executor_ordem',
                 ])
-                ->when($status, fn($q) => $q->where('status', $status))
+                ->when($status, fn ($q) => $this->applyDepositStatusFilter($q, $status))
                 ->when($busca, fn($q) => $this->applyDepositSearch($q, $busca))
-                ->when($dataInicio, fn($q) => $q->where('date', '>=', $dataInicio))
-                ->when($dataFim, fn($q) => $q->where('date', '<=', $dataFim . ' 23:59:59'))
+                ->tap(fn ($q) => $this->applyFinancialDateRangeFilter($q, $dataInicio, $dataFim))
                 ->orderBy('date', 'desc'); // Usa índice sol_date_idx
 
             $deposits = $query->paginate($limit, ['*'], 'page', $page);
@@ -324,7 +560,7 @@ class FinancialService
     {
         $page = max(1, (int) ($filters['page'] ?? 1));
         $limit = min(max(1, (int) ($filters['limit'] ?? 20)), 100);
-        $status = $filters['status'] ?? null;
+        $status = $this->normalizeWithdrawalStatusFilter($filters['status'] ?? null);
         $busca = $filters['busca'] ?? null;
         $dataInicio = $filters['data_inicio'] ?? null;
         $dataFim = $filters['data_fim'] ?? null;
@@ -352,10 +588,9 @@ class FinancialService
                     'beneficiaryname', // CORRIGIDO: Incluir para busca
                     'created_at',
                 ])
-                ->when($status, fn($q) => $q->where('status', $status))
+                ->when($status, fn ($q) => $q->where('status', $status))
                 ->when($busca, fn($q) => $this->applyWithdrawalSearch($q, $busca))
-                ->when($dataInicio, fn($q) => $q->where('date', '>=', $dataInicio))
-                ->when($dataFim, fn($q) => $q->where('date', '<=', $dataFim . ' 23:59:59'))
+                ->tap(fn ($q) => $this->applyFinancialDateRangeFilter($q, $dataInicio, $dataFim))
                 ->orderBy('date', 'desc');
 
             $withdrawals = $query->paginate($limit, ['*'], 'page', $page);
@@ -457,59 +692,6 @@ class FinancialService
     }
 
     // ========== Métodos Privados (Helpers) ==========
-
-    /**
-     * Query para depósitos
-     */
-    private function getDepositsQuery(?string $status, ?string $busca, ?string $dataInicio, ?string $dataFim, ?string $tipo): Collection
-    {
-        if ($tipo && $tipo !== 'deposito') {
-            return collect();
-        }
-
-        $query = Solicitacoes::with('user:id,user_id,name,username')
-            ->when($status, fn($q) => $q->where('status', $status))
-            ->when($busca, fn($q) => $this->applyDepositSearch($q, $busca))
-            ->when($dataInicio, fn($q) => $q->where('date', '>=', $dataInicio))
-            ->when($dataFim, fn($q) => $q->where('date', '<=', $dataFim . ' 23:59:59'))
-            ->orderBy('date', 'desc');
-
-        return $query->get()->map(fn($item) => $this->formatTransaction($item, 'deposito'));
-    }
-
-    /**
-     * Query para saques
-     */
-    private function getWithdrawalsQuery(?string $status, ?string $busca, ?string $dataInicio, ?string $dataFim, ?string $tipo): Collection
-    {
-        if ($tipo && $tipo !== 'saque') {
-            return collect();
-        }
-
-        // CORRIGIDO: Selecionar campos específicos incluindo cash_out_liquido
-        $query = SolicitacoesCashOut::with('user:id,user_id,name,username')
-            ->select([
-                'id',
-                'user_id',
-                'idTransaction',
-                'amount',
-                'cash_out_liquido',
-                'status',
-                'date',
-                'pixkey',
-                'type',
-                'taxa_cash_out',
-                'beneficiaryname',
-                'created_at',
-            ])
-            ->when($status, fn($q) => $q->where('status', $status))
-            ->when($busca, fn($q) => $this->applyWithdrawalSearch($q, $busca))
-            ->when($dataInicio, fn($q) => $q->where('date', '>=', $dataInicio))
-            ->when($dataFim, fn($q) => $q->where('date', '<=', $dataFim . ' 23:59:59'))
-            ->orderBy('date', 'desc');
-
-        return $query->get()->map(fn($item) => $this->formatTransaction($item, 'saque'));
-    }
 
     /**
      * Estatísticas agregadas de depósitos
@@ -719,44 +901,6 @@ class FinancialService
         };
         
         return $query;
-    }
-
-    /**
-     * Formatar transação (depósito ou saque)
-     */
-    private function formatTransaction($item, string $tipo): array
-    {
-        $isDeposit = $tipo === 'deposito';
-        $model = $isDeposit ? Solicitacoes::class : SolicitacoesCashOut::class;
-
-        // CORRIGIDO: Usar cash_out_liquido diretamente para saques
-        // Se cash_out_liquido for NULL ou 0, calcular: amount (cliente sempre recebe o valor solicitado)
-        if ($isDeposit) {
-            $valorLiquido = $item->deposito_liquido ?? 0;
-        } else {
-            $valorLiquido = $item->cash_out_liquido ?? $item->valor_liquido ?? null;
-            if ($valorLiquido === null || $valorLiquido == 0) {
-                // Para saques, o cliente sempre recebe o valor solicitado (amount)
-                // A taxa é descontada do saldo, não do valor recebido
-                $valorLiquido = $item->amount ?? 0;
-            }
-        }
-
-        return [
-            'id' => $item->id,
-            'tipo' => $tipo,
-            'meio' => $isDeposit ? ($item->method ?? 'pix') : 'pix',
-            'cliente_id' => $item->user ? $item->user->username : $item->user_id,
-            'transacao_id' => $isDeposit 
-                ? $item->idTransaction 
-                : ($item->idTransaction ?? 'dep_' . $item->id),
-            'valor_total' => (float) $item->amount,
-            'valor_liquido' => (float) $valorLiquido,
-            'status' => $item->status,
-            'status_legivel' => $isDeposit ? $this->getStatusLabel($item->status) : $this->getWithdrawalStatusLabel($item->status),
-            'data' => $item->date,
-            'created_at' => $item->created_at,
-        ];
     }
 
     /**
@@ -988,8 +1132,9 @@ class FinancialService
      * Label de status para saques (PIX OUT).
      * PROCESSING na adquirente = PIX já enviado; exibir como "Concluído".
      */
-    private function getWithdrawalStatusLabel(string $status): string
+    private function getWithdrawalStatusLabel(?string $status): string
     {
+        $status = (string) ($status ?? '');
         if ($status === 'PROCESSING') {
             return 'Concluído';
         }
@@ -1055,9 +1200,9 @@ class FinancialService
     /**
      * Obter label do status
      */
-    private function getStatusLabel(string $status): string
+    private function getStatusLabel(?string $status): string
     {
-        $s = strtoupper(trim($status));
+        $s = strtoupper(trim((string) ($status ?? '')));
 
         return match ($s) {
             'WAITING_FOR_APPROVAL' => 'Pendente',
