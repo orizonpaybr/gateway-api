@@ -557,14 +557,14 @@ class PixKeyController extends Controller
                 \App\Helpers\Helper::calculaSaldoLiquido($user->user_id ?? $user->username);
                 app(\App\Services\PaymentProcessingService::class)->invalidateCachesAfterPayment($withdrawal->user_id);
 
+                $motivoManual = \App\Helpers\WithdrawalConfigResolver::getMotivoManual($user, $setting);
+
                 Log::info('Saque PIX manual criado - pendente de aprovação (valor + taxa debitados)', [
                     'withdrawal_id' => $withdrawal->id,
                     'user_id' => $user->username,
                     'amount' => $amount,
                     'valor_total_descontar' => $valorTotalDescontar,
-                    'motivo' => ! $setting->saque_automatico
-                        ? 'Saque automático desativado'
-                        : 'Valor acima do limite de R$ '.number_format($setting->limite_saque_automatico, 2, ',', '.'),
+                    'motivo' => $motivoManual,
                 ]);
 
                 return response()->json([
@@ -579,9 +579,7 @@ class PixKeyController extends Controller
                         'description' => $description,
                         'status' => 'PENDING_APPROVAL',
                         'tipo_processamento' => 'Manual',
-                        'motivo_manual' => ! $setting->saque_automatico
-                            ? 'Saque automático desativado no sistema'
-                            : 'Valor acima do limite automático de R$ '.number_format($setting->limite_saque_automatico, 2, ',', '.'),
+                        'motivo_manual' => $motivoManual,
                         'created_at' => now()->toISOString(),
                         // Split de taxas
                         'taxa_cash_out' => round($taxaCashOut, 2),

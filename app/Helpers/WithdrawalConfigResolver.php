@@ -47,4 +47,25 @@ class WithdrawalConfigResolver
 
         return !$temLimite || $amount <= $config['limite'];
     }
+
+    /**
+     * Mensagem exibida ao usuário quando o saque exige aprovação manual.
+     */
+    public static function getMotivoManual(User $user, $setting): string
+    {
+        $config = self::resolve($user, $setting);
+
+        if (!$config['saque_automatico']) {
+            return $user->saque_config_personalizada
+                ? 'Saque automático desativado para este usuário'
+                : 'Saque automático desativado no sistema';
+        }
+
+        $limite = $config['limite'];
+        if ($limite !== null && $limite > 0) {
+            return 'Valor acima do limite automático de R$ '.number_format($limite, 2, ',', '.');
+        }
+
+        return 'Aguardando aprovação do administrador.';
+    }
 }
