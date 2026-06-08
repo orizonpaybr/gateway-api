@@ -7,8 +7,8 @@ use App\Models\User;
 class WithdrawalConfigResolver
 {
     /**
-     * Resolve se o saque deve ser automático e qual limite usar,
-     * priorizando config individual do usuário com fallback para global.
+     * Resolve se o saque deve ser automático e qual limite usar.
+     * Com config personalizada, limite null no usuário significa sem limite (não herda global).
      *
      * @return array{saque_automatico: bool, limite: float|null}
      */
@@ -18,7 +18,7 @@ class WithdrawalConfigResolver
             $saqueAutomatico = $user->saque_automatico_usuario ?? (bool) $setting->saque_automatico;
             $limite = $user->limite_saque_automatico_usuario !== null
                 ? (float) $user->limite_saque_automatico_usuario
-                : ($setting->limite_saque_automatico !== null ? (float) $setting->limite_saque_automatico : null);
+                : null;
         } else {
             $saqueAutomatico = (bool) $setting->saque_automatico;
             $limite = $setting->limite_saque_automatico !== null
