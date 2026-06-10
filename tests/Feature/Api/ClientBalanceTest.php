@@ -52,8 +52,8 @@ class ClientBalanceTest extends TestCase
     private function authHeaders(): array
     {
         return [
-            'api_token' => 'balance_token',
-            'api_secret' => 'balance_secret',
+            'api-token' => 'balance_token',
+            'api-secret' => 'balance_secret',
         ];
     }
 
