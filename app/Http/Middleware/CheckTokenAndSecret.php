@@ -14,7 +14,7 @@ class CheckTokenAndSecret
 {
     public function handle(Request $request, Closure $next)
     {
-        // Token e secret: body, query ou headers (api_token / api_secret para frontend)
+        // Token e secret: body, query ou headers (api-token / api-secret)
         $token = $request->input('token')
             ?: $request->query('token')
             ?: $request->header('api_token')
