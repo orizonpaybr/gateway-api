@@ -77,16 +77,17 @@ Content-Type: application/json
 
 ### 2. Token + Secret - Para transações
 
-Usado para depósitos, saques e outras transações:
+Usado para depósitos, saques, consulta de saldo e outras transações:
 
 ```http
-Authorization: Bearer {token}
-X-User-Secret: {secret}
+api_token: {token}
+api_secret: {secret}
 ```
 
+Também aceita `token` e `secret` no body (POST) ou query string (GET).
+
 **Onde obter:**
-- **Token**: Obtido via login (mesmo JWT)
-- **Secret**: Chave secreta gerada no painel (Integrações → Chaves API)
+- **Token e Secret**: Gerados no painel (Integrações → Chaves API)
 
 ---
 
@@ -268,6 +269,81 @@ Content-Type: application/json
   }
 }
 ```
+
+---
+
+### 💰 Consultar Saldo (Integração)
+
+#### GET `/api/wallet/balance`
+
+Retorna o saldo disponível e a movimentação do mês corrente do integrador autenticado. Endpoint **somente leitura** — não altera saldo nem interfere em cash in/cash out.
+
+**Headers:**
+```
+api_token: {token}
+api_secret: {secret}
+```
+
+**Query Params (alternativa aos headers):**
+```
+?token=seu_token&secret=sua_secret
+```
+
+**Resposta de Sucesso:**
+```json
+{
+  "status": "success",
+  "data": {
+    "moeda": "BRL",
+    "saldo_disponivel": 299.47,
+    "entradas_mes": 2.00,
+    "saidas_mes": 1.00,
+    "fluxo_liquido_mes": 1.00,
+    "periodo": {
+      "inicio": "2026-06-01",
+      "fim": "2026-06-30"
+    },
+    "atualizado_em": "2026-06-10T13:06:00-03:00"
+  }
+}
+```
+
+**Campos da resposta:**
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `moeda` | string | Moeda da conta (sempre `BRL`) |
+| `saldo_disponivel` | decimal | Saldo principal + saldo de afiliados, disponível para saque |
+| `entradas_mes` | decimal | Total de depósitos pagos no mês (status `PAID_OUT` ou `COMPLETED`) |
+| `saidas_mes` | decimal | Total de saques concluídos no mês |
+| `fluxo_liquido_mes` | decimal | Entradas − saídas no mês |
+| `periodo.inicio` | date | Primeiro dia do mês corrente |
+| `periodo.fim` | date | Último dia do mês corrente |
+| `atualizado_em` | datetime | Timestamp ISO 8601 da consulta |
+
+**Observações:**
+- Os valores mensais consideram apenas transações com status `PAID_OUT` ou `COMPLETED`.
+- A resposta completa é cacheada por **10 segundos** por conta (configurável via `BALANCE_CACHE_TTL_SECONDS`), evitando sobrecarga no banco em polling frequente.
+- **Recomendado:** consultar no máximo a cada **30 segundos** (botão manual ou timer). Evite polling agressivo (ex.: a cada 1–2 segundos).
+- **Não exige IP autorizado** (diferente do PIX OUT).
+
+**Limites e proteções:**
+
+| Regra | Valor padrão | Descrição |
+|-------|--------------|-----------|
+| Rate limit (sucesso) | 60 req/min | Por token (conta) |
+| Cache da resposta | 10 s | Por usuário; requisições repetidas no intervalo não batem no banco |
+| Tentativas falhas por IP | 3 | Após 3 respostas `400`, `401`, `403` ou `500`, o IP é bloqueado por 15 min |
+| Retry em falha | Máx. 3 | Não insista além de 3 tentativas com erro; aguarde o `retry_after` (429) |
+
+**Erros comuns:**
+
+| HTTP | Resposta | Causa |
+|------|----------|-------|
+| `400` | `Token ou Secret ausentes` | Credenciais não enviadas |
+| `401` | `Token ou Secret inválidos` | Credenciais incorretas |
+| `403` | `Conta inativa ou bloqueada` | Usuário inativo, pendente ou banido |
+| `429` | Rate limit excedido | Muitas requisições por minuto **ou** IP bloqueado após 3 falhas |
 
 ---
 
@@ -753,6 +829,7 @@ Os endpoints de integração (token + secret) têm limite **por conta (token)**,
 
 | Endpoint | Limite | Chave |
 |----------|--------|--------|
+| `GET /api/wallet/balance` | 60 req/min | token |
 | `POST /api/wallet/deposit/payment` (PIX IN) | 500 req/min | token |
 | `POST /api/pixout` (PIX OUT) | 500 req/min | token |
 | `POST /api/status` | 500 req/min | token ou idTransaction |
@@ -791,4 +868,4 @@ Uma coleção completa com 137 rotas está disponível em `insomnia-collection.j
 
 ---
 
-**Última atualização:** Janeiro 2025
+**Última atualização:** Junho 2026

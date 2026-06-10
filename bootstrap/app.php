@@ -34,6 +34,17 @@ return Application::configure(basePath: dirname(__DIR__))
             return Limit::perMinute($perMinute)->by('status|'.$key);
         });
 
+        RateLimiter::for('balance-check', function (Request $request) {
+            $key = $request->input('token')
+                ?? $request->query('token')
+                ?? $request->header('api_token')
+                ?? $request->header('api-token')
+                ?? $request->ip();
+            $perMinute = max(10, (int) config('saldo.balance_check_rate_limit_per_minute', 60));
+
+            return Limit::perMinute($perMinute)->by('balance-check|'.$key);
+        });
+
         RateLimiter::for('simpay-webhook', function (Request $request) {
             return Limit::perMinute((int) config('simpay.webhook_rate_limit_per_minute', 18000))
                 ->by('simpay-webhook|'.$request->ip());
@@ -96,6 +107,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'secure.cors' => \App\Http\Middleware\SecureCors::class,
             'throttle.fyhub.pix' => \App\Http\Middleware\ThrottleFyhubPixThroughput::class,
             'throttle.treeal.pix' => \App\Http\Middleware\ThrottleTreealPixThroughput::class,
+            'throttle.balance.failures' => \App\Http\Middleware\ThrottleBalanceCheckFailures::class,
         ]);
 
         // Aplicar CORS seguro globalmente nas rotas API
