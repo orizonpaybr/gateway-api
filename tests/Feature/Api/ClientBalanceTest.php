@@ -9,6 +9,7 @@ use App\Models\SolicitacoesCashOut;
 use App\Models\User;
 use App\Models\UsersKey;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Tests\TestCase;
 
 /**
@@ -28,6 +29,8 @@ class ClientBalanceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        Cache::flush();
 
         $this->user = User::factory()->create([
             'username' => 'balanceuser',
