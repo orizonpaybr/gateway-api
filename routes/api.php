@@ -201,6 +201,9 @@ Route::get('/link-storage', function (Request $request) {
     return redirect('/');
 })->middleware('auth:sanctum');
 
+/* SALDO (consulta para integradores — somente leitura) */
+Route::middleware(['throttle.balance.failures', 'check.token.secret', 'throttle:balance-check'])->get('wallet/balance', [\App\Http\Controllers\Api\Client\BalanceController::class, 'show']);
+
 /* PIX */
 Route::middleware(['check.token.secret', 'throttle.fyhub.pix', 'throttle.treeal.pix', 'throttle:pix-in'])->post('wallet/deposit/payment', [DepositController::class, 'makeDeposit']);
 Route::middleware(['check.token.secret', 'check.allowed.ip', 'throttle.fyhub.pix', 'throttle.treeal.pix', 'throttle:pix-out'])->post('pixout', [SaqueController::class, 'makePayment']);
