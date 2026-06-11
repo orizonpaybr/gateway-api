@@ -32,7 +32,9 @@ Route::post('auth/validate-registration', [AuthController::class, 'validateRegis
 Route::post('auth/logout', [AuthController::class, 'logout']);
 
 // Rotas protegidas com JWT (para frontend)
-Route::middleware(['verify.jwt'])->group(function () {
+// throttle:120,1 protege contra abuso/flood nas rotas de dashboard, transações e saldo
+// (limite por usuário/IP; folgado o bastante para dashboards com polling de vários widgets).
+Route::middleware(['verify.jwt', 'throttle:120,1'])->group(function () {
     Route::get('auth/verify', [AuthController::class, 'verifyToken']);
     Route::get('balance', [UserController::class, 'getBalance']);
     Route::get('transactions', [UserController::class, 'getTransactions']);

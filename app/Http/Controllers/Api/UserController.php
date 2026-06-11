@@ -707,7 +707,7 @@ class UserController extends Controller
 
             // Verificar se o saque está bloqueado para este usuário
             if ($user->saque_bloqueado ?? false) {
-                Log::warning('Tentativa de saque bloqueado via API', [
+                Log::channel('security')->warning('Tentativa de saque bloqueado via API', [
                     'user_id' => $user->id,
                     'username' => $user->username,
                     'ip' => $request->ip()

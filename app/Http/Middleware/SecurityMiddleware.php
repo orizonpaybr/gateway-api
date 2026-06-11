@@ -17,7 +17,7 @@ class SecurityMiddleware
         // Bloquear tentativas de acesso a arquivos PHP em uploads
         if ($request->is('uploads/*') && $request->getPathInfo() && 
             preg_match('/\.(php|phtml|php3|php4|php5)$/i', $request->getPathInfo())) {
-            Log::warning('Tentativa de acesso a arquivo PHP bloqueada', [
+            Log::channel('security')->warning('Tentativa de acesso a arquivo PHP bloqueada', [
                 'ip' => $request->ip(),
                 'path' => $request->getPathInfo(),
                 'user_agent' => $request->userAgent()
@@ -41,7 +41,7 @@ class SecurityMiddleware
         $requestContent = $request->getContent();
         foreach ($suspiciousPatterns as $pattern) {
             if (preg_match($pattern, $requestContent)) {
-                Log::warning('Request suspeito bloqueado', [
+                Log::channel('security')->warning('Request suspeito bloqueado', [
                     'ip' => $request->ip(),
                     'pattern' => $pattern,
                     'user_agent' => $request->userAgent()

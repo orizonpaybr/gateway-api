@@ -73,6 +73,17 @@ return [
             'replace_placeholders' => true,
         ],
 
+        // Canal dedicado para eventos de segurança / abuso (saque bloqueado,
+        // requests suspeitos, IP não autorizado). Mantém o laravel.log limpo
+        // e com rotação diária própria (retenção maior para auditoria).
+        'security' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/security.log'),
+            'level' => env('LOG_LEVEL', 'warning'),
+            'days' => env('LOG_SECURITY_DAYS', 30),
+            'replace_placeholders' => true,
+        ],
+
         'slack' => [
             'driver' => 'slack',
             'url' => env('LOG_SLACK_WEBHOOK_URL'),
