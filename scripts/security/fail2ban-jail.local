@@ -1,0 +1,48 @@
+# Gerado/copiado por scripts/hardening-vps.sh
+# TRUSTED_IPS é substituído na instalação.
+
+[DEFAULT]
+ignoreip = 127.0.0.1/8 ::1 __TRUSTED_IPS__
+bantime  = 3600
+findtime = 600
+maxretry = 3
+banaction = ufw
+backend = auto
+
+# SSH — brute force
+[sshd]
+enabled  = true
+port     = ssh
+maxretry = 3
+bantime  = 86400
+findtime = 600
+
+# Path sensível — ban permanente (IPs em ignoreip do DEFAULT ficam isentos)
+[nginx-sensitive]
+enabled  = true
+port     = http,https
+filter   = nginx-sensitive
+logpath  = /var/log/nginx/sensitive.log
+maxretry = 1
+bantime  = -1
+findtime = 86400
+
+# Abuso geral — 3 strikes em 10 min = 1h de ban
+[nginx-4xx-abuse]
+enabled  = true
+port     = http,https
+filter   = nginx-4xx-abuse
+logpath  = /var/log/nginx/access.log
+maxretry = 3
+bantime  = 3600
+findtime = 600
+
+# Reincidentes — quem voltou a ser banido (IPs confiáveis isentos via ignoreip)
+[recidive]
+enabled  = true
+filter   = recidive
+logpath  = /var/log/fail2ban.log
+action   = ufw
+maxretry = 2
+bantime  = 604800
+findtime = 86400

@@ -46,7 +46,7 @@ ufw --force enable
 ufw allow 22/tcp   # SSH
 ufw allow 80/tcp   # HTTP
 ufw allow 443/tcp  # HTTPS
-ufw allow 3306/tcp # MySQL (apenas se precisar acesso externo)
+# MySQL/Redis NÃO expostos — só localhost (ver scripts/hardening-vps.sh)
 ufw status
 
 # Instalar MySQL/MariaDB

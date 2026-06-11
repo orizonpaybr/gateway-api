@@ -278,16 +278,33 @@ Content-Type: application/json
 
 Retorna o saldo disponível e a movimentação do mês corrente do integrador autenticado. Endpoint **somente leitura** — não altera saldo nem interfere em cash in/cash out.
 
-**Headers:**
-```
-api_token: {token}
-api_secret: {secret}
+**Exemplo cURL (recomendado):**
+
+```bash
+curl --request GET \
+  --url 'https://seu-dominio.com/api/wallet/balance' \
+  --header 'accept: application/json' \
+  --header 'api-token: {token}' \
+  --header 'api-secret: {secret}'
 ```
 
-**Query Params (alternativa aos headers):**
+**Headers:**
+
+| Header | Obrigatório | Descrição |
+|--------|-------------|-----------|
+| `accept` | Não | `application/json` |
+| `api-token` | Sim | Client Key (use **hífen**, não `api_token`) |
+| `api-secret` | Sim | Client Secret (use **hífen**, não `api_secret`) |
+
+> **Importante (nginx):** em produção, headers com underscore (`api_token`) são descartados pelo nginx. Use sempre `api-token` e `api-secret`.
+
+**Query params (alternativa — evite em produção):**
+
 ```
 ?token=seu_token&secret=sua_secret
 ```
+
+Credenciais na URL podem aparecer em logs de servidor e proxy. Prefira sempre os headers.
 
 **Resposta de Sucesso:**
 ```json
