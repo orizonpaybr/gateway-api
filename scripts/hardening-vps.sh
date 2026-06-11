@@ -30,7 +30,7 @@ if [[ ! -d "${SECURITY_DIR}" ]]; then
   exit 1
 fi
 
-TRUSTED_IPS="${TRUSTED_IPS:-45.233.86.55 45.169.215.9}"
+TRUSTED_IPS="${TRUSTED_IPS:-45.233.86.55}"
 RESTRICT_SSH="${RESTRICT_SSH:-no}"
 KEEP_MYSQL_REMOTE_IP="${KEEP_MYSQL_REMOTE_IP:-}"
 
@@ -58,18 +58,33 @@ fi
 echo -e "${YELLOW}[2/7] UFW — fechar portas internas${NC}"
 ufw --force enable
 
-# Remove regra genérica de MySQL se existir
-while ufw status numbered | grep -q '3306/tcp'; do
-  RULE_NUM=$(ufw status numbered | grep '3306/tcp' | head -1 | sed -E 's/^\[ *\([0-9]+\)\].*/\1/')
+# Extrai número da regra UFW (formato: "[ 3] 3306/tcp ...")
+_ufw_rule_num() {
+  local pattern="$1"
+  ufw status numbered 2>/dev/null \
+    | grep "${pattern}" \
+    | head -1 \
+    | sed -n 's/.*\[[[:space:]]*\([0-9][0-9]*\)\].*/\1/p'
+}
+
+# Remove regras MySQL/Redis existentes (idempotente)
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  RULE_NUM=$(_ufw_rule_num '3306')
+  [[ -z "${RULE_NUM}" ]] && break
   ufw --force delete "${RULE_NUM}" || break
 done
 
-# Remove allow específico por IP (será re-adicionado só se KEEP_MYSQL_REMOTE_IP)
-while ufw status | grep -q '3306'; do
-  RULE_NUM=$(ufw status numbered | grep '3306' | head -1 | sed -E 's/^\[ *\([0-9]+\)\].*/\1/')
+ufw delete allow 3306/tcp 2>/dev/null || true
+ufw delete allow 3306 2>/dev/null || true
+ufw delete deny 3306/tcp 2>/dev/null || true
+
+for _ in 1 2 3 4 5; do
+  RULE_NUM=$(_ufw_rule_num '6379')
+  [[ -z "${RULE_NUM}" ]] && break
   ufw --force delete "${RULE_NUM}" || break
 done
 
+ufw delete allow 6379/tcp 2>/dev/null || true
 ufw deny 3306/tcp 2>/dev/null || true
 ufw deny 6379/tcp 2>/dev/null || true
 
