@@ -7,5 +7,9 @@ use Illuminate\Support\Facades\Route;
 Route::post('treeal/webhook/pix', [TreealWebhookController::class, 'handlePix'])
     ->middleware(['throttle:treeal-webhook']);
 
+// Treeal pode enviar para a URL base registrada (/treeal/webhook) sem o sufixo /pix
+Route::post('treeal/webhook', [TreealWebhookController::class, 'handlePix'])
+    ->middleware(['throttle:treeal-webhook']);
+
 Route::post('treeal/contas/webhook', [TreealContasWebhookController::class, 'handle'])
     ->middleware(['throttle:treeal-contas-webhook']);
