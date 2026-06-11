@@ -63,7 +63,7 @@ class SaqueController extends Controller
 
         // Verificar se o saque está bloqueado para este usuário (sem query adicional)
         if ($user->saque_bloqueado ?? false) {
-            Log::warning('Tentativa de saque bloqueado', [
+            Log::channel('security')->warning('Tentativa de saque bloqueado', [
                 'user_id' => $user->id,
                 'username' => $user->username,
                 'ip' => $request->ip(),

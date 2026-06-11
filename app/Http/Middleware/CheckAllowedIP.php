@@ -54,7 +54,7 @@ class CheckAllowedIP
 
         // Usar IPManagementTrait para verificação de IPs (inclui IPs globais)
         if (!IPManagementTrait::isIPAllowed($clientIP, $user)) {
-            Log::warning('[IP_CHECK] IP não autorizado para saque', [
+            Log::channel('security')->warning('[IP_CHECK] IP não autorizado para saque', [
                 'user_id' => $user->user_id,
                 'client_ip' => $clientIP
             ]);

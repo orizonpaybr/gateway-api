@@ -116,7 +116,7 @@ class FinancialService
             $unionQuery = $depositosQuery->unionAll($saquesQuery);
         }
 
-        $total = (int) DB::query()->fromSub($unionQuery, 'transactions')->count();
+        $total = $this->countAllTransactions($status, $tipo, $busca, $dataInicio, $dataFim);
 
         $rows = DB::query()
             ->fromSub($unionQuery, 'transactions')
@@ -137,6 +137,47 @@ class FinancialService
             'per_page' => $limit,
             'total' => $total,
         ];
+    }
+
+    /**
+     * Total de transações (depósitos + saques) para a paginação.
+     *
+     * Sem filtros (caso padrão da tela): soma duas contagens simples e indexadas,
+     * evitando materializar o UNION ALL inteiro só para um COUNT (era a query lenta
+     * de ~1s observada em /api/admin/financial/transactions). Com filtros, mantém o
+     * COUNT sobre o UNION, mas cacheado por filtro (independente de page/limit).
+     */
+    private function countAllTransactions(
+        ?string $status,
+        ?string $tipo,
+        ?string $busca,
+        ?string $dataInicio,
+        ?string $dataFim
+    ): int {
+        $hasFilters = $status !== null || $busca !== null || $dataInicio !== null || $dataFim !== null;
+        $cacheKey = 'fin_tx_count:' . md5(json_encode([$status, $tipo, $busca, $dataInicio, $dataFim]));
+
+        return (int) Cache::remember($cacheKey, 60, function () use ($hasFilters, $status, $tipo, $busca, $dataInicio, $dataFim) {
+            if (! $hasFilters) {
+                $depCount = $tipo === 'saque' ? 0 : (int) Solicitacoes::count();
+                $saqueCount = $tipo === 'deposito' ? 0 : (int) SolicitacoesCashOut::count();
+
+                return $depCount + $saqueCount;
+            }
+
+            $depositosQuery = $this->buildAdminDepositsUnionQuery($status, $busca, $dataInicio, $dataFim);
+            $saquesQuery = $this->buildAdminWithdrawalsUnionQuery($status, $busca, $dataInicio, $dataFim);
+
+            if ($tipo === 'deposito') {
+                $unionQuery = $depositosQuery;
+            } elseif ($tipo === 'saque') {
+                $unionQuery = $saquesQuery;
+            } else {
+                $unionQuery = $depositosQuery->unionAll($saquesQuery);
+            }
+
+            return (int) DB::query()->fromSub($unionQuery, 'transactions')->count();
+        });
     }
 
     private function buildAdminDepositsUnionQuery(
