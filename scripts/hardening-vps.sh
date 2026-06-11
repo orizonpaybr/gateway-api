@@ -67,26 +67,27 @@ _ufw_rule_num() {
     | sed -n 's/.*\[[[:space:]]*\([0-9][0-9]*\)\].*/\1/p'
 }
 
-# Remove regras MySQL/Redis existentes (idempotente)
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-  RULE_NUM=$(_ufw_rule_num '3306')
-  [[ -z "${RULE_NUM}" ]] && break
-  ufw --force delete "${RULE_NUM}" || break
-done
+# Remove todas as regras que mencionem uma porta (idempotente).
+# set +e local: parsing de regras não deve abortar o script.
+_ufw_purge_port() {
+  local pattern="$1"
+  local rule_num
+  set +e
+  for _ in $(seq 1 20); do
+    rule_num="$(_ufw_rule_num "${pattern}")"
+    if [[ -z "${rule_num}" ]]; then
+      break
+    fi
+    ufw --force delete "${rule_num}" >/dev/null 2>&1
+  done
+  set -e
+}
 
-ufw delete allow 3306/tcp 2>/dev/null || true
-ufw delete allow 3306 2>/dev/null || true
-ufw delete deny 3306/tcp 2>/dev/null || true
+_ufw_purge_port '3306'
+_ufw_purge_port '6379'
 
-for _ in 1 2 3 4 5; do
-  RULE_NUM=$(_ufw_rule_num '6379')
-  [[ -z "${RULE_NUM}" ]] && break
-  ufw --force delete "${RULE_NUM}" || break
-done
-
-ufw delete allow 6379/tcp 2>/dev/null || true
-ufw deny 3306/tcp 2>/dev/null || true
-ufw deny 6379/tcp 2>/dev/null || true
+ufw deny 3306/tcp >/dev/null 2>&1 || true
+ufw deny 6379/tcp >/dev/null 2>&1 || true
 
 if [[ -n "${KEEP_MYSQL_REMOTE_IP}" ]]; then
   echo -e "${YELLOW}Aviso: mantendo MySQL acessível para ${KEEP_MYSQL_REMOTE_IP} (menos seguro)${NC}"
@@ -151,11 +152,15 @@ sed "s/__TRUSTED_IPS__/${TRUSTED_IPS_F2B}/" "${SECURITY_DIR}/fail2ban-jail.local
 touch /var/log/nginx/sensitive.log
 chown www-data:adm /var/log/nginx/sensitive.log 2>/dev/null || chown www-data:www-data /var/log/nginx/sensitive.log
 
-systemctl enable fail2ban
-systemctl restart fail2ban
-sleep 2
-fail2ban-client status
-echo -e "${GREEN}Fail2ban ativo${NC}"
+systemctl enable fail2ban >/dev/null 2>&1 || true
+if systemctl restart fail2ban; then
+  sleep 2
+  fail2ban-client status || true
+  echo -e "${GREEN}Fail2ban ativo${NC}"
+else
+  echo -e "${RED}Fail2ban não iniciou — verifique: journalctl -u fail2ban -n 30${NC}"
+  echo -e "${YELLOW}Continuando demais passos...${NC}"
+fi
 
 # --- 6. Nginx ---
 echo -e "${YELLOW}[6/7] Nginx — rate limit + paths sensíveis${NC}"
