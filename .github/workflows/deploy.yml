@@ -95,10 +95,12 @@ jobs:
           echo "Host Nginx: $HEALTH_HOST"
           ssh $SERVER_USER@$SERVER_HOST bash << EOF
             set -e
-            HTTP_CODE=\$(curl -sS -o /tmp/health-up.json -w "%{http_code}" \\
+            # HTTPS direto no Nginx local (--resolve mantém SNI/Host correto e ignora Cloudflare).
+            # -k: a origem pode usar Cloudflare Origin Cert (não confiável pelo trust store do SO); só validamos o app, não o TLS.
+            HTTP_CODE=\$(curl -sS -k -o /tmp/health-up.json -w "%{http_code}" \\
               --connect-timeout 10 --max-time 15 \\
-              -H "Host: ${HEALTH_HOST}" \\
-              "http://127.0.0.1/up")
+              --resolve "${HEALTH_HOST}:443:127.0.0.1" \\
+              "https://${HEALTH_HOST}/up")
             echo "HTTP \$HTTP_CODE — body:"
             cat /tmp/health-up.json || true
             if [ "\$HTTP_CODE" != "200" ]; then
