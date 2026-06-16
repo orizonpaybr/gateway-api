@@ -65,7 +65,7 @@ class WithdrawalFailureRefundService
             return;
         }
 
-        $user = User::where('user_id', $cashOut->user_id)->lockForUpdate()->first();
+        $user = self::resolveUserForCashOut($cashOut);
         if (! $user) {
             Log::warning('[WITHDRAWAL_REFUND] Usuário não encontrado para restituir Pix Out', [
                 'cash_out_id' => $cashOut->id,
@@ -123,5 +123,22 @@ class WithdrawalFailureRefundService
                 ]);
             }
         }
+    }
+
+    /**
+     * Resolve o dono do saque: solicitacoes_cash_out.user_id pode ser user_id ou username.
+     */
+    public static function resolveUserForCashOut(SolicitacoesCashOut $cashOut): ?User
+    {
+        $identifier = trim((string) $cashOut->user_id);
+        if ($identifier === '') {
+            return null;
+        }
+
+        return User::query()
+            ->where('user_id', $identifier)
+            ->orWhere('username', $identifier)
+            ->lockForUpdate()
+            ->first();
     }
 }

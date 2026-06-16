@@ -539,7 +539,7 @@ class WithdrawalController extends Controller
                     return;
                 }
 
-                $userModel = User::where('user_id', $locked->user_id)->lockForUpdate()->first();
+                $userModel = \App\Services\WithdrawalFailureRefundService::resolveUserForCashOut($locked);
                 if (! $userModel) {
                     Log::warning("Usuário não encontrado ao rejeitar o saque ID: {$locked->id}, user_id: {$locked->user_id}");
 
