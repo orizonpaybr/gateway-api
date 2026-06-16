@@ -3,6 +3,7 @@
 namespace App\Traits;
 
 use App\Models\User;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 
@@ -118,67 +119,212 @@ trait IPManagementTrait
     }
 
     /**
-     * Verifica se IP está dentro de um range CIDR
+     * Verifica se IP está dentro de um range CIDR (IPv4 ou IPv6).
      */
     public static function isIPInCIDR(string $ip, string $cidr): bool
     {
-        if (! filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-            return false;
-        }
-
         $parts = explode('/', trim($cidr), 2);
-        if (count($parts) !== 2) {
+        if (count($parts) !== 2 || ! ctype_digit($parts[1])) {
             return false;
         }
 
-        [$subnet, $maskBits] = $parts;
-        if (! filter_var($subnet, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) || ! ctype_digit($maskBits)) {
+        $ipBin = @inet_pton(trim($ip));
+        $subnetBin = @inet_pton(trim($parts[0]));
+        if ($ipBin === false || $subnetBin === false) {
             return false;
         }
 
-        $mask = (int) $maskBits;
-        if ($mask < 0 || $mask > 32) {
+        // Famílias diferentes (IPv4 x IPv6) nunca casam.
+        if (strlen($ipBin) !== strlen($subnetBin)) {
             return false;
         }
 
+        $maxBits = strlen($ipBin) * 8; // 32 (IPv4) ou 128 (IPv6)
+        $mask = (int) $parts[1];
+        if ($mask < 0 || $mask > $maxBits) {
+            return false;
+        }
         if ($mask === 0) {
             return true;
         }
 
-        $ipLong = ip2long($ip);
-        $subnetLong = ip2long($subnet);
-        $maskLong = -1 << (32 - $mask);
+        $fullBytes = intdiv($mask, 8);
+        if ($fullBytes > 0 && substr($ipBin, 0, $fullBytes) !== substr($subnetBin, 0, $fullBytes)) {
+            return false;
+        }
 
-        return ($ipLong & $maskLong) === ($subnetLong & $maskLong);
+        $remainingBits = $mask % 8;
+        if ($remainingBits === 0) {
+            return true;
+        }
+
+        $maskByte = (~((1 << (8 - $remainingBits)) - 1)) & 0xFF;
+
+        return (ord($ipBin[$fullBytes]) & $maskByte) === (ord($subnetBin[$fullBytes]) & $maskByte);
     }
 
     /**
-     * Obtém o IP real do cliente
+     * Aplica a máscara de prefixo a um endereço binário (inet_pton), zerando os bits de host.
      */
-    public static function getClientIP(): string
+    private static function applyMaskToBinary(string $bin, int $mask): string
     {
-        $headers = [
-            'HTTP_CF_CONNECTING_IP',     // Cloudflare
-            'HTTP_X_FORWARDED_FOR',      // Load balancer/proxy
-            'HTTP_X_FORWARDED',          // Proxy
-            'HTTP_X_CLUSTER_CLIENT_IP',  // Cluster
-            'HTTP_FORWARDED_FOR',        // Proxy
-            'HTTP_FORWARDED',            // Proxy
-            'REMOTE_ADDR'                // IP direto
-        ];
+        $result = '';
+        $total = strlen($bin);
 
-        foreach ($headers as $header) {
-            if (!empty($_SERVER[$header])) {
-                $ips = explode(',', $_SERVER[$header]);
-                $ip = trim($ips[0]);
-                
-                if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
-                    return $ip;
+        for ($i = 0; $i < $total; $i++) {
+            $bitsForByte = $mask - ($i * 8);
+
+            if ($bitsForByte >= 8) {
+                $result .= $bin[$i];
+            } elseif ($bitsForByte <= 0) {
+                $result .= chr(0);
+            } else {
+                $maskByte = (~((1 << (8 - $bitsForByte)) - 1)) & 0xFF;
+                $result .= chr(ord($bin[$i]) & $maskByte);
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Obtém o IP real do cliente de forma segura contra spoofing.
+     *
+     * Regra: os cabeçalhos de encaminhamento (CF-Connecting-IP / X-Forwarded-For)
+     * só são confiados quando a conexão (REMOTE_ADDR) vem de um proxy confiável
+     * (Cloudflare). Em conexão direta ao IP de origem, eles são ignorados — assim
+     * um atacante não consegue forjar CF-Connecting-IP para furar a allowlist de saque.
+     *
+     * Observação: se o Nginx tiver real_ip (CF) ativo, ele já reescreve REMOTE_ADDR
+     * para o IP real do cliente; nesse caso REMOTE_ADDR não está no range Cloudflare
+     * e é retornado diretamente — o que também é correto e seguro.
+     */
+    public static function getClientIP(?Request $request = null): string
+    {
+        $request = $request ?? request();
+
+        $remoteAddr = $request->server('REMOTE_ADDR');
+        $remoteAddr = is_string($remoteAddr) ? trim($remoteAddr) : '';
+
+        if ($remoteAddr !== '' && self::isTrustedProxy($remoteAddr)) {
+            $cf = $request->headers->get('CF-Connecting-IP')
+                ?: $request->headers->get('True-Client-IP');
+            if (is_string($cf) && filter_var(trim($cf), FILTER_VALIDATE_IP)) {
+                return trim($cf);
+            }
+
+            $xff = $request->headers->get('X-Forwarded-For');
+            if (is_string($xff) && $xff !== '') {
+                $first = trim(explode(',', $xff)[0]);
+                if (filter_var($first, FILTER_VALIDATE_IP)) {
+                    return $first;
                 }
             }
         }
 
-        return request()->ip();
+        if ($remoteAddr !== '' && filter_var($remoteAddr, FILTER_VALIDATE_IP)) {
+            return $remoteAddr;
+        }
+
+        $laravelIp = $request->ip();
+
+        return is_string($laravelIp) && $laravelIp !== '' ? $laravelIp : '0.0.0.0';
+    }
+
+    /**
+     * Indica se um IP é um proxy confiável (Cloudflare ou configurado em extra_trusted_proxies).
+     */
+    public static function isTrustedProxy(string $ip): bool
+    {
+        $ip = trim($ip);
+        if ($ip === '' || ! filter_var($ip, FILTER_VALIDATE_IP)) {
+            return false;
+        }
+
+        foreach (self::trustedProxyRanges() as $range) {
+            if ($range === '') {
+                continue;
+            }
+
+            if (str_contains($range, '/')) {
+                if (self::isIPInCIDR($ip, $range)) {
+                    return true;
+                }
+            } elseif ($ip === $range) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Faixas confiáveis: config/cloudflare.php (override) + baseline embutido (à prova de
+     * app não inicializada / config cache ausente) + proxies extras configurados.
+     *
+     * @return array<int, string>
+     */
+    private static function trustedProxyRanges(): array
+    {
+        $ranges = null;
+        $extra = [];
+
+        try {
+            if (function_exists('config')) {
+                $cfg = config('cloudflare.ip_ranges');
+                if (is_array($cfg) && $cfg !== []) {
+                    $ranges = $cfg;
+                }
+
+                $ex = config('cloudflare.extra_trusted_proxies');
+                if (is_array($ex)) {
+                    $extra = $ex;
+                }
+            }
+        } catch (\Throwable $e) {
+            $ranges = null;
+        }
+
+        if ($ranges === null) {
+            $ranges = self::defaultCloudflareRanges();
+        }
+
+        return array_merge($ranges, $extra);
+    }
+
+    /**
+     * Baseline das faixas Cloudflare (https://www.cloudflare.com/ips/).
+     *
+     * @return array<int, string>
+     */
+    private static function defaultCloudflareRanges(): array
+    {
+        return [
+            // IPv4
+            '173.245.48.0/20',
+            '103.21.244.0/22',
+            '103.22.200.0/22',
+            '103.31.4.0/22',
+            '141.101.64.0/18',
+            '108.162.192.0/18',
+            '190.93.240.0/20',
+            '188.114.96.0/20',
+            '197.234.240.0/22',
+            '198.41.128.0/17',
+            '162.158.0.0/15',
+            '104.16.0.0/13',
+            '104.24.0.0/14',
+            '172.64.0.0/13',
+            '131.0.72.0/22',
+            // IPv6
+            '2400:cb00::/32',
+            '2606:4700::/32',
+            '2803:f800::/32',
+            '2405:b500::/32',
+            '2405:8100::/32',
+            '2a06:98c0::/29',
+            '2c0f:f248::/32',
+        ];
     }
 
     /**
@@ -208,7 +354,7 @@ trait IPManagementTrait
             return $serverIP;
         } else {
             // Para requisições de API direta, usar IP real do cliente
-            return self::getClientIP();
+            return self::getClientIP($request instanceof Request ? $request : null);
         }
     }
 
@@ -423,27 +569,35 @@ trait IPManagementTrait
         }
 
         $parts = explode('/', $ip, 2);
-        if (count($parts) !== 2 || ! self::isValidIPv4Octets($parts[0])) {
+        if (count($parts) !== 2 || ! ctype_digit($parts[1])) {
             return $ip;
         }
 
+        $bin = @inet_pton($parts[0]);
+        if ($bin === false) {
+            return $ip;
+        }
+
+        $maxBits = strlen($bin) * 8; // 32 (IPv4) ou 128 (IPv6)
         $mask = (int) $parts[1];
-        if ($mask < 0 || $mask > 32) {
+        if ($mask < 0 || $mask > $maxBits) {
             return $ip;
         }
 
         if ($mask === 0) {
-            return '0.0.0.0/0';
+            return ($maxBits === 32 ? '0.0.0.0' : '::').'/0';
         }
 
-        $subnetLong = ip2long($parts[0]);
-        $maskLong = (-1 << (32 - $mask));
+        $network = @inet_ntop(self::applyMaskToBinary($bin, $mask));
+        if ($network === false) {
+            return $ip;
+        }
 
-        return long2ip($subnetLong & $maskLong).'/'.$mask;
+        return $network.'/'.$mask;
     }
 
     /**
-     * Valida se um IP, CIDR ou wildcard é permitido na allowlist.
+     * Valida se um IP, CIDR ou wildcard é permitido na allowlist (IPv4 ou IPv6).
      */
     public static function isValidIP(string $ip): bool
     {
@@ -461,7 +615,7 @@ trait IPManagementTrait
             return self::isValidWildcardIPv4($ip);
         }
 
-        return self::isValidIPv4Octets($ip);
+        return filter_var($ip, FILTER_VALIDATE_IP) !== false;
     }
 
     private static function isValidIPv4Octets(string $ip): bool
@@ -492,12 +646,15 @@ trait IPManagementTrait
             return false;
         }
 
-        $maskInt = (int) $mask;
-        if ($maskInt < 0 || $maskInt > 32) {
+        $bin = @inet_pton($parts[0]);
+        if ($bin === false) {
             return false;
         }
 
-        return self::isValidIPv4Octets($parts[0]);
+        $maxBits = strlen($bin) * 8; // 32 (IPv4) ou 128 (IPv6)
+        $maskInt = (int) $mask;
+
+        return $maskInt >= 0 && $maskInt <= $maxBits;
     }
 
     private static function isValidWildcardIPv4(string $ip): bool
