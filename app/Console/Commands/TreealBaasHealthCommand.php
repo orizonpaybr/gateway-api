@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\SolicitacoesCashOut;
 use App\Services\Treeal\TreealPixAcquirerService;
 use App\Services\TreealContas\TreealContasPixOutService;
+use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\File;
 
@@ -59,7 +60,7 @@ class TreealBaasHealthCommand extends Command
                 $w->user_id,
                 number_format((float) $w->amount, 2, ',', '.'),
                 $w->idTransaction,
-                optional($w->date)->format('Y-m-d H:i') ?? '—',
+                $w->date ? Carbon::parse((string) $w->date)->format('Y-m-d H:i') : '—',
                 $this->debitLabel($w),
             ])->all();
 

@@ -6,9 +6,17 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\PixKeyResource;
 use App\Models\App;
 use App\Models\PixKey;
+use App\Models\SolicitacoesCashOut;
+use App\Services\CashOut\CashOutOutcomeApplier;
+use App\Services\Fyhub\FyhubCashOutOutcomeService;
 use App\Services\PixAcquirer\PixAcquirerManager;
+use App\Services\Simpay\SimpayCashOutOutcomeService;
+use App\Services\Treeal\TreealCashOutOutcomeService;
+use App\Services\Treeal\TreealPixAcquirerService;
+use App\Services\Fyhub\FyhubPixAcquirerService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 
@@ -634,41 +642,106 @@ class PixKeyController extends Controller
                     ], 400)->header('Access-Control-Allow-Origin', '*');
                 }
 
-                $idTxn = $payoutResult['referenceCode'] ?? $correlationID;
+                $idTxnRaw = $payoutResult['referenceCode'] ?? $correlationID;
+                $idTxn = is_string($idTxnRaw) ? trim($idTxnRaw) : (string) $idTxnRaw;
+                if ($idTxn === '') {
+                    $idTxn = $correlationID;
+                }
+
+                $raw = is_array($payoutResult['raw'] ?? null) ? $payoutResult['raw'] : [];
+                $payoutE2e = trim((string) ($raw['endToEndId'] ?? ''));
                 $providerStatus = (string) ($payoutResult['status'] ?? 'pending');
-                $payoutE2e = trim((string) (($payoutResult['raw']['endToEndId'] ?? '') ?: ''));
-                $statusMapped = $acquirerService instanceof \App\Services\Fyhub\FyhubPixAcquirerService
-                    || $acquirerService instanceof \App\Services\Treeal\TreealPixAcquirerService
-                    ? $acquirerService->resolveInitialPayoutStatus($providerStatus, $payoutE2e)
+                $statusMapped = $acquirerService instanceof FyhubPixAcquirerService
+                    || $acquirerService instanceof TreealPixAcquirerService
+                    ? $acquirerService->resolveInitialPayoutStatus($providerStatus, $payoutE2e !== '' ? $payoutE2e : null)
                     : $acquirerService->mapPayoutStatus($providerStatus);
-                $withdrawal = \App\Models\SolicitacoesCashOut::create([
+
+                // Alinhado com SaqueController: terminal síncrono → PROCESSING + OutcomeApplier (estorno em FAILED).
+                $statusForDb = CashOutOutcomeApplier::isTerminalStatus($statusMapped)
+                    ? 'PROCESSING'
+                    : $statusMapped;
+
+                $withdrawal = SolicitacoesCashOut::create([
                     'user_id' => $user->user_id ?? $user->username,
-                    'externalreference' => $idTxn,
+                    'externalreference' => $correlationID,
                     'amount' => $amount,
                     'beneficiaryname' => '',
                     'beneficiarydocument' => '',
                     'pix' => $keyValue,
                     'pixkey' => $keyType,
-                    'idTransaction' => $idTxn,
-                    'status' => $statusMapped,
+                    'idTransaction' => $correlationID,
+                    'status' => 'PENDING',
                     'type' => 'PIX',
                     'date' => now(),
                     'taxa_cash_out' => $taxaCashOut,
                     'valor_total_descontado' => round($valorTotalDescontar, 4),
                     'cash_out_liquido' => $cashOutLiquido,
-                    'descricao_transacao' => 'AUTOMATICO',
+                    'descricao_transacao' => 'WEB',
                     'executor_ordem' => $acquirerService->getReference(),
                     'descricao_externa' => $correlationID,
+                    'callback' => 'web',
                 ]);
 
-                \Illuminate\Support\Facades\DB::transaction(function () use ($withdrawal, $user, $valorTotalDescontar) {
+                DB::transaction(function () use ($withdrawal, $user, $valorTotalDescontar, $idTxn, $statusForDb, $payoutE2e) {
                     $balanceService = app(\App\Services\BalanceService::class);
+                    $w = SolicitacoesCashOut::where('id', $withdrawal->id)->lockForUpdate()->first();
+                    if ($w === null) {
+                        return;
+                    }
                     $dec = $balanceService->decrementCombinedBalanceWithSplit($user, $valorTotalDescontar);
-                    $withdrawal->update([
+                    $w->update([
+                        'idTransaction' => $idTxn,
+                        'externalreference' => $idTxn,
+                        'end_to_end' => $payoutE2e !== '' ? $payoutE2e : null,
+                        'status' => $statusForDb,
                         'debito_saldo_afiliado' => $dec['debito_saldo_afiliado'],
                         'debito_saldo_principal' => $dec['debito_saldo_principal'],
                     ]);
                 });
+
+                $withdrawal->refresh();
+
+                if (CashOutOutcomeApplier::isTerminalStatus($statusMapped)) {
+                    if ($acquirerService->getReference() === 'fyhub') {
+                        app(FyhubCashOutOutcomeService::class)->applySyncTerminalOutcome(
+                            $withdrawal,
+                            $statusMapped,
+                            $raw,
+                            $payoutE2e !== '' ? $payoutE2e : null,
+                            '[WEB_PAYOUT][OUTCOME]',
+                        );
+                    } elseif ($acquirerService->getReference() === 'treeal') {
+                        app(TreealCashOutOutcomeService::class)->applySyncTerminalOutcome(
+                            $withdrawal,
+                            $statusMapped,
+                            $raw,
+                            $payoutE2e !== '' ? $payoutE2e : null,
+                            '[WEB_PAYOUT][OUTCOME]',
+                        );
+                    } else {
+                        app(CashOutOutcomeApplier::class)->applyTerminalStatusIfNeeded(
+                            $withdrawal,
+                            $statusMapped,
+                            $raw,
+                            $payoutE2e !== '' ? $payoutE2e : null,
+                            null,
+                            '[WEB_PAYOUT][OUTCOME]',
+                        );
+                    }
+                    $withdrawal->refresh();
+                } elseif ($acquirerService->getReference() === 'fyhub') {
+                    app(FyhubCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($withdrawal);
+                    $withdrawal->refresh();
+                } elseif ($acquirerService->getReference() === 'treeal') {
+                    app(TreealCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($withdrawal);
+                    $withdrawal->refresh();
+                }
+
+                if ($acquirerService->getReference() === 'simpay') {
+                    app(SimpayCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($withdrawal);
+                    $withdrawal->refresh();
+                }
+
                 \App\Helpers\Helper::calculaSaldoLiquido($user->user_id ?? $user->username);
                 app(\App\Services\PaymentProcessingService::class)->invalidateCachesAfterPayment($withdrawal->user_id);
 
@@ -681,7 +754,7 @@ class PixKeyController extends Controller
                         'key_type' => $keyType,
                         'key_value' => $keyValue,
                         'description' => $description,
-                        'status' => $statusMapped,
+                        'status' => $withdrawal->status,
                         'tipo_processamento' => 'Automático',
                         'estimated_time' => '5-10 minutos',
                         'created_at' => now()->toISOString(),
