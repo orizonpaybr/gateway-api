@@ -80,23 +80,33 @@ jobs:
             echo "Deploy concluído com sucesso!"
           EOF
 
-      # Health check HTTPS: o certificado deve bater com o HOST da URL (SAN).
-      # - Defina o secret HEALTH_CHECK_URL (ex.: https://api.coratri.com/up) — recomendado após troca de domínio (orizonpay → coratri).
-      # - Se HEALTH_CHECK_URL estiver vazio, usa https://$SERVER_HOST/up — só funciona se SERVER_HOST for o mesmo FQDN do certificado (não use IP).
+      # Health check via SSH + localhost — contorna Cloudflare Bot Fight/WAF (curl externo do GitHub Actions costuma levar 403).
+      # Secret HEALTH_CHECK_URL (opcional): ex. https://api.coratri.com/up — usado só para extrair o Host do vhost Nginx.
       - name: Health Check
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
           HEALTH_CHECK_URL: ${{ secrets.HEALTH_CHECK_URL }}
         run: |
-          echo "Verificando saúde da aplicação..."
+          echo "Verificando saúde da aplicação (localhost na VPS)..."
           sleep 5
-          URL="${HEALTH_CHECK_URL:-https://$SERVER_HOST/up}"
-          echo "URL do health check: $URL"
-          if [ -z "${HEALTH_CHECK_URL:-}" ] && echo "$SERVER_HOST" | grep -qE '^[0-9.]+$|^\[.*\]$'; then
-            echo "::warning::HEALTH_CHECK_URL não definido e SERVER_HOST parece IP. O TLS costuma falhar (curl 60). Configure o secret HEALTH_CHECK_URL com a URL pública HTTPS (ex.: https://api.coratri.com/up)."
-          fi
-          curl -f --connect-timeout 15 --max-time 20 "$URL" || exit 1
-          echo "Aplicação está respondendo!"
+          HEALTH_URL="${HEALTH_CHECK_URL:-https://api.coratri.com/up}"
+          HEALTH_HOST="$(echo "$HEALTH_URL" | sed -E 's|https?://([^/]+).*|\1|')"
+          echo "Host Nginx: $HEALTH_HOST"
+          ssh $SERVER_USER@$SERVER_HOST bash << EOF
+            set -e
+            HTTP_CODE=\$(curl -sS -o /tmp/health-up.json -w "%{http_code}" \\
+              --connect-timeout 10 --max-time 15 \\
+              -H "Host: ${HEALTH_HOST}" \\
+              "http://127.0.0.1/up")
+            echo "HTTP \$HTTP_CODE — body:"
+            cat /tmp/health-up.json || true
+            if [ "\$HTTP_CODE" != "200" ]; then
+              echo "::error::Health check falhou (esperado 200, recebido \$HTTP_CODE)"
+              exit 1
+            fi
+            echo "Aplicação está respondendo!"
+          EOF
 
       - name: Notify deployment
         if: always()
