@@ -78,6 +78,15 @@ return Application::configure(basePath: dirname(__DIR__))
         });
     })
     ->withMiddleware(function (Middleware $middleware) {
+        // Nginx + Cloudflare: confiar nos headers de proxy para request()->ip() e allowlist de saque.
+        $middleware->trustProxies(
+            at: '*',
+            headers: Request::HEADER_X_FORWARDED_FOR
+                | Request::HEADER_X_FORWARDED_HOST
+                | Request::HEADER_X_FORWARDED_PORT
+                | Request::HEADER_X_FORWARDED_PROTO
+        );
+
         $middleware->append([
             \App\Http\Middleware\AtualizarSaldosClientes::class,
         ]);

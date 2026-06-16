@@ -48,15 +48,20 @@ class CheckAllowedIP
             // Para requisições da interface web, usar IP do servidor configurado
             $clientIP = IPManagementTrait::getServerIPFromConfig();
         } else {
-            // Para requisições de API direta, usar IP real do cliente
-            $clientIP = $this->getClientIP($request);
+            // Para requisições de API direta, usar IP real do cliente (CF-Connecting-IP quando via Cloudflare)
+            $clientIP = IPManagementTrait::getClientIP($request);
         }
 
         // Usar IPManagementTrait para verificação de IPs (inclui IPs globais)
         if (!IPManagementTrait::isIPAllowed($clientIP, $user)) {
             Log::channel('security')->warning('[IP_CHECK] IP não autorizado para saque', [
                 'user_id' => $user->user_id,
-                'client_ip' => $clientIP
+                'client_ip' => $clientIP,
+                'request_ip' => $request->ip(),
+                'cf_connecting_ip' => $request->header('CF-Connecting-IP'),
+                'x_forwarded_for' => $request->header('X-Forwarded-For'),
+                'remote_addr' => $request->server('REMOTE_ADDR'),
+                'allowed_ips' => IPManagementTrait::getAllowedIPs($user),
             ]);
 
             return response()->json([
@@ -66,13 +71,5 @@ class CheckAllowedIP
         }
 
         return $next($request);
-    }
-
-    /**
-     * Obtém o IP real do cliente (usando IPManagementTrait)
-     */
-    private function getClientIP(Request $request): string
-    {
-        return IPManagementTrait::getClientIP();
     }
 }

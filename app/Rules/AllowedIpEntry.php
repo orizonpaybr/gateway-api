@@ -17,7 +17,7 @@ class AllowedIpEntry implements ValidationRule
         }
 
         if (! IPManagementTrait::isValidIP(trim($value))) {
-            $fail('Informe um IPv4 válido, range CIDR (ex: 74.220.48.0/24) ou wildcard (ex: 192.168.1.*).');
+            $fail('Informe um IP válido (IPv4 ou IPv6), range CIDR (ex: 74.220.48.0/24 ou 2804:219c::/32) ou wildcard (ex: 192.168.1.*).');
         }
     }
 }
