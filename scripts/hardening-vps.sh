@@ -163,7 +163,8 @@ else
 fi
 
 # --- 6. Nginx ---
-echo -e "${YELLOW}[6/7] Nginx — rate limit + paths sensíveis${NC}"
+echo -e "${YELLOW}[6/7] Nginx — Cloudflare real_ip + rate limit + paths sensíveis${NC}"
+cp "${SECURITY_DIR}/nginx-cloudflare-real-ip.conf" /etc/nginx/conf.d/cloudflare-real-ip.conf
 cp "${SECURITY_DIR}/nginx-rate-limit.conf" /etc/nginx/conf.d/rate-limit.conf
 cp "${SECURITY_DIR}/nginx-gateway-security.conf" /etc/nginx/snippets/gateway-security.conf
 
@@ -213,6 +214,7 @@ echo ""
 echo -e "${GREEN}=== Hardening concluído ===${NC}"
 echo ""
 echo "Verificações:"
+echo "  grep real_ip /etc/nginx/conf.d/cloudflare-real-ip.conf | head -3"
 echo "  ss -tlnp | grep -E '3306|6379'"
 echo "  fail2ban-client status"
 echo "  fail2ban-client status nginx-sensitive"
