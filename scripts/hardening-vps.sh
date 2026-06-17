@@ -112,21 +112,24 @@ ufw allow 443/tcp
 ufw reload
 ufw status verbose
 
-# --- 3. Rate limit no kernel (UFW before.rules) ---
-echo -e "${YELLOW}[3/7] UFW — rate limit por IP (hashlimit)${NC}"
+# --- 3. UFW kernel rate limit — REMOVIDO (incompatível com Cloudflare) ---
+# A origem fica 100% atrás da Cloudflare: todo o tráfego chega por ~15 IPs CF.
+# Um hashlimit por srcip em 80/443 dropa esses IPs sob carga e derruba o site
+# inteiro com Cloudflare 521. O rate limit real é feito pelo nginx (limit_req com
+# real_ip = IP real do cliente) + WAF da Cloudflare. Aqui apenas REMOVEMOS qualquer
+# regra hashlimit legada, para que rodar este script conserte uma VPS já afetada.
+echo -e "${YELLOW}[3/7] UFW — removendo hashlimit legado (causa de 521)${NC}"
 BEFORE_RULES="/etc/ufw/before.rules"
 MARKER="# gateway-api hashlimit"
-if ! grep -q "${MARKER}" "${BEFORE_RULES}"; then
-  cp -a "${BEFORE_RULES}" "${BEFORE_RULES}.bak-hardening-$(date +%Y%m%d)"
-  sed -i "/^COMMIT$/i\\
-${MARKER}\\
--A ufw-before-input -p tcp --dport 80 -m conntrack --ctstate NEW -m hashlimit --hashlimit-name http_rl --hashlimit-mode srcip --hashlimit-above 40/sec -j DROP\\
--A ufw-before-input -p tcp --dport 443 -m conntrack --ctstate NEW -m hashlimit --hashlimit-name https_rl --hashlimit-mode srcip --hashlimit-above 40/sec -j DROP\\
-" "${BEFORE_RULES}"
+if grep -q "${MARKER}\|hashlimit-name http_rl\|hashlimit-name https_rl" "${BEFORE_RULES}"; then
+  cp -a "${BEFORE_RULES}" "${BEFORE_RULES}.bak-hashlimit-removal-$(date +%Y%m%d%H%M%S)"
+  sed -i "\|${MARKER}|d" "${BEFORE_RULES}"
+  sed -i '/hashlimit-name http_rl/d' "${BEFORE_RULES}"
+  sed -i '/hashlimit-name https_rl/d' "${BEFORE_RULES}"
   ufw reload
-  echo -e "${GREEN}hashlimit aplicado em ${BEFORE_RULES}${NC}"
+  echo -e "${GREEN}hashlimit removido de ${BEFORE_RULES}${NC}"
 else
-  echo "hashlimit já configurado"
+  echo "Sem hashlimit a remover (ok)."
 fi
 
 # --- 4. Sysctl ---
