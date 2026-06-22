@@ -48,6 +48,31 @@ class TreealContasWebhookRegistrationServiceTest extends TestCase
         $this->assertSame('https://gateway.test/treeal/contas/webhook', $service->resolveWebhookUri());
     }
 
+    public function test_register_infraction_webhook_posts_to_api(): void
+    {
+        Http::fake([
+            'https://treeal-contas.test/webhooks/infraction' => Http::response([
+                'id' => '497f6eca-6276-4993-bfeb-53cbbbba6f08',
+                'type' => 'INFRACTION',
+                'uri' => 'https://gateway.test/treeal/contas/webhook',
+                'enabled' => true,
+            ], 201),
+        ]);
+
+        $auth = $this->createMock(TreealContasAuthService::class);
+        $auth->method('isConfigured')->willReturn(true);
+        $auth->method('authHeaders')->willReturn(['Authorization' => 'Bearer token']);
+
+        $client = new TreealContasApiClient($auth);
+        $result = (new TreealContasWebhookRegistrationService($client, $auth))->registerWebhook('INFRACTION');
+
+        $this->assertTrue($result['success']);
+        Http::assertSent(function ($request) {
+            return $request->method() === 'POST'
+                && $request->url() === 'https://treeal-contas.test/webhooks/infraction';
+        });
+    }
+
     public function test_register_transfer_webhook_posts_to_api(): void
     {
         Http::fake([

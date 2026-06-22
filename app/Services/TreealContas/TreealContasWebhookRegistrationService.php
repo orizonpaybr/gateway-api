@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Log;
 class TreealContasWebhookRegistrationService
 {
     /** @var array<int, string> */
-    public const REGISTERABLE_TYPES = ['TRANSFER', 'RECEIVE', 'REFUND', 'CASHOUT'];
+    public const REGISTERABLE_TYPES = ['TRANSFER', 'RECEIVE', 'REFUND', 'CASHOUT', 'INFRACTION'];
 
     public function __construct(
         private readonly TreealContasApiClient $client,
