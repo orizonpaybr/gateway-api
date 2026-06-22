@@ -24,6 +24,7 @@ use App\Services\Treeal\TreealPixAcquirerService;
 use App\Services\Treeal\TreealWebhookRegistrationService;
 use App\Services\TreealContas\TreealContasApiClient;
 use App\Services\TreealContas\TreealContasAuthService;
+use App\Services\TreealContas\TreealContasInfractionService;
 use App\Services\TreealContas\TreealContasPixOutService;
 use App\Services\TreealContas\TreealContasWebhookRegistrationService;
 use Illuminate\Support\ServiceProvider;
@@ -86,6 +87,13 @@ class AppServiceProvider extends ServiceProvider
 
         $this->app->singleton(TreealContasWebhookRegistrationService::class, function ($app) {
             return new TreealContasWebhookRegistrationService(
+                $app->make(TreealContasApiClient::class),
+                $app->make(TreealContasAuthService::class),
+            );
+        });
+
+        $this->app->singleton(TreealContasInfractionService::class, function ($app) {
+            return new TreealContasInfractionService(
                 $app->make(TreealContasApiClient::class),
                 $app->make(TreealContasAuthService::class),
             );

@@ -22,11 +22,14 @@ class TreealContasWebhookControllerTest extends TestCase
             ->assertJson(['received' => false, 'error' => 'unauthorized']);
     }
 
-    public function test_ignores_infraction_type(): void
+    public function test_infraction_without_resolvable_deposit_is_acknowledged(): void
     {
         config([
             'treeal_contas.webhook_auth_header' => '',
             'treeal_contas.webhook_auth_value' => '',
+            // Sem credenciais/cert: não tenta buscar o detalhe na API.
+            'treeal_contas.client_id' => '',
+            'treeal_contas.client_secret' => '',
         ]);
 
         $response = $this->postJson('/treeal/contas/webhook', [
@@ -35,7 +38,7 @@ class TreealContasWebhookControllerTest extends TestCase
         ]);
 
         $response->assertOk()
-            ->assertJson(['received' => true, 'processed' => false, 'reason' => 'type_not_handled']);
+            ->assertJson(['received' => true, 'processed' => false, 'reason' => 'deposit_not_found']);
     }
 
     public function test_rejects_invalid_payload(): void

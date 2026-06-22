@@ -90,8 +90,10 @@ class SaqueController extends Controller
         // Verificar saldo disponível = saldo principal + saldo de afiliados (considerando valores em mediação)
         $saldoDisponivel = (float) ($user->saldo ?? 0) + (float) ($user->saldo_afiliado ?? 0);
 
-        // Calcular valores bloqueados em mediação
-        $valoresEmMediacao = \App\Models\Solicitacoes::where('user_id', $user->id)
+        // Calcular valores bloqueados em mediação (depósitos sob infração/MED).
+        // Depósitos são gravados com user_id = username (vide DepositController), então o
+        // bloqueio precisa casar com o mesmo identificador para ser efetivo.
+        $valoresEmMediacao = \App\Models\Solicitacoes::where('user_id', $user->username)
             ->where('status', 'MEDIATION')
             ->sum('deposito_liquido');
 

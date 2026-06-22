@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\SaqueController;
 use App\Http\Controllers\Api\DepositController;
 use Illuminate\Support\Facades\Artisan;
-// use App\Http\Controllers\Api\PixInfracoesController; // Pix infrações — desativado temporariamente
+use App\Http\Controllers\Api\PixInfracoesController;
 use App\Http\Controllers\Api\PixKeyController;
 use App\Http\Controllers\Api\SimpayCpfController;
 use App\Http\Controllers\Api\SimpayDebugController;
@@ -49,9 +49,10 @@ Route::middleware(['verify.jwt', 'throttle:120,1'])->group(function () {
     Route::get('gamification/journey', [UserController::class, 'getGamificationData']);
     Route::get('gamification/sidebar', [UserController::class, 'getSidebarGamificationData']);
 
-    // Infrações Pix (desativado temporariamente — reative o use acima e as duas rotas)
-    // Route::get('pix/infracoes', [PixInfracoesController::class, 'index']);
-    // Route::get('pix/infracoes/{id}', [PixInfracoesController::class, 'show']);
+    // Infrações Pix (MED — Mecanismo Especial de Devolução)
+    Route::get('pix/infracoes', [PixInfracoesController::class, 'index']);
+    Route::get('pix/infracoes/{id}', [PixInfracoesController::class, 'show'])->where('id', '[0-9]+');
+    Route::post('pix/infracoes/{id}/defense', [PixInfracoesController::class, 'defense'])->where('id', '[0-9]+');
 
     // Chaves PIX
     Route::get('pix/keys', [PixKeyController::class, 'index']);

@@ -1,17 +1,22 @@
 <?php
 
 /**
- * Rotas HTTP deste controller estão comentadas em routes/api.php (GET pix/infracoes e pix/infracoes/{id}).
- * Descomente-as e o import em api.php para reativar o recurso no gateway.
+ * Infrações Pix (MED — Mecanismo Especial de Devolução).
+ *
+ * Listagem/detalhe leem a tabela local `pix_infracoes` (alimentada pelo webhook
+ * INFRACTION da Treeal Contas). A defesa é encaminhada à adquirente via
+ * TreealContasInfractionService (POST /infractions/{id}/defense).
  */
 
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\TreealContas\TreealContasInfractionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Schema;
 use Carbon\Carbon;
 
 class PixInfracoesController extends Controller
@@ -230,6 +235,99 @@ class PixInfracoesController extends Controller
             ])->header('Access-Control-Allow-Origin', '*');
         } catch (\Exception $e) {
             Log::error('Erro ao obter detalhe de infração Pix', [
+                'error' => $e->getMessage(),
+                'id' => $id,
+            ]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro interno do servidor'
+            ], 500)->header('Access-Control-Allow-Origin', '*');
+        }
+    }
+
+    /**
+     * Submete uma defesa contra a infração na adquirente (Treeal Contas).
+     */
+    public function defense(Request $request, $id)
+    {
+        try {
+            $user = $request->user() ?? ($request->user_auth ?? null);
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Usuário não autenticado'
+                ], 401)->header('Access-Control-Allow-Origin', '*');
+            }
+
+            $validated = $request->validate([
+                'defense' => ['required', 'string', 'min:3', 'max:5000'],
+                'files' => ['sometimes', 'array', 'max:10'],
+                'files.*' => ['file', 'max:10240'],
+            ]);
+
+            $row = DB::table('pix_infracoes')
+                ->where('user_id', $user->username)
+                ->where('id', $id)
+                ->first();
+
+            if (!$row) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Infração não encontrada'
+                ], 404)->header('Access-Control-Allow-Origin', '*');
+            }
+
+            $providerId = Schema::hasColumn('pix_infracoes', 'provider_infraction_id')
+                ? trim((string) ($row->provider_infraction_id ?? ''))
+                : '';
+
+            if ($providerId === '') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Esta infração não possui vínculo com a adquirente para envio de defesa.'
+                ], 422)->header('Access-Control-Allow-Origin', '*');
+            }
+
+            $service = app(TreealContasInfractionService::class);
+            $files = $request->file('files') ?? [];
+            if (! is_array($files)) {
+                $files = [$files];
+            }
+
+            $result = $service->submitDefense($providerId, (string) $validated['defense'], $files);
+
+            if (! ($result['success'] ?? false)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $result['message'] ?? 'Falha ao enviar defesa para a adquirente.'
+                ], 502)->header('Access-Control-Allow-Origin', '*');
+            }
+
+            DB::table('pix_infracoes')->where('id', $row->id)->update([
+                'status' => 'EM_ANALISE',
+                'updated_at' => Carbon::now(),
+            ]);
+
+            Cache::forget("pix_infracao_detail:{$user->username}:{$id}");
+            try {
+                app(\App\Services\PaymentProcessingService::class)->invalidateInfractionCaches($user->username);
+            } catch (\Throwable $e) {
+                // cache best-effort
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Defesa enviada com sucesso.',
+                'data' => $result['raw'] ?? null,
+            ])->header('Access-Control-Allow-Origin', '*');
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erro de validação',
+                'errors' => $e->errors(),
+            ], 422)->header('Access-Control-Allow-Origin', '*');
+        } catch (\Exception $e) {
+            Log::error('Erro ao enviar defesa de infração Pix', [
                 'error' => $e->getMessage(),
                 'id' => $id,
             ]);

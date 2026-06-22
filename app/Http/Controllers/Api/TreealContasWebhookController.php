@@ -8,10 +8,14 @@ use App\Http\Controllers\Controller;
 use App\Jobs\ClientWebhookDispatchJob;
 use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
+use App\Models\User;
+use App\Services\BalanceService;
 use App\Services\CashOut\CashOutOutcomeApplier;
 use App\Services\ClientWebhookPayloadBuilder;
 use App\Services\PaymentProcessingService;
 use App\Services\Treeal\TreealPixAcquirerService;
+use App\Services\TreealContas\TreealContasInfractionService;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -25,7 +29,10 @@ use Illuminate\Support\Facades\Log;
  */
 class TreealContasWebhookController extends Controller
 {
-    private const IGNORE_TYPES = ['INFRACTION'];
+    private const IGNORE_TYPES = [];
+
+    /** Status de infração que mantêm o valor bloqueado (em mediação) no recebedor. */
+    private const INFRACTION_ACTIVE_STATUSES = ['OPEN', 'ACKNOWLEDGED', 'WAITING_ADJUSTMENTS', 'DEFENDED', 'ANSWERED'];
 
     public function handle(Request $request): JsonResponse
     {
@@ -64,8 +71,328 @@ class TreealContasWebhookController extends Controller
             'TRANSFER' => $this->handleTransfer($data),
             'REFUND' => $this->handleRefundCashOut($data),
             'CASHOUT' => $this->handleCashOutValidationFailure($data),
+            'INFRACTION' => $this->handleInfraction($data),
             default => response()->json(['received' => true, 'processed' => false, 'reason' => 'unknown_type']),
         };
+    }
+
+    /**
+     * Infração Pix (MED). Quando aberta contra a conta recebedora, registra a infração,
+     * bloqueia o valor (status MEDIATION no depósito) e notifica o integrador. Ao encerrar,
+     * confirma a devolução (fraude) ou libera o bloqueio (defesa aceita / cancelada).
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function handleInfraction(array $data): JsonResponse
+    {
+        $infractionId = trim((string) ($data['id'] ?? ''));
+        if ($infractionId === '') {
+            return response()->json(['received' => true, 'processed' => false, 'reason' => 'missing_infraction_id']);
+        }
+
+        $status = strtoupper(trim((string) ($data['status'] ?? '')));
+        $analysisResult = strtoupper(trim((string) ($data['analysisResult'] ?? '')));
+
+        $endToEndId = trim((string) ($data['endToEndId'] ?? ''));
+        // O payload do webhook traz transactionId, mas o endToEndId só vem no detalhe.
+        if ($endToEndId === '') {
+            $endToEndId = $this->resolveInfractionEndToEndId($infractionId, $data);
+        }
+
+        $deposit = $this->findTreealDepositForInfraction($data, $endToEndId);
+        if (! $deposit) {
+            Log::warning('[TREEAL_CONTAS][WEBHOOK][INFRACTION] Depósito não localizado', [
+                'infraction_id' => $infractionId,
+                'status' => $status,
+                'end_to_end' => $endToEndId !== '' ? $endToEndId : null,
+                'transactionId' => $data['transactionId'] ?? null,
+            ]);
+
+            return response()->json(['received' => true, 'processed' => false, 'reason' => 'deposit_not_found']);
+        }
+
+        $amount = $this->extractInfractionAmount($data, (float) $deposit->amount);
+
+        $this->upsertInfractionRecord($deposit, $infractionId, $status, $analysisResult, $amount, $data, $endToEndId);
+
+        $depositStatusChanged = $this->applyInfractionToDeposit($deposit, $status, $analysisResult);
+
+        app(PaymentProcessingService::class)->invalidateInfractionCaches((string) $deposit->user_id);
+        app(PaymentProcessingService::class)->invalidateCachesAfterPayment((string) $deposit->user_id);
+
+        $this->dispatchInfractionClientWebhook($deposit->fresh(), $status, $amount);
+
+        Log::info('[TREEAL_CONTAS][WEBHOOK][INFRACTION] Processada', [
+            'infraction_id' => $infractionId,
+            'status' => $status,
+            'analysis_result' => $analysisResult !== '' ? $analysisResult : null,
+            'deposit_id' => $deposit->id,
+            'deposit_status_changed' => $depositStatusChanged,
+        ]);
+
+        return response()->json(['received' => true, 'processed' => true]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function resolveInfractionEndToEndId(string $infractionId, array $data): string
+    {
+        $service = app(TreealContasInfractionService::class);
+        if (! $service->isConfigured()) {
+            return '';
+        }
+
+        try {
+            $detail = $service->getInfraction($infractionId);
+            if (($detail['success'] ?? false) && is_array($detail['raw'] ?? null)) {
+                $detailData = is_array($detail['raw']['data'] ?? null) ? $detail['raw']['data'] : $detail['raw'];
+
+                return trim((string) ($detailData['endToEndId'] ?? ''));
+            }
+        } catch (\Throwable $e) {
+            Log::warning('[TREEAL_CONTAS][WEBHOOK][INFRACTION] Falha ao buscar detalhe', [
+                'infraction_id' => $infractionId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return '';
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function findTreealDepositForInfraction(array $data, string $endToEndId): ?Solicitacoes
+    {
+        $base = Solicitacoes::query()->where('executor_ordem', 'treeal');
+
+        if ($endToEndId !== '') {
+            $found = (clone $base)->where('end_to_end', $endToEndId)->first();
+            if ($found !== null) {
+                return $found;
+            }
+        }
+
+        $txId = trim((string) ($data['transactionId'] ?? $data['txId'] ?? ''));
+        if ($txId !== '') {
+            return (clone $base)->where('idTransaction', $txId)->first();
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function extractInfractionAmount(array $data, float $fallback): float
+    {
+        $amount = $data['transactionAmount']['amount'] ?? null;
+        if (is_numeric($amount) && (float) $amount > 0) {
+            return round((float) $amount, 2);
+        }
+
+        return $fallback;
+    }
+
+    /**
+     * Cria/atualiza o registro local da infração (idempotente pelo provider_infraction_id).
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function upsertInfractionRecord(
+        Solicitacoes $deposit,
+        string $infractionId,
+        string $status,
+        string $analysisResult,
+        float $amount,
+        array $data,
+        string $endToEndId,
+    ): void {
+        $hasProviderColumn = \Illuminate\Support\Facades\Schema::hasColumn('pix_infracoes', 'provider_infraction_id');
+
+        $creation = $this->parseDate($data['creationDate'] ?? null) ?? Carbon::now();
+        $limite = $this->parseDate($data['lastModificationDate'] ?? null) ?? $creation->copy()->addDays(7);
+
+        $attributes = [
+            'user_id' => (string) $deposit->user_id,
+            'transaction_id' => (string) ($deposit->idTransaction ?? ''),
+            'status' => $this->mapInfractionStatusToLocal($status),
+            'tipo' => strtolower((string) ($data['type'] ?? 'fraude')),
+            'descricao' => mb_substr((string) ($data['reportDetails'] ?? 'Infração Pix (MED) registrada.'), 0, 1000),
+            'valor' => $amount,
+            'end_to_end' => $endToEndId !== '' ? $endToEndId : (string) ($deposit->end_to_end ?? ''),
+            'data_criacao' => $creation,
+            'data_limite' => $limite,
+            'detalhes' => json_encode([
+                'infractionId' => $infractionId,
+                'status' => $status,
+                'analysisResult' => $analysisResult !== '' ? $analysisResult : null,
+                'reportedBy' => $data['reportedBy'] ?? null,
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            'updated_at' => Carbon::now(),
+        ];
+
+        if ($hasProviderColumn) {
+            $attributes['provider'] = 'treeal';
+            if (\Illuminate\Support\Facades\Schema::hasColumn('pix_infracoes', 'analysis_result')) {
+                $attributes['analysis_result'] = $analysisResult !== '' ? $analysisResult : null;
+            }
+
+            $existing = DB::table('pix_infracoes')->where('provider_infraction_id', $infractionId)->first();
+            if ($existing) {
+                DB::table('pix_infracoes')->where('id', $existing->id)->update($attributes);
+            } else {
+                $attributes['provider_infraction_id'] = $infractionId;
+                $attributes['created_at'] = Carbon::now();
+                DB::table('pix_infracoes')->insert($attributes);
+            }
+
+            return;
+        }
+
+        // Fallback sem a coluna de id externo: deduplica por end_to_end + user.
+        $existing = DB::table('pix_infracoes')
+            ->where('user_id', $attributes['user_id'])
+            ->where('end_to_end', $attributes['end_to_end'])
+            ->first();
+
+        if ($existing) {
+            DB::table('pix_infracoes')->where('id', $existing->id)->update($attributes);
+        } else {
+            $attributes['created_at'] = Carbon::now();
+            DB::table('pix_infracoes')->insert($attributes);
+        }
+    }
+
+    /**
+     * Aplica o efeito da infração ao depósito (bloqueio / devolução / liberação).
+     */
+    private function applyInfractionToDeposit(Solicitacoes $deposit, string $status, string $analysisResult): bool
+    {
+        // Infração ativa: bloquear o valor (MEDIATION) se ainda creditado.
+        if (in_array($status, self::INFRACTION_ACTIVE_STATUSES, true)) {
+            return DB::transaction(function () use ($deposit) {
+                $locked = Solicitacoes::where('id', $deposit->id)->lockForUpdate()->first();
+                if (! $locked || ! in_array($locked->status, ['PAID_OUT', 'COMPLETED'], true)) {
+                    return false;
+                }
+
+                $locked->update(['status' => 'MEDIATION']);
+
+                return true;
+            });
+        }
+
+        if ($status === 'CLOSED') {
+            // Fraude confirmada (AGREED) → devolução efetivada: debita saldo e marca estornado.
+            if ($analysisResult === 'AGREED') {
+                return $this->settleInfractionRefund($deposit);
+            }
+
+            // Defesa aceita (DISAGREED) → libera o bloqueio.
+            return $this->releaseInfractionHold($deposit);
+        }
+
+        if ($status === 'CANCELLED') {
+            return $this->releaseInfractionHold($deposit);
+        }
+
+        return false;
+    }
+
+    private function settleInfractionRefund(Solicitacoes $deposit): bool
+    {
+        return DB::transaction(function () use ($deposit) {
+            $locked = Solicitacoes::where('id', $deposit->id)->lockForUpdate()->first();
+            if (! $locked || $locked->status === 'REFUNDED') {
+                return false;
+            }
+
+            $previousStatus = (string) $locked->status;
+            $locked->update(['status' => 'REFUNDED']);
+
+            // Estorna do saldo apenas se o valor havia sido creditado (estava pago ou bloqueado).
+            if (in_array($previousStatus, ['PAID_OUT', 'COMPLETED', 'MEDIATION'], true)) {
+                $user = User::where('user_id', $locked->user_id)
+                    ->orWhere('username', $locked->user_id)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($user) {
+                    app(BalanceService::class)->decrementBalanceForRefund(
+                        $user,
+                        (float) $locked->deposito_liquido,
+                        'saldo',
+                    );
+                }
+            }
+
+            return true;
+        });
+    }
+
+    private function releaseInfractionHold(Solicitacoes $deposit): bool
+    {
+        return DB::transaction(function () use ($deposit) {
+            $locked = Solicitacoes::where('id', $deposit->id)->lockForUpdate()->first();
+            if (! $locked || $locked->status !== 'MEDIATION') {
+                return false;
+            }
+
+            $locked->update(['status' => 'COMPLETED']);
+
+            return true;
+        });
+    }
+
+    private function mapInfractionStatusToLocal(string $status): string
+    {
+        return match ($status) {
+            'OPEN' => 'PENDENTE',
+            'ACKNOWLEDGED', 'WAITING_ADJUSTMENTS', 'DEFENDED', 'ANSWERED' => 'EM_ANALISE',
+            'CLOSED' => 'RESOLVIDA',
+            'CANCELLED' => 'CANCELADA',
+            default => 'PENDENTE',
+        };
+    }
+
+    private function parseDate(mixed $value): ?Carbon
+    {
+        if (! is_string($value) || trim($value) === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($value);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private function dispatchInfractionClientWebhook(?Solicitacoes $deposit, string $status, float $amount): void
+    {
+        if (! $deposit || empty($deposit->callback) || $deposit->callback === 'web') {
+            return;
+        }
+
+        $clientStatus = match ($status) {
+            'OPEN' => 'INFRACTION_OPEN',
+            'ACKNOWLEDGED', 'WAITING_ADJUSTMENTS', 'DEFENDED', 'ANSWERED' => 'INFRACTION_ACKNOWLEDGED',
+            'CLOSED' => 'INFRACTION_CLOSED',
+            'CANCELLED' => 'INFRACTION_CANCELLED',
+            default => 'INFRACTION_OPEN',
+        };
+
+        ClientWebhookDispatchJob::send(
+            $deposit->callback,
+            (string) $deposit->idTransaction,
+            $clientStatus,
+            $amount,
+            now()->toIso8601String(),
+            ClientWebhookPayloadBuilder::extraForDeposit($deposit),
+            WebhookClientMessages::getMessageForStatus($clientStatus, 'PIX_IN'),
+        );
     }
 
     /**

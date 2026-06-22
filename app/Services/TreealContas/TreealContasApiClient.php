@@ -40,6 +40,56 @@ class TreealContasApiClient
     }
 
     /**
+     * Envio multipart/form-data (ex.: defesa de infração com anexos).
+     *
+     * @param  array<string, scalar>  $fields
+     * @param  array<int, array{name: string, contents: string, filename: string}>  $files
+     */
+    public function postMultipart(string $path, array $fields = [], array $files = []): Response
+    {
+        $baseUrl = rtrim((string) config('treeal_contas.base_url'), '/');
+        $timeout = (int) config('treeal_contas.timeout', 30);
+        $path = '/'.ltrim($path, '/');
+        $url = $baseUrl.$path;
+
+        $mtls = TreealContasMtlsOptions::build();
+
+        $send = function () use ($timeout, $mtls, $files, $url, $fields): Response {
+            // Multipart não deve forçar Content-Type application/json.
+            $headers = $this->auth->authHeaders();
+            unset($headers['Content-Type']);
+
+            $client = Http::timeout($timeout)
+                ->withOptions($mtls)
+                ->withHeaders($headers)
+                ->asMultipart();
+
+            foreach ($files as $file) {
+                $client->attach($file['name'], $file['contents'], $file['filename']);
+            }
+
+            return $client->post($url, $fields);
+        };
+
+        try {
+            $response = $send();
+
+            if ($response->status() === 401) {
+                $this->auth->invalidateToken();
+                $response = $send();
+            }
+
+            return $response;
+        } catch (\Throwable $e) {
+            Log::error('[TREEAL_CONTAS][HTTP] Falha em requisição multipart', [
+                'path' => $path,
+                'error' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
      * @param  array{query?: array<string, mixed>, json?: array<string, mixed>, headers?: array<string, string>}  $options
      */
     private function request(string $method, string $path, array $options = []): Response

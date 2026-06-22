@@ -9,9 +9,9 @@ class TreealRegisterContasWebhooksCommand extends Command
 {
     protected $signature = 'treeal:register-contas-webhooks
                             {--show : Lista webhooks cadastrados na Treeal Contas}
-                            {--type= : Registra apenas um tipo (TRANSFER, RECEIVE, REFUND, CASHOUT)}';
+                            {--type= : Registra apenas um tipo (TRANSFER, RECEIVE, REFUND, CASHOUT, INFRACTION)}';
 
-    protected $description = 'Registra webhooks Contas TREEAL (TRANSFER, RECEIVE, REFUND, CASHOUT)';
+    protected $description = 'Registra webhooks Contas TREEAL (TRANSFER, RECEIVE, REFUND, CASHOUT, INFRACTION)';
 
     public function handle(TreealContasWebhookRegistrationService $service): int
     {
