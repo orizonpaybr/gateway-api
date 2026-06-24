@@ -84,8 +84,30 @@ class TaxaSaqueHelper
         // Verificar se o usuário tem taxas personalizadas ativas
         $taxasPersonalizadasAtivas = $user && isset($user->taxas_personalizadas_ativas) && $user->taxas_personalizadas_ativas;
 
-        // Obter taxa fixa configurada (taxa total cobrada do cliente)
-        if ($taxasPersonalizadasAtivas) {
+        // Modo de cobrança por PORCENTAGEM (individual, exclusivo da taxa fixa).
+        $modoPercentual = $taxasPersonalizadasAtivas
+            && isset($user->taxa_modo_percentual) && $user->taxa_modo_percentual;
+        $percentualAplicado = 0.0;
+
+        // Obter taxa total cobrada do cliente
+        if ($modoPercentual) {
+            // Taxa por PORCENTAGEM sobre o valor do saque. Substitui a taxa fixa do usuário.
+            $percentualAplicado = max(0, (float) ($user->taxa_percentual_pix ?? 0));
+            $taxaPercentualBruta = ($amount * $percentualAplicado) / 100;
+
+            // PISO: nunca menor que a taxa padrão em centavos da adquirente principal (Treeal).
+            $piso = CustoAdquirentePixHelper::pisoCentavos();
+            $taxaTotal = max($taxaPercentualBruta, $piso);
+            $descricao = $isInterfaceWeb ? 'PERSONALIZADA_INTERFACE_WEB_PERCENTUAL' : 'PERSONALIZADA_API_PERCENTUAL';
+
+            Log::info('TaxaSaqueHelper::calcularTaxaSaque - Usando taxa percentual', [
+                'user_id' => $user->user_id ?? 'N/A',
+                'percentual' => $percentualAplicado,
+                'taxa_percentual_bruta' => $taxaPercentualBruta,
+                'piso_centavos' => $piso,
+                'taxa_aplicada' => $taxaTotal,
+            ]);
+        } elseif ($taxasPersonalizadasAtivas) {
             // Usar taxa fixa personalizada do usuário
             $taxaTotal = $user->taxa_fixa_pix ?? $setting->taxa_fixa_pix ?? 1.00;
             $descricao = $isInterfaceWeb ? 'PERSONALIZADA_INTERFACE_WEB_FIXA' : 'PERSONALIZADA_API_FIXA';
@@ -193,6 +215,8 @@ class TaxaSaqueHelper
             'saque_liquido' => $saque_liquido,       // Valor que o cliente recebe (sempre o valor solicitado)
             'descricao' => $descricao,
             'valor_total_descontar' => $valor_total_descontar, // Total descontado do saldo (amount + taxa)
+            'modo_percentual' => $modoPercentual,
+            'taxa_percentual' => $percentualAplicado,
         ];
     }
 
@@ -209,6 +233,36 @@ class TaxaSaqueHelper
     {
         // Verificar se o usuário tem taxas personalizadas ativas
         $taxasPersonalizadasAtivas = $user && isset($user->taxas_personalizadas_ativas) && $user->taxas_personalizadas_ativas;
+        $modoPercentual = $taxasPersonalizadasAtivas
+            && isset($user->taxa_modo_percentual) && $user->taxa_modo_percentual;
+
+        if ($modoPercentual) {
+            // No modo percentual a taxa depende do valor sacado: saldo = valor + valor*(p/100).
+            // Resolvendo: valor = saldo / (1 + p/100). Respeita o piso em centavos.
+            $percentual = max(0, (float) ($user->taxa_percentual_pix ?? 0));
+            $piso = CustoAdquirentePixHelper::pisoCentavos();
+
+            $valorMaximo = $percentual > 0
+                ? $saldoDisponivel / (1 + ($percentual / 100))
+                : max(0, $saldoDisponivel - $piso);
+
+            $taxaTotal = max(($valorMaximo * $percentual) / 100, $piso);
+
+            // Se o piso "comeu" mais do que o percentual previa, recalcula o valor máximo.
+            if (($valorMaximo + $taxaTotal) > $saldoDisponivel) {
+                $valorMaximo = max(0, $saldoDisponivel - $piso);
+                $taxaTotal = max(($valorMaximo * $percentual) / 100, $piso);
+            }
+
+            $valorMaximo = max(0, $valorMaximo);
+            $saldoRestante = $saldoDisponivel - $valorMaximo - $taxaTotal;
+
+            return [
+                'valor_maximo' => $valorMaximo,
+                'taxa_total' => $taxaTotal,
+                'saldo_restante' => $saldoRestante,
+            ];
+        }
 
         // Taxa fixa
         if ($taxasPersonalizadasAtivas) {

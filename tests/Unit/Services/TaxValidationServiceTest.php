@@ -138,4 +138,58 @@ class TaxValidationServiceTest extends TestCase
         $this->assertArrayHasKey('taxa_comissao_afiliado', $rules);
         $this->assertArrayHasKey('comissao_afiliado_personalizada', $rules);
     }
+
+    /** @test */
+    public function get_individual_tax_rules_inclui_modo_e_taxas_percentuais(): void
+    {
+        $rules = TaxValidationService::getIndividualTaxRules();
+
+        $this->assertArrayHasKey('taxa_modo_percentual', $rules);
+        $this->assertArrayHasKey('taxa_percentual_deposito', $rules);
+        $this->assertArrayHasKey('taxa_percentual_pix', $rules);
+        $this->assertStringContainsString('max:100', $rules['taxa_percentual_deposito']);
+        $this->assertStringContainsString('max:100', $rules['taxa_percentual_pix']);
+    }
+
+    /** @test */
+    public function validate_individual_taxes_aceita_modo_percentual(): void
+    {
+        $validator = TaxValidationService::validateIndividualTaxes([
+            'taxas_personalizadas_ativas' => true,
+            'taxa_modo_percentual' => true,
+            'taxa_percentual_deposito' => 2.00,
+            'taxa_percentual_pix' => 1.50,
+        ]);
+
+        $this->assertFalse($validator->fails());
+    }
+
+    /** @test */
+    public function validate_individual_taxes_rejeita_percentual_acima_de_100(): void
+    {
+        $validator = TaxValidationService::validateIndividualTaxes([
+            'taxa_modo_percentual' => true,
+            'taxa_percentual_deposito' => 150,
+        ]);
+
+        $this->assertTrue($validator->fails());
+        $this->assertArrayHasKey('taxa_percentual_deposito', $validator->errors()->toArray());
+    }
+
+    /** @test */
+    public function sanitize_tax_data_converte_modo_e_percentuais(): void
+    {
+        $data = [
+            'taxa_modo_percentual' => '1',
+            'taxa_percentual_deposito' => '2.5',
+            'taxa_percentual_pix' => '',
+        ];
+
+        $sanitized = TaxValidationService::sanitizeTaxData($data);
+
+        $this->assertTrue($sanitized['taxa_modo_percentual']);
+        $this->assertIsFloat($sanitized['taxa_percentual_deposito']);
+        $this->assertEquals(2.5, $sanitized['taxa_percentual_deposito']);
+        $this->assertNull($sanitized['taxa_percentual_pix']);
+    }
 }

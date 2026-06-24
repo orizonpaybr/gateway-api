@@ -193,6 +193,8 @@ class AdminUserService
                 'taxa_cash_in_fixa', 'taxa_cash_out_fixa', 'gerente_id',
                 // Taxas fixas (em centavos)
                 'taxas_personalizadas_ativas', 'taxa_fixa_deposito', 'taxa_fixa_pix',
+                // Modo percentual (exclusivo da taxa fixa) + percentuais por usuário
+                'taxa_modo_percentual', 'taxa_percentual_deposito', 'taxa_percentual_pix',
                 'limite_mensal_pf',
                 // Comissão de afiliado personalizada
                 'taxa_comissao_afiliado', 'comissao_afiliado_personalizada',
@@ -227,9 +229,13 @@ class AdminUserService
             $hasTaxaPix = array_key_exists('taxa_fixa_pix', $data);
             $taxaDepositoValue = $hasTaxaDeposito ? (float) ($data['taxa_fixa_deposito'] ?? 0) : null;
             $taxaPixValue = $hasTaxaPix ? (float) ($data['taxa_fixa_pix'] ?? 0) : null;
-            
-            // Se uma taxa foi definida e é diferente de zero, ativar taxas personalizadas
-            if (($hasTaxaDeposito && $taxaDepositoValue > 0) || ($hasTaxaPix && $taxaPixValue > 0)) {
+
+            // Modo percentual também depende de taxas personalizadas ativas para ser aplicado
+            $modoPercentualAtivado = array_key_exists('taxa_modo_percentual', $data)
+                && (bool) $data['taxa_modo_percentual'] === true;
+
+            // Se uma taxa foi definida (>0) ou o modo percentual foi ativado, ativar taxas personalizadas
+            if (($hasTaxaDeposito && $taxaDepositoValue > 0) || ($hasTaxaPix && $taxaPixValue > 0) || $modoPercentualAtivado) {
                 // Só atualizar se não foi explicitamente definido como false
                 if (!array_key_exists('taxas_personalizadas_ativas', $data) || $data['taxas_personalizadas_ativas'] !== false) {
                     $updateData['taxas_personalizadas_ativas'] = true;
@@ -237,6 +243,7 @@ class AdminUserService
                         'user_id' => $userId,
                         'taxa_fixa_deposito' => $taxaDepositoValue,
                         'taxa_fixa_pix' => $taxaPixValue,
+                        'modo_percentual' => $modoPercentualAtivado,
                     ]);
                 }
             }

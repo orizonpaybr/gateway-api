@@ -73,8 +73,33 @@ class TaxaFlexivelHelper
             'amount' => $amount,
         ]);
 
-        // Obter taxa fixa configurada (taxa total cobrada do cliente)
-        if ($taxasPersonalizadasAtivas) {
+        // Modo de cobrança por PORCENTAGEM (individual, exclusivo da taxa fixa).
+        // Só vale quando o usuário tem taxas personalizadas ativas E ativou o modo percentual.
+        $modoPercentual = $taxasPersonalizadasAtivas
+            && isset($user->taxa_modo_percentual) && $user->taxa_modo_percentual;
+        $percentualAplicado = 0.0;
+
+        // Obter taxa total cobrada do cliente
+        if ($modoPercentual) {
+            // Taxa por PORCENTAGEM sobre o valor (ex.: 2% de R$ 10,00 = R$ 0,20).
+            // Substitui a taxa fixa em centavos do usuário.
+            $percentualAplicado = max(0, (float) ($user->taxa_percentual_deposito ?? 0));
+            $taxaPercentualBruta = ($amount * $percentualAplicado) / 100;
+
+            // PISO: nunca menor que a taxa padrão em centavos da adquirente principal (Treeal).
+            $piso = CustoAdquirentePixHelper::pisoCentavos();
+            $taxaTotal = max($taxaPercentualBruta, $piso);
+            $descricao = 'PERSONALIZADA_PERCENTUAL';
+
+            \Illuminate\Support\Facades\Log::info('TaxaFlexivelHelper::calcularTaxaDeposito - Usando taxa percentual', [
+                'user_id' => $user->user_id ?? 'N/A',
+                'percentual' => $percentualAplicado,
+                'taxa_percentual_bruta' => $taxaPercentualBruta,
+                'piso_centavos' => $piso,
+                'taxa_aplicada' => $taxaTotal,
+                'amount' => $amount,
+            ]);
+        } elseif ($taxasPersonalizadasAtivas) {
             // Usar taxa fixa personalizada do usuário
             $taxaTotal = (float) ($user->taxa_fixa_deposito ?? $setting->taxa_fixa_padrao ?? 1.00);
             $descricao = 'PERSONALIZADA_FIXA';
@@ -141,6 +166,8 @@ class TaxaFlexivelHelper
             'deposito_liquido' => $depositoLiquido,
             'valor_recebido_adquirente' => $valorRecebidoAdquirente,
             'descricao' => $descricao,
+            'modo_percentual' => $modoPercentual,
+            'taxa_percentual' => $percentualAplicado,
         ];
     }
 }
