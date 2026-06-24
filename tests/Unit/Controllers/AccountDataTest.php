@@ -4,6 +4,7 @@ namespace Tests\Unit\Controllers;
 
 use Tests\TestCase;
 use App\Http\Controllers\Api\UserController;
+use App\Models\App;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
@@ -266,6 +267,42 @@ class AccountDataTest extends TestCase
 
         $this->assertEquals(200, $response->getStatusCode());
         $this->assertEquals(1, $data['data']['permission']);
+    }
+
+    /**
+     * Teste: Deve retornar taxas em porcentagem quando modo percentual está ativo
+     */
+    public function test_should_return_percent_taxes_when_percent_mode_is_active(): void
+    {
+        App::factory()->create([
+            'taxa_fixa_padrao' => 1.00,
+            'taxa_fixa_pix' => 1.00,
+        ]);
+
+        $this->user->taxas_personalizadas_ativas = true;
+        $this->user->taxa_modo_percentual = true;
+        $this->user->taxa_percentual_deposito = 2.50;
+        $this->user->taxa_percentual_pix = 1.75;
+        $this->user->taxa_fixa_deposito = 0.50;
+        $this->user->taxa_fixa_pix = 0.33;
+        $this->user->save();
+
+        Cache::forget('user_profile_' . $this->user->username);
+
+        $controller = new UserController();
+        $request = \Illuminate\Http\Request::create('/api/user/profile', 'GET');
+        $request->setUserResolver(fn() => $this->user);
+
+        $response = $controller->getProfile($request);
+        $data = json_decode($response->getContent(), true);
+
+        $this->assertEquals(200, $response->getStatusCode());
+        $this->assertEquals('percent', $data['data']['taxes']['mode']);
+        $this->assertEquals('percent', $data['data']['taxes']['deposit']['mode']);
+        $this->assertEquals(2.50, $data['data']['taxes']['deposit']['percent']);
+        $this->assertEquals('percent', $data['data']['taxes']['withdraw']['mode']);
+        $this->assertEquals(1.75, $data['data']['taxes']['withdraw']['percent']);
+        $this->assertArrayNotHasKey('fixed', $data['data']['taxes']['deposit']);
     }
 }
 

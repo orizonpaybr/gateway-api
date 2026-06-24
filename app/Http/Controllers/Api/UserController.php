@@ -2345,6 +2345,7 @@ class UserController extends Controller
 
         // Verificar se usuário tem taxas personalizadas ativas
         $hasPersonalizedTaxes = $user->taxas_personalizadas_ativas ?? false;
+        $isPercentMode = $hasPersonalizedTaxes && ($user->taxa_modo_percentual ?? false);
 
         // Taxas de Depósito (Cash In)
         $depositTaxes = $this->getDepositTaxes($user, $setting, $hasPersonalizedTaxes);
@@ -2356,6 +2357,7 @@ class UserController extends Controller
         $affiliateTaxes = $this->getAffiliateTaxes($setting);
 
         return [
+            'mode' => $isPercentMode ? 'percent' : 'fixed',
             'deposit' => $depositTaxes,
             'withdraw' => $withdrawTaxes,
             'affiliate' => $affiliateTaxes,
@@ -2373,6 +2375,17 @@ class UserController extends Controller
      */
     private function getDepositTaxes($user, $setting, bool $hasPersonalizedTaxes): array
     {
+        if ($hasPersonalizedTaxes && ($user->taxa_modo_percentual ?? false)) {
+            $percent = (float) ($user->taxa_percentual_deposito ?? 0);
+
+            return [
+                'mode' => 'percent',
+                'percent' => $percent,
+                'is_custom' => true,
+                'floor_cents' => \App\Helpers\CustoAdquirentePixHelper::pisoCentavos(),
+            ];
+        }
+
         $globalFixed = (float) ($setting->taxa_fixa_padrao ?? 1);
         $customFixed = $hasPersonalizedTaxes && isset($user->taxa_fixa_deposito)
             ? (float) $user->taxa_fixa_deposito
@@ -2382,6 +2395,7 @@ class UserController extends Controller
             : $globalFixed;
 
         return [
+            'mode' => 'fixed',
             'fixed' => $fixed,
             'global_fixed' => $globalFixed,
             'custom_fixed' => $customFixed,
@@ -2400,6 +2414,17 @@ class UserController extends Controller
      */
     private function getWithdrawTaxes($user, $setting, bool $hasPersonalizedTaxes): array
     {
+        if ($hasPersonalizedTaxes && ($user->taxa_modo_percentual ?? false)) {
+            $percent = (float) ($user->taxa_percentual_pix ?? 0);
+
+            return [
+                'mode' => 'percent',
+                'percent' => $percent,
+                'is_custom' => true,
+                'floor_cents' => \App\Helpers\CustoAdquirentePixHelper::pisoCentavos(),
+            ];
+        }
+
         $globalFixed = (float) ($setting->taxa_fixa_pix ?? 1);
         $customFixed = $hasPersonalizedTaxes && isset($user->taxa_fixa_pix)
             ? (float) $user->taxa_fixa_pix
@@ -2409,6 +2434,7 @@ class UserController extends Controller
             : $globalFixed;
 
         return [
+            'mode' => 'fixed',
             'fixed' => $fixed,
             'global_fixed' => $globalFixed,
             'custom_fixed' => $customFixed,
@@ -2446,13 +2472,16 @@ class UserController extends Controller
     private function getDefaultTaxesStructure(): array
     {
         return [
+            'mode' => 'fixed',
             'deposit' => [
+                'mode' => 'fixed',
                 'fixed' => 0,
                 'global_fixed' => 0,
                 'custom_fixed' => null,
                 'is_custom' => false,
             ],
             'withdraw' => [
+                'mode' => 'fixed',
                 'fixed' => 0,
                 'global_fixed' => 0,
                 'custom_fixed' => null,
