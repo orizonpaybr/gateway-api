@@ -1162,6 +1162,8 @@ class AdminDashboardController extends Controller
                 // Taxas - SEMPRE retornar valores salvos no banco (se existirem), senão usar padrão
                 // Converter para float para garantir que retorne número e não string
                 'taxas_personalizadas_ativas' => $usandoPersonalizadas,
+                // Modo de cobrança: false = taxa fixa (R$), true = porcentagem (exclusivos)
+                'taxa_modo_percentual' => (bool) ($user->taxa_modo_percentual ?? false),
                 'taxa_percentual_deposito' => (float) ($user->taxa_percentual_deposito !== null 
                     ? $user->taxa_percentual_deposito 
                     : ($setting->taxa_cash_in_padrao ?? 4.00)),

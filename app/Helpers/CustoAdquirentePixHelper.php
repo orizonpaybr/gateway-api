@@ -23,4 +23,26 @@ class CustoAdquirentePixHelper
             default => 0.0,
         };
     }
+
+    /**
+     * Referência da adquirente PRINCIPAL, usada como base do piso de taxa.
+     *
+     * Hoje a principal é a Treeal. Configurável via .env (ADQUIRENTE_PRINCIPAL).
+     */
+    public static function adquirentePrincipal(): string
+    {
+        return (string) env('ADQUIRENTE_PRINCIPAL', 'treeal');
+    }
+
+    /**
+     * Piso da taxa (em R$) que a taxa percentual nunca pode subverter.
+     *
+     * É a taxa padrão em centavos da adquirente principal (custo fixo por
+     * transação). Garante que o valor cobrado via percentual nunca seja menor
+     * do que o custo cobrado pela adquirente.
+     */
+    public static function pisoCentavos(): float
+    {
+        return self::custoFixoTransacao(self::adquirentePrincipal());
+    }
 }

@@ -109,8 +109,13 @@ trait UserRequestTrait
     {
         return [
             'taxas_personalizadas_ativas' => 'nullable|boolean',
+            // Modo de cobrança: false = taxa fixa (centavos/reais), true = porcentagem sobre o valor
+            'taxa_modo_percentual' => 'nullable|boolean',
             'taxa_fixa_deposito' => 'nullable|numeric|min:0',
             'taxa_fixa_pix' => 'nullable|numeric|min:0',
+            // Taxas percentuais (em %, ex.: 2 = 2%). Aplicáveis quando taxa_modo_percentual = true
+            'taxa_percentual_deposito' => 'nullable|numeric|min:0|max:100',
+            'taxa_percentual_pix' => 'nullable|numeric|min:0|max:100',
             'limite_mensal_pf' => 'nullable|numeric|min:0',
             'observacoes_taxas' => 'nullable|string|max:1000',
             'taxa_comissao_afiliado' => 'nullable|numeric|min:0',

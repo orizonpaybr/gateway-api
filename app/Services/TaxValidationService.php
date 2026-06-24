@@ -56,10 +56,17 @@ class TaxValidationService
     {
         return [
             'taxas_personalizadas_ativas' => 'nullable|boolean',
-            
+
+            // Modo de cobrança: false = taxa fixa (centavos), true = porcentagem (exclusivos)
+            'taxa_modo_percentual' => 'nullable|boolean',
+
             // Taxas fixas personalizadas (em centavos)
             'taxa_fixa_deposito' => 'nullable|numeric|min:0',
             'taxa_fixa_pix' => 'nullable|numeric|min:0',
+
+            // Taxas percentuais personalizadas (em %, ex.: 2 = 2%)
+            'taxa_percentual_deposito' => 'nullable|numeric|min:0|max:100',
+            'taxa_percentual_pix' => 'nullable|numeric|min:0|max:100',
             'valor_minimo_saque' => 'nullable|numeric|min:0',
 
             // Comissão de afiliado personalizada
@@ -108,12 +115,15 @@ class TaxValidationService
         $numericFields = [
             'taxa_fixa_deposito',
             'taxa_fixa_pix',
+            'taxa_percentual_deposito',
+            'taxa_percentual_pix',
             'taxa_comissao_afiliado_padrao',
             'taxa_comissao_afiliado',
         ];
 
         $booleanFields = [
             'taxas_personalizadas_ativas',
+            'taxa_modo_percentual',
             'comissao_afiliado_personalizada',
         ];
 
