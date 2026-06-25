@@ -677,11 +677,10 @@ class FinancialService
             $mesInicio = $now->copy()->startOfMonth();
             $mesFim = $now->copy()->endOfMonth();
 
-            $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.035);
-            $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
+            $custoExpr = \App\Helpers\CustoAdquirentePixHelper::sqlCustoPorTransacaoExpr('amount');
 
-            // Saques: custo por transação conforme executor_ordem (fyhub R$ 0,04; demais PIX automáticos usam custo Simpay como legado)
-            $custoSql = "COALESCE(SUM(CASE WHEN executor_ordem = 'fyhub' THEN {$custoFyhub} WHEN executor_ordem = 'simpay' THEN {$custoSimpay} ELSE {$custoSimpay} END), 0)";
+            // Saques: custo por transação conforme executor_ordem (Treeal %; fyhub/simpay fixo)
+            $custoSql = "COALESCE(SUM({$custoExpr}), 0)";
             $stats = DB::selectOne("
                 SELECT 
                     -- Estatísticas gerais
@@ -754,6 +753,7 @@ class FinancialService
     {
         $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.035);
         $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
+        $pctTreeal = (float) config('treeal.taxa_percentual_transacao', 1.0);
 
         $stats = Solicitacoes::whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
             ->selectRaw('
@@ -763,6 +763,7 @@ class FinancialService
                     CASE
                         WHEN taxa_pix_cash_in_adquirente IS NOT NULL AND taxa_pix_cash_in_adquirente > 0
                         THEN taxa_pix_cash_in_adquirente
+                        WHEN executor_ordem = \'treeal\' THEN amount * ' . $pctTreeal . ' / 100
                         WHEN executor_ordem = \'fyhub\' THEN ' . $custoFyhub . '
                         WHEN executor_ordem = \'simpay\' OR executor_ordem = \'Adquirente PIX\' OR adquirente_ref = \'Adquirente PIX\'
                         THEN ' . $custoSimpay . '
@@ -783,8 +784,7 @@ class FinancialService
      */
     private function getWithdrawalsStatsAggregated(array $dateRange): array
     {
-        $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.035);
-        $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
+        $custoExpr = \App\Helpers\CustoAdquirentePixHelper::sqlCustoPorTransacaoExpr('amount');
 
         $stats = SolicitacoesCashOut::whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
             ->selectRaw('
@@ -799,12 +799,10 @@ class FinancialService
         $totalSaques = (int) ($stats->aprovadas ?? 0);
         $taxaTotal = (float) ($stats->taxa_total ?? 0);
 
-        $fyhubSaques = SolicitacoesCashOut::whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
+        $custoAdquirente = (float) SolicitacoesCashOut::whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
             ->whereIn('status', self::APPROVED_STATUSES)
-            ->where('executor_ordem', 'fyhub')
-            ->count();
+            ->sum(DB::raw($custoExpr));
 
-        $custoAdquirente = ($fyhubSaques * $custoFyhub) + (($totalSaques - $fyhubSaques) * $custoSimpay);
         $lucro = $taxaTotal - $custoAdquirente;
 
         return [
@@ -821,6 +819,8 @@ class FinancialService
         $dateRange = $this->getDateRange($periodo);
         $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.035);
         $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
+        $pctTreeal = (float) config('treeal.taxa_percentual_transacao', 1.0);
+        $custoSaqueExpr = \App\Helpers\CustoAdquirentePixHelper::sqlCustoPorTransacaoExpr('amount');
 
         // Lucro líquido de depósitos: taxa_cash_in − custo por adquirente quando não há taxa explícita na linha
         $lucroDepositos = Solicitacoes::whereIn('status', self::APPROVED_STATUSES)
@@ -829,26 +829,21 @@ class FinancialService
                 CASE
                     WHEN taxa_pix_cash_in_adquirente IS NOT NULL AND taxa_pix_cash_in_adquirente > 0
                     THEN taxa_pix_cash_in_adquirente
+                    WHEN executor_ordem = 'treeal' THEN amount * {$pctTreeal} / 100
                     WHEN executor_ordem = 'fyhub' THEN {$custoFyhub}
                     WHEN executor_ordem = 'simpay' OR executor_ordem = 'Adquirente PIX' OR adquirente_ref = 'Adquirente PIX'
                     THEN {$custoSimpay}
                     ELSE 0
                 END"));
 
-        $totalSaques = SolicitacoesCashOut::whereIn('status', self::APPROVED_STATUSES)
-            ->whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
-            ->count();
-
         $taxaTotalSaques = SolicitacoesCashOut::whereIn('status', self::APPROVED_STATUSES)
             ->whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
             ->sum('taxa_cash_out');
 
-        $fyhubSaques = SolicitacoesCashOut::whereIn('status', self::APPROVED_STATUSES)
+        $custoAdquirenteSaques = (float) SolicitacoesCashOut::whereIn('status', self::APPROVED_STATUSES)
             ->whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
-            ->where('executor_ordem', 'fyhub')
-            ->count();
+            ->sum(DB::raw($custoSaqueExpr));
 
-        $custoAdquirenteSaques = ($fyhubSaques * $custoFyhub) + (($totalSaques - $fyhubSaques) * $custoSimpay);
         $lucroSaques = $taxaTotalSaques - $custoAdquirenteSaques;
 
         return (float) ($lucroDepositos + $lucroSaques);

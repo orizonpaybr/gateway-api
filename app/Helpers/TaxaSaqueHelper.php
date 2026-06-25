@@ -95,8 +95,8 @@ class TaxaSaqueHelper
             $percentualAplicado = max(0, (float) ($user->taxa_percentual_pix ?? 0));
             $taxaPercentualBruta = ($amount * $percentualAplicado) / 100;
 
-            // PISO: nunca menor que a taxa padrão em centavos da adquirente principal (Treeal).
-            $piso = CustoAdquirentePixHelper::pisoCentavos();
+            // PISO: nunca menor que o custo percentual da adquirente principal (Treeal).
+            $piso = CustoAdquirentePixHelper::pisoTaxa($amount);
             $taxaTotal = max($taxaPercentualBruta, $piso);
             $descricao = $isInterfaceWeb ? 'PERSONALIZADA_INTERFACE_WEB_PERCENTUAL' : 'PERSONALIZADA_API_PERCENTUAL';
 
@@ -104,7 +104,7 @@ class TaxaSaqueHelper
                 'user_id' => $user->user_id ?? 'N/A',
                 'percentual' => $percentualAplicado,
                 'taxa_percentual_bruta' => $taxaPercentualBruta,
-                'piso_centavos' => $piso,
+                'piso_taxa' => $piso,
                 'taxa_aplicada' => $taxaTotal,
             ]);
         } elseif ($taxasPersonalizadasAtivas) {
@@ -148,7 +148,7 @@ class TaxaSaqueHelper
             ]);
         }
 
-        $custoAdquirente = CustoAdquirentePixHelper::custoFixoTransacao($adquirenteReferencia);
+        $custoAdquirente = CustoAdquirentePixHelper::custoTransacao($amount, $adquirenteReferencia);
 
         // Lucro líquido da aplicação = taxa fixa - custo Adquirente PIX - comissão afiliado
         $lucroAplicacao = max(0, $taxaTotal - $custoAdquirente - $comissaoAfiliado);
@@ -237,23 +237,17 @@ class TaxaSaqueHelper
             && isset($user->taxa_modo_percentual) && $user->taxa_modo_percentual;
 
         if ($modoPercentual) {
-            // No modo percentual a taxa depende do valor sacado: saldo = valor + valor*(p/100).
-            // Resolvendo: valor = saldo / (1 + p/100). Respeita o piso em centavos.
+            // No modo percentual: saldo = valor + valor × taxaEfetiva/100.
+            // taxaEfetiva = max(% usuário, % mínimo da adquirente principal).
             $percentual = max(0, (float) ($user->taxa_percentual_pix ?? 0));
-            $piso = CustoAdquirentePixHelper::pisoCentavos();
+            $percentualMinimo = CustoAdquirentePixHelper::percentualPrincipal();
+            $taxaEfetivaPercent = max($percentual, $percentualMinimo);
 
-            $valorMaximo = $percentual > 0
-                ? $saldoDisponivel / (1 + ($percentual / 100))
-                : max(0, $saldoDisponivel - $piso);
+            $valorMaximo = $taxaEfetivaPercent > 0
+                ? $saldoDisponivel / (1 + ($taxaEfetivaPercent / 100))
+                : $saldoDisponivel;
 
-            $taxaTotal = max(($valorMaximo * $percentual) / 100, $piso);
-
-            // Se o piso "comeu" mais do que o percentual previa, recalcula o valor máximo.
-            if (($valorMaximo + $taxaTotal) > $saldoDisponivel) {
-                $valorMaximo = max(0, $saldoDisponivel - $piso);
-                $taxaTotal = max(($valorMaximo * $percentual) / 100, $piso);
-            }
-
+            $taxaTotal = ($valorMaximo * $taxaEfetivaPercent) / 100;
             $valorMaximo = max(0, $valorMaximo);
             $saldoRestante = $saldoDisponivel - $valorMaximo - $taxaTotal;
 
