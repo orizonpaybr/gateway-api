@@ -86,8 +86,8 @@ class TaxaFlexivelHelper
             $percentualAplicado = max(0, (float) ($user->taxa_percentual_deposito ?? 0));
             $taxaPercentualBruta = ($amount * $percentualAplicado) / 100;
 
-            // PISO: nunca menor que a taxa padrão em centavos da adquirente principal (Treeal).
-            $piso = CustoAdquirentePixHelper::pisoCentavos();
+            // PISO: nunca menor que o custo percentual da adquirente principal (Treeal).
+            $piso = CustoAdquirentePixHelper::pisoTaxa($amount);
             $taxaTotal = max($taxaPercentualBruta, $piso);
             $descricao = 'PERSONALIZADA_PERCENTUAL';
 
@@ -95,7 +95,7 @@ class TaxaFlexivelHelper
                 'user_id' => $user->user_id ?? 'N/A',
                 'percentual' => $percentualAplicado,
                 'taxa_percentual_bruta' => $taxaPercentualBruta,
-                'piso_centavos' => $piso,
+                'piso_taxa' => $piso,
                 'taxa_aplicada' => $taxaTotal,
                 'amount' => $amount,
             ]);
@@ -147,7 +147,7 @@ class TaxaFlexivelHelper
             ]);
         }
 
-        $custoAdquirente = CustoAdquirentePixHelper::custoFixoTransacao($adquirenteReferencia);
+        $custoAdquirente = CustoAdquirentePixHelper::custoTransacao($amount, $adquirenteReferencia);
 
         // Lucro líquido da aplicação = taxa fixa - custo Adquirente PIX - comissão afiliado
         $lucroAplicacao = max(0, $taxaTotal - $custoAdquirente - $comissaoAfiliado);

@@ -2382,7 +2382,7 @@ class UserController extends Controller
                 'mode' => 'percent',
                 'percent' => $percent,
                 'is_custom' => true,
-                'floor_cents' => \App\Helpers\CustoAdquirentePixHelper::pisoCentavos(),
+                'acquirer_min_percent' => \App\Helpers\CustoAdquirentePixHelper::percentualPrincipal(),
             ];
         }
 
@@ -2421,7 +2421,7 @@ class UserController extends Controller
                 'mode' => 'percent',
                 'percent' => $percent,
                 'is_custom' => true,
-                'floor_cents' => \App\Helpers\CustoAdquirentePixHelper::pisoCentavos(),
+                'acquirer_min_percent' => \App\Helpers\CustoAdquirentePixHelper::percentualPrincipal(),
             ];
         }
 

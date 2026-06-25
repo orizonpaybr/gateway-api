@@ -34,11 +34,12 @@ class DashboardService
         return Cache::remember($cacheKey, self::CACHE_TTL_STATS, function () use ($username, $startOfMonth, $endOfMonth) {
             $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.035);
             $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
+            $pctTreeal = (float) config('treeal.taxa_percentual_transacao', 1.0);
 
-            $custoSaqueExpr = "CASE WHEN executor_ordem = 'fyhub' THEN {$custoFyhub} WHEN executor_ordem = 'simpay' THEN {$custoSimpay} ELSE {$custoSimpay} END";
+            $custoSaqueExpr = \App\Helpers\CustoAdquirentePixHelper::sqlCustoPorTransacaoExpr('amount');
 
             // Query única otimizada usando UNION ALL
-            // Lucro líquido = taxa − custo adquirente (taxa explícita na linha ou custo fixo por executor_ordem).
+            // Lucro líquido = taxa − custo adquirente (taxa explícita na linha ou custo por executor_ordem).
             $statsQuery = "
                 SELECT 
                     'deposito' as tipo,
@@ -48,6 +49,7 @@ class DashboardService
                         CASE
                             WHEN taxa_pix_cash_in_adquirente IS NOT NULL AND taxa_pix_cash_in_adquirente > 0
                             THEN taxa_pix_cash_in_adquirente
+                            WHEN executor_ordem = 'treeal' THEN amount * {$pctTreeal} / 100
                             WHEN executor_ordem = 'fyhub' THEN {$custoFyhub}
                             WHEN executor_ordem = 'simpay' OR executor_ordem = 'Adquirente PIX' OR adquirente_ref = 'Adquirente PIX'
                             THEN {$custoSimpay}
