@@ -116,7 +116,7 @@ class TreealContasWebhookController extends Controller
 
         $this->upsertInfractionRecord($deposit, $infractionId, $status, $analysisResult, $amount, $data, $endToEndId);
 
-        $depositStatusChanged = $this->applyInfractionToDeposit($deposit, $status, $analysisResult, $matchType);
+        $depositStatusChanged = $this->applyInfractionToDeposit($deposit, $status, $analysisResult);
 
         app(PaymentProcessingService::class)->invalidateInfractionCaches((string) $deposit->user_id);
         app(PaymentProcessingService::class)->invalidateCachesAfterPayment((string) $deposit->user_id);
@@ -196,50 +196,6 @@ class TreealContasWebhookController extends Controller
             }
         }
 
-        // 3. Último recurso (HEURÍSTICA): depósito sem E2E preenchido, casado por
-        //    valor exato + janela em torno da DATA DA TRANSAÇÃO original. Só aplica
-        //    quando há exatamente 1 candidato (evita match ambíguo). Marcado como
-        //    'fuzzy' para impedir estorno automático (ver applyInfractionToDeposit).
-        if ($endToEndId !== '') {
-            $amount = $this->extractInfractionAmount($data, 0.0);
-            // Data da transação original (não a data de abertura da MED).
-            $txDate = $this->parseDate(
-                $data['transactionDate']
-                ?? $data['transaction']['date']
-                ?? $data['originalTransactionDate']
-                ?? null
-            );
-
-            if ($amount > 0 && $txDate !== null) {
-                $candidates = (clone $base)
-                    ->where(function ($q) {
-                        $q->whereNull('end_to_end')->orWhere('end_to_end', '');
-                    })
-                    ->where('amount', $amount)
-                    ->whereBetween('date', [
-                        $txDate->copy()->subHours(6),
-                        $txDate->copy()->addHours(6),
-                    ])
-                    ->get();
-
-                if ($candidates->count() === 1) {
-                    $deposit = $candidates->first();
-                    // Grava o E2E retroativamente para que reentregas casem por E2E (estratégia 1).
-                    $deposit->update(['end_to_end' => $endToEndId]);
-
-                    Log::warning('[TREEAL_CONTAS][WEBHOOK][INFRACTION] Match HEURÍSTICO por valor+data (revisar manualmente; estorno automático bloqueado)', [
-                        'deposit_id' => $deposit->id,
-                        'end_to_end' => $endToEndId,
-                        'amount' => $amount,
-                    ]);
-
-                    $matchType = 'fuzzy';
-
-                    return $deposit->fresh();
-                }
-            }
-        }
-
         return null;
     }
 
@@ -273,7 +229,7 @@ class TreealContasWebhookController extends Controller
         $hasProviderColumn = \Illuminate\Support\Facades\Schema::hasColumn('pix_infracoes', 'provider_infraction_id');
 
         $creation = $this->parseDate($data['creationDate'] ?? null) ?? Carbon::now();
-        // deadlineDate é o prazo real da MED; lastModificationDate é apenas a última atualização.
+        // A API Treeal não envia deadlineDate; prazo padrão MED = 5 dias após abertura.
         $limite = $this->parseDate($data['deadlineDate'] ?? null)
             ?? $creation->copy()->addDays(5);
 
@@ -331,10 +287,9 @@ class TreealContasWebhookController extends Controller
     /**
      * Aplica o efeito da infração ao depósito (bloqueio / devolução / liberação).
      */
-    private function applyInfractionToDeposit(Solicitacoes $deposit, string $status, string $analysisResult, string $matchType = 'e2e'): bool
+    private function applyInfractionToDeposit(Solicitacoes $deposit, string $status, string $analysisResult): bool
     {
         // Infração ativa: bloquear o valor (MEDIATION) se ainda creditado.
-        // Bloqueio é reversível, então é seguro mesmo em match heurístico.
         if (in_array($status, self::INFRACTION_ACTIVE_STATUSES, true)) {
             return DB::transaction(function () use ($deposit) {
                 $locked = Solicitacoes::where('id', $deposit->id)->lockForUpdate()->first();
@@ -349,22 +304,10 @@ class TreealContasWebhookController extends Controller
         }
 
         if ($status === 'CLOSED') {
-            // Fraude confirmada (AGREED) → devolução efetivada: debita saldo e marca estornado.
             if ($analysisResult === 'AGREED') {
-                // Estorno é irreversível (debita saldo): só permitido com match forte (E2E/txId).
-                if ($matchType === 'fuzzy') {
-                    Log::warning('[TREEAL_CONTAS][WEBHOOK][INFRACTION] Estorno automático BLOQUEADO em match heurístico — revisar manualmente', [
-                        'deposit_id' => $deposit->id,
-                        'user_id' => (string) $deposit->user_id,
-                    ]);
-
-                    return false;
-                }
-
                 return $this->settleInfractionRefund($deposit);
             }
 
-            // Defesa aceita (DISAGREED) → libera o bloqueio.
             return $this->releaseInfractionHold($deposit);
         }
 
