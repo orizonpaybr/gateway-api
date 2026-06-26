@@ -677,7 +677,7 @@ class FinancialService
             $mesInicio = $now->copy()->startOfMonth();
             $mesFim = $now->copy()->endOfMonth();
 
-            $custoExpr = \App\Helpers\CustoAdquirentePixHelper::sqlCustoPorTransacaoExpr('amount');
+            $custoExpr = \App\Helpers\CustoAdquirentePixHelper::sqlCustoPorTransacaoExpr('amount', true);
 
             // Saques: custo por transação conforme executor_ordem (Treeal %; fyhub/simpay fixo)
             $custoSql = "COALESCE(SUM({$custoExpr}), 0)";
@@ -784,7 +784,7 @@ class FinancialService
      */
     private function getWithdrawalsStatsAggregated(array $dateRange): array
     {
-        $custoExpr = \App\Helpers\CustoAdquirentePixHelper::sqlCustoPorTransacaoExpr('amount');
+        $custoExpr = \App\Helpers\CustoAdquirentePixHelper::sqlCustoPorTransacaoExpr('amount', true);
 
         $stats = SolicitacoesCashOut::whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
             ->selectRaw('
@@ -820,7 +820,7 @@ class FinancialService
         $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.035);
         $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
         $pctTreeal = (float) config('treeal.taxa_percentual_transacao', 1.0);
-        $custoSaqueExpr = \App\Helpers\CustoAdquirentePixHelper::sqlCustoPorTransacaoExpr('amount');
+        $custoSaqueExpr = \App\Helpers\CustoAdquirentePixHelper::sqlCustoPorTransacaoExpr('amount', true);
 
         // Lucro líquido de depósitos: taxa_cash_in − custo por adquirente quando não há taxa explícita na linha
         $lucroDepositos = Solicitacoes::whereIn('status', self::APPROVED_STATUSES)

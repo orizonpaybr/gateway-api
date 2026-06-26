@@ -86,17 +86,23 @@ class CustoAdquirentePixHelper
 
     /**
      * Expressão SQL para custo da adquirente por linha (usa executor_ordem e amount).
+     *
+     * @param  bool  $cashOutTable  Tabela solicitacoes_cash_out não possui adquirente_ref.
      */
-    public static function sqlCustoPorTransacaoExpr(string $amountColumn = 'amount'): string
+    public static function sqlCustoPorTransacaoExpr(string $amountColumn = 'amount', bool $cashOutTable = false): string
     {
         $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.035);
         $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
         $pctTreeal = (float) config('treeal.taxa_percentual_transacao', 1.0);
 
+        $simpayMatch = $cashOutTable
+            ? "executor_ordem = 'simpay' OR executor_ordem = 'Adquirente PIX'"
+            : "executor_ordem = 'simpay' OR executor_ordem = 'Adquirente PIX' OR adquirente_ref = 'Adquirente PIX'";
+
         return "(CASE
             WHEN executor_ordem = 'treeal' THEN ({$amountColumn} * {$pctTreeal} / 100)
             WHEN executor_ordem = 'fyhub' THEN {$custoFyhub}
-            WHEN executor_ordem = 'simpay' OR executor_ordem = 'Adquirente PIX' OR adquirente_ref = 'Adquirente PIX' THEN {$custoSimpay}
+            WHEN {$simpayMatch} THEN {$custoSimpay}
             ELSE {$custoSimpay}
         END)";
     }
