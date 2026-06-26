@@ -104,17 +104,22 @@ class PixInfracoesController extends Controller
                         ? Carbon::parse($r->data_limite) 
                         : $dataCriacao->copy()->addDays(7);
                     
-                    // Mapear status para legível
-                    $statusLegivel = $this->getStatusLegivel($r->status);
-                    
+                    $analysisResult = $this->extractAnalysisResult($r);
+                    $statusLegivel = $this->getStatusLegivel((string) $r->status, $analysisResult);
+                    $desfecho = $this->getDesfecho($analysisResult, (string) $r->status);
+
                     return [
                         'id' => (int) ($r->id ?? 0),
                         'status' => $statusLegivel,
+                        'desfecho_titulo' => $desfecho['titulo'] ?? null,
+                        'desfecho_mensagem' => $desfecho['mensagem'] ?? null,
+                        'favoravel_lojista' => $desfecho['favoravel_lojista'] ?? null,
                         'data_criacao' => $dataCriacao->toDateString(),
                         'data_limite' => $dataLimite->toDateString(),
                         'valor' => (float) ($r->valor ?? 0),
                         'end_to_end' => (string) ($r->end_to_end ?? $r->transaction_id ?? ''),
                         'tipo' => (string) ($r->tipo ?? 'pix'),
+                        'tipo_legivel' => $this->getTipoLegivel((string) ($r->tipo ?? 'pix')),
                         'descricao' => (string) ($r->descricao ?? ''),
                     ];
                 })->toArray();
@@ -188,9 +193,10 @@ class PixInfracoesController extends Controller
                     ? Carbon::parse($row->data_limite) 
                     : $dataCriacao->copy()->addDays(7);
                 
-                // Mapear status para legível
-                $statusLegivel = $this->getStatusLegivel($row->status);
-                
+                $analysisResult = $this->extractAnalysisResult($row);
+                $statusLegivel = $this->getStatusLegivel((string) $row->status, $analysisResult);
+                $desfecho = $this->getDesfecho($analysisResult, (string) $row->status);
+
                 // Buscar transação relacionada se houver transaction_id
                 $transacaoRelacionada = null;
                 if ($row->transaction_id) {
@@ -212,13 +218,20 @@ class PixInfracoesController extends Controller
                 return [
                     'id' => (int) ($row->id ?? 0),
                     'status' => $statusLegivel,
+                    'desfecho_titulo' => $desfecho['titulo'] ?? null,
+                    'desfecho_mensagem' => $desfecho['mensagem'] ?? null,
+                    'favoravel_lojista' => $desfecho['favoravel_lojista'] ?? null,
                     'data_criacao' => $dataCriacao->toIso8601String(),
                     'data_limite' => $dataLimite->toIso8601String(),
                     'valor' => (float) ($row->valor ?? 0),
                     'end_to_end' => (string) ($row->end_to_end ?? $row->transaction_id ?? ''),
                     'tipo' => (string) ($row->tipo ?? 'pix'),
+                    'tipo_legivel' => $this->getTipoLegivel((string) ($row->tipo ?? 'pix')),
                     'descricao' => (string) ($row->descricao ?? ''),
                     'detalhes' => (string) ($row->detalhes ?? ''),
+                    'detalhes_adicionais' => $this->buildDetalhesAdicionais((string) ($row->detalhes ?? '')),
+                    'pode_apresentar_defesa' => $this->canPresentDefense($row),
+                    'defesa_enviada_para' => 'Treeal (adquirente Pix / MED)',
                     'transacao_relacionada' => $transacaoRelacionada,
                     'created_at' => Carbon::parse($row->created_at)->toIso8601String(),
                     'updated_at' => Carbon::parse($row->updated_at)->toIso8601String(),
@@ -342,21 +355,201 @@ class PixInfracoesController extends Controller
     }
 
     /**
-     * Mapear status para legível
+     * Status legível para o lojista.
+     * RESOLVIDA + DISAGREED = lojista ganhou; RESOLVIDA + AGREED = pagador ganhou (estorno).
      */
-    private function getStatusLegivel(string $status): string
+    private function getStatusLegivel(string $status, ?string $analysisResult = null): string
     {
+        $statusUpper = strtoupper(trim($status));
+
+        if ($statusUpper === 'RESOLVIDA') {
+            return match (strtoupper(trim((string) $analysisResult))) {
+                'AGREED' => 'Estorno',
+                'DISAGREED' => 'Resolvida',
+                default => 'Resolvida',
+            };
+        }
+
         $statusMap = [
             'PENDENTE' => 'Pendente',
             'EM_ANALISE' => 'Em Análise',
-            'RESOLVIDA' => 'Resolvida',
             'CANCELADA' => 'Cancelada',
             'CHARGEBACK' => 'Chargeback',
             'MEDIATION' => 'Mediação',
             'DISPUTE' => 'Disputa',
         ];
 
-        return $statusMap[strtoupper($status)] ?? ucfirst(strtolower($status));
+        return $statusMap[$statusUpper] ?? ucfirst(strtolower($status));
+    }
+
+    /**
+     * @return array{titulo: string, mensagem: string, favoravel_lojista: bool|null}|null
+     */
+    private function getDesfecho(?string $analysisResult, string $status): ?array
+    {
+        if (strtoupper(trim($status)) !== 'RESOLVIDA') {
+            return null;
+        }
+
+        return match (strtoupper(trim((string) $analysisResult))) {
+            'DISAGREED' => [
+                'titulo' => 'Contestação encerrada a seu favor',
+                'mensagem' => 'A Treeal não confirmou a fraude. O valor saiu da mediação e permanece no seu saldo disponível.',
+                'favoravel_lojista' => true,
+            ],
+            'AGREED' => [
+                'titulo' => 'Valor estornado ao pagador',
+                'mensagem' => 'A contestação foi aceita no MED. O Pix foi devolvido ao pagador e o valor foi debitado do seu saldo.',
+                'favoravel_lojista' => false,
+            ],
+            default => [
+                'titulo' => 'Infração encerrada',
+                'mensagem' => 'Esta infração foi finalizada pela adquirente. Consulte os detalhes abaixo.',
+                'favoravel_lojista' => null,
+            ],
+        };
+    }
+
+    private function extractAnalysisResult(object $row): ?string
+    {
+        if (Schema::hasColumn('pix_infracoes', 'analysis_result')) {
+            $fromColumn = trim((string) ($row->analysis_result ?? ''));
+            if ($fromColumn !== '') {
+                return $fromColumn;
+            }
+        }
+
+        $detalhes = trim((string) ($row->detalhes ?? ''));
+        if ($detalhes === '') {
+            return null;
+        }
+
+        $parsed = json_decode($detalhes, true);
+        if (! is_array($parsed) || ! array_key_exists('analysisResult', $parsed) || $parsed['analysisResult'] === null) {
+            return null;
+        }
+
+        return (string) $parsed['analysisResult'];
+    }
+
+    private function getTipoLegivel(string $tipo): string
+    {
+        return match (strtolower(trim($tipo))) {
+            'refund_request', 'refund' => 'Solicitação de devolução (MED)',
+            'fraud', 'fraude' => 'Suspeita de fraude',
+            'operational_flaw', 'operational' => 'Falha operacional',
+            'pix' => 'Infração Pix',
+            default => ucfirst(str_replace('_', ' ', strtolower($tipo))),
+        };
+    }
+
+    /**
+     * @return list<array{label: string, value: string}>
+     */
+    private function buildDetalhesAdicionais(string $detalhesJson): array
+    {
+        if (trim($detalhesJson) === '') {
+            return [];
+        }
+
+        $parsed = json_decode($detalhesJson, true);
+        if (! is_array($parsed)) {
+            return [['label' => 'Informação', 'value' => $detalhesJson]];
+        }
+
+        $items = [];
+
+        if (! empty($parsed['infractionId'])) {
+            $items[] = [
+                'label' => 'ID na adquirente (Treeal)',
+                'value' => (string) $parsed['infractionId'],
+            ];
+        }
+
+        if (! empty($parsed['status'])) {
+            $items[] = [
+                'label' => 'Situação na Treeal',
+                'value' => $this->mapTreealInfractionStatus((string) $parsed['status']),
+            ];
+        }
+
+        if (array_key_exists('analysisResult', $parsed)) {
+            $result = $parsed['analysisResult'] ? (string) $parsed['analysisResult'] : null;
+            $items[] = [
+                'label' => 'Resultado da análise',
+                'value' => $result
+                    ? $this->mapAnalysisResultLegivel($result)
+                    : 'Aguardando conclusão',
+            ];
+
+            if ($result) {
+                $items[] = [
+                    'label' => 'Efeito no seu saldo',
+                    'value' => match (strtoupper(trim($result))) {
+                        'AGREED' => 'Debitado — o Pix foi devolvido ao pagador',
+                        'DISAGREED' => 'Liberado — permanece no saldo disponível',
+                        default => 'Consulte o status do depósito relacionado',
+                    },
+                ];
+            }
+        }
+
+        if (! empty($parsed['reportedBy'])) {
+            $items[] = [
+                'label' => 'Quem abriu a reclamação',
+                'value' => $this->mapReportedByLegivel((string) $parsed['reportedBy']),
+            ];
+        }
+
+        return $items;
+    }
+
+    private function mapTreealInfractionStatus(string $status): string
+    {
+        return match (strtoupper(trim($status))) {
+            'OPEN' => 'Aberta',
+            'WAITING_PSP' => 'Aguardando análise do participante',
+            'ACKNOWLEDGED' => 'Recebida pela instituição',
+            'WAITING_ADJUSTMENTS' => 'Aguardando ajustes',
+            'DEFENDED' => 'Defesa registrada',
+            'ANSWERED' => 'Respondida',
+            'CLOSED' => 'Encerrada',
+            'CANCELLED' => 'Cancelada',
+            default => ucfirst(strtolower(str_replace('_', ' ', $status))),
+        };
+    }
+
+    private function mapAnalysisResultLegivel(string $result): string
+    {
+        return match (strtoupper(trim($result))) {
+            'AGREED' => 'Contestação aceita — pagador recebeu a devolução',
+            'DISAGREED' => 'Contestação rejeitada — valor mantido com você (lojista)',
+            default => ucfirst(strtolower(str_replace('_', ' ', $result))),
+        };
+    }
+
+    private function mapReportedByLegivel(string $reportedBy): string
+    {
+        return match (strtoupper(trim($reportedBy))) {
+            'DEBITED_PARTICIPANT' => 'Titular da conta que pagou o Pix',
+            'CREDITED_PARTICIPANT' => 'Titular da conta que recebeu o Pix',
+            default => ucfirst(strtolower(str_replace('_', ' ', $reportedBy))),
+        };
+    }
+
+    private function canPresentDefense(object $row): bool
+    {
+        $status = strtoupper((string) ($row->status ?? ''));
+
+        if (! in_array($status, ['PENDENTE', 'EM_ANALISE'], true)) {
+            return false;
+        }
+
+        if (! Schema::hasColumn('pix_infracoes', 'provider_infraction_id')) {
+            return true;
+        }
+
+        return trim((string) ($row->provider_infraction_id ?? '')) !== '';
     }
 }
 
