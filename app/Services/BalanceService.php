@@ -173,7 +173,29 @@ class BalanceService
      */
     public function getTotalAvailableBalance(User $user): float
     {
-        return (float) ($user->saldo + $user->saldo_afiliado);
+        $bruto = (float) ($user->saldo + $user->saldo_afiliado);
+        $emMediacao = $this->getMediationHoldAmount($user);
+
+        return max(0.0, $bruto - $emMediacao);
+    }
+
+    /**
+     * Soma dos depósitos retidos em mediação (infração/MED) do usuário.
+     *
+     * Esses valores foram creditados no saldo no momento do depósito, mas estão
+     * bloqueados enquanto a MED está aberta (status MEDIATION). Por isso precisam
+     * ser descontados do saldo disponível para saque. Quando a MED é encerrada,
+     * o depósito sai de MEDIATION (REFUNDED debita o saldo; COMPLETED libera),
+     * então este hold deixa de contar — sem dupla contagem.
+     *
+     * Depósitos gravam user_id = username (vide DepositController).
+     */
+    public function getMediationHoldAmount(User $user): float
+    {
+        return (float) \App\Models\Solicitacoes::query()
+            ->where('user_id', $user->username)
+            ->where('status', 'MEDIATION')
+            ->sum(DB::raw('COALESCE(deposito_liquido, amount, 0)'));
     }
 
     /**

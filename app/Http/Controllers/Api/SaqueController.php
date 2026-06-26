@@ -87,17 +87,10 @@ class SaqueController extends Controller
 
         // Nota: A verificação de IP é feita pelo middleware CheckAllowedIP
 
-        // Verificar saldo disponível = saldo principal + saldo de afiliados (considerando valores em mediação)
-        $saldoDisponivel = (float) ($user->saldo ?? 0) + (float) ($user->saldo_afiliado ?? 0);
-
-        // Calcular valores bloqueados em mediação (depósitos sob infração/MED).
-        // Depósitos são gravados com user_id = username (vide DepositController), então o
-        // bloqueio precisa casar com o mesmo identificador para ser efetivo.
-        $valoresEmMediacao = \App\Models\Solicitacoes::where('user_id', $user->username)
-            ->where('status', 'MEDIATION')
-            ->sum('deposito_liquido');
-
-        $saldoRealDisponivel = $saldoDisponivel - (float) $valoresEmMediacao;
+        // Saldo disponível para saque = saldo principal + afiliado - depósitos em mediação (MED).
+        // Centralizado no BalanceService para que TODOS os fluxos de saque (pixout, web,
+        // pagarme) apliquem o mesmo bloqueio de valores sob infração.
+        $saldoRealDisponivel = app(\App\Services\BalanceService::class)->getTotalAvailableBalance($user);
 
         $amountSolicitado = (float) $request->amount;
         $taxaPreview = TaxaSaqueHelper::calcularTaxaSaque($amountSolicitado, $setting, $user, $isInterfaceWeb, false, $default);
