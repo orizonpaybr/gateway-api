@@ -192,4 +192,30 @@ class PixInfracoesEndpointsTest extends TestCase
             ->postJson('/api/pix/infracoes/'.$id.'/defense', ['defense' => ''])
             ->assertStatus(422);
     }
+
+    public function test_index_full_page_sets_next_cursor_without_error(): void
+    {
+        $user = AuthTestHelper::createTestUser([
+            'username' => 'page_'.uniqid(),
+            'email' => 'page_'.uniqid().'@example.com',
+        ]);
+
+        $now = Carbon::now();
+        for ($i = 0; $i < 20; $i++) {
+            $this->insertInfraction($user->username, [
+                'end_to_end' => 'E_PAGE_'.$i,
+                'data_criacao' => null,
+                'created_at' => $now->copy()->subMinutes($i),
+            ]);
+        }
+
+        $token = AuthTestHelper::generateTestToken($user);
+
+        $this->withHeader('Authorization', 'Bearer '.$token)
+            ->getJson('/api/pix/infracoes?page=1&limit=20')
+            ->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.total', 20)
+            ->assertJsonPath('data.next_cursor', $now->copy()->subMinutes(19)->toDateTimeString());
+    }
 }

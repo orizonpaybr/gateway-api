@@ -119,6 +119,11 @@ class PixInfracoesController extends Controller
                     ];
                 })->toArray();
 
+                $lastRow = $rows->last();
+                $nextCursor = ($rows->count() === $limit && $lastRow)
+                    ? (string) ($lastRow->data_criacao ?? $lastRow->created_at)
+                    : null;
+
                 return [
                     'data' => $data,
                     'current_page' => $page,
@@ -127,9 +132,7 @@ class PixInfracoesController extends Controller
                     'total' => $total,
                     'from' => $total > 0 ? $offset + 1 : 0,
                     'to' => min($offset + $limit, $total),
-                    'next_cursor' => count($rows) === $limit && !empty($rows) 
-                        ? (string) (end($rows)->data_criacao ?? end($rows)->created_at) 
-                        : null,
+                    'next_cursor' => $nextCursor,
                 ];
             });
 
