@@ -173,10 +173,41 @@ class BalanceService
      */
     public function getTotalAvailableBalance(User $user): float
     {
-        $bruto = (float) ($user->saldo + $user->saldo_afiliado);
-        $emMediacao = $this->getMediationHoldAmount($user);
+        return $this->getBalanceBreakdown($user)['saldo_disponivel'];
+    }
 
-        return max(0.0, $bruto - $emMediacao);
+    /**
+     * Saldo bruto, retido em mediação (MED) e disponível para saque.
+     *
+     * @return array{
+     *     saldo_bruto: float,
+     *     saldo_em_mediacao: float,
+     *     qtd_em_mediacao: int,
+     *     saldo_disponivel: float
+     * }
+     */
+    public function getBalanceBreakdown(User $user): array
+    {
+        $fresh = User::where('id', $user->id)->first(['saldo', 'saldo_afiliado', 'username']);
+        $bruto = $fresh
+            ? (float) ($fresh->saldo ?? 0) + (float) ($fresh->saldo_afiliado ?? 0)
+            : 0.0;
+        $username = $fresh->username ?? $user->username;
+        $emMediacao = (float) \App\Models\Solicitacoes::query()
+            ->where('user_id', $username)
+            ->where('status', 'MEDIATION')
+            ->sum(DB::raw('COALESCE(deposito_liquido, amount, 0)'));
+        $qtdMediacao = (int) \App\Models\Solicitacoes::query()
+            ->where('user_id', $username)
+            ->where('status', 'MEDIATION')
+            ->count();
+
+        return [
+            'saldo_bruto' => round($bruto, 2),
+            'saldo_em_mediacao' => round($emMediacao, 2),
+            'qtd_em_mediacao' => $qtdMediacao,
+            'saldo_disponivel' => round(max(0.0, $bruto - $emMediacao), 2),
+        ];
     }
 
     /**
@@ -192,10 +223,7 @@ class BalanceService
      */
     public function getMediationHoldAmount(User $user): float
     {
-        return (float) \App\Models\Solicitacoes::query()
-            ->where('user_id', $user->username)
-            ->where('status', 'MEDIATION')
-            ->sum(DB::raw('COALESCE(deposito_liquido, amount, 0)'));
+        return $this->getBalanceBreakdown($user)['saldo_em_mediacao'];
     }
 
     /**

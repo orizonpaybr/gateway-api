@@ -276,4 +276,54 @@ class AffiliateCommissionService
             DB::transaction($runner);
         }
     }
+
+    /**
+     * Reverte comissão paga ao afiliado quando o depósito do indicado é estornado (MED/refund).
+     */
+    public function reverseCashInCommissionForRefundedDeposit(Solicitacoes $cashin): void
+    {
+        $runner = function () use ($cashin) {
+            $commission = AffiliateCommission::where('solicitacao_id', $cashin->id)
+                ->where('transaction_type', 'cash_in')
+                ->where('status', 'paid')
+                ->lockForUpdate()
+                ->first();
+
+            if (! $commission) {
+                return;
+            }
+
+            $affiliate = User::where('id', $commission->affiliate_id)->lockForUpdate()->first();
+            if (! $affiliate) {
+                Log::warning('[AFFILIATE][CASH_IN_REVERSE] Afiliado não encontrado', [
+                    'commission_id' => $commission->id,
+                    'affiliate_id' => $commission->affiliate_id,
+                ]);
+
+                return;
+            }
+
+            $amount = (float) $commission->commission_value;
+            if ($amount > 0) {
+                User::where('id', $affiliate->id)->decrement('saldo_afiliado', $amount);
+            }
+
+            $commission->update(['status' => 'reversed']);
+
+            CacheKeyService::forgetAffiliateUser($affiliate->id);
+
+            Log::info('[AFFILIATE][CASH_IN_REVERSE] Comissão de cash-in estornada do afiliado', [
+                'solicitacao_id' => $cashin->id,
+                'commission_id' => $commission->id,
+                'affiliate_user_id' => $affiliate->user_id,
+                'amount' => $amount,
+            ]);
+        };
+
+        if (DB::transactionLevel() > 0) {
+            $runner();
+        } else {
+            DB::transaction($runner);
+        }
+    }
 }

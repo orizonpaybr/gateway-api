@@ -88,8 +88,8 @@ class GamificationService
      */
     public function meuNivel($user): array
     {
-        // Calcula total de depósitos pagos do usuário
-        $depositos = $this->getTotalDepositos($user->user_id);
+        // Calcula total de depósitos confirmados (exclui mediação/disputa/estorno)
+        $depositos = $this->getTotalDepositos($user);
         
         // Busca níveis do cache
         $niveis = $this->getNiveis();
@@ -113,33 +113,14 @@ class GamificationService
     }
     
     /**
-     * Calcula total de depósitos pagos do usuário (pode ser movido para UserRepository)
-     * Considera tanto PAID_OUT (automático) quanto COMPLETED (manual/final)
-     * 
-     * @param string $userId
-     * @return float
+     * Calcula total de depósitos confirmados do usuário (jornada / gamificação).
+     * Não inclui MEDIATION, CHARGEBACK, DISPUTE nem REFUNDED.
      */
-    private function getTotalDepositos(string $userId): float
+    private function getTotalDepositos(User $user): float
     {
-        // Soma dos depósitos pagos registrados
-        $depositosRegistrados = (float) Solicitacoes::whereIn('status', ['PAID_OUT', 'COMPLETED'])
-            ->where('user_id', $userId)
+        return (float) Solicitacoes::forAccount($user)
+            ->confirmedRevenue()
             ->sum('amount');
-        
-        // Se há depósitos registrados, usar esse valor
-        if ($depositosRegistrados > 0) {
-            return $depositosRegistrados;
-        }
-        
-        // Fallback para desenvolvimento/seeds: usar volume_transacional
-        // que representa o total histórico de depósitos acumulados
-        $user = User::where('user_id', $userId)->first();
-        if ($user && $user->volume_transacional > 0) {
-            return (float) $user->volume_transacional;
-        }
-        
-        // Se não há nem depósitos registrados nem volume_transacional, retorna 0
-        return 0.0;
     }
     
     /**

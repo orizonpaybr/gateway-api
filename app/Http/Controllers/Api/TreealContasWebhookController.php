@@ -342,6 +342,16 @@ class TreealContasWebhookController extends Controller
                         (float) $locked->deposito_liquido,
                         'saldo',
                     );
+
+                    try {
+                        app(\App\Services\AffiliateCommissionService::class)
+                            ->reverseCashInCommissionForRefundedDeposit($locked);
+                    } catch (\Throwable $e) {
+                        Log::warning('[TREEAL_CONTAS][INFRACTION] Falha ao estornar comissão de afiliado', [
+                            'deposit_id' => $locked->id,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
                 }
             }
 

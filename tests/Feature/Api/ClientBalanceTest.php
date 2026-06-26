@@ -100,6 +100,29 @@ class ClientBalanceTest extends TestCase
     }
 
     /** @test */
+    public function deve_descontar_depositos_em_mediacao_do_saldo_disponivel(): void
+    {
+        Solicitacoes::factory()->create([
+            'user_id' => $this->user->username,
+            'status' => 'MEDIATION',
+            'amount' => 100.00,
+            'deposito_liquido' => 95.00,
+        ]);
+
+        $response = $this->getJson('/api/wallet/balance', $this->authHeaders());
+
+        $response->assertStatus(200)
+            ->assertJson([
+                'data' => [
+                    'saldo_disponivel' => 204.47,
+                    'saldo_bruto' => 299.47,
+                    'saldo_em_mediacao' => 95.00,
+                    'qtd_em_mediacao' => 1,
+                ],
+            ]);
+    }
+
+    /** @test */
     public function nao_deve_contar_transacoes_pendentes_nem_de_outros_meses(): void
     {
         Solicitacoes::factory()->pending()->create([

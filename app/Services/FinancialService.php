@@ -1087,6 +1087,16 @@ class FinancialService
                     (float) $locked->deposito_liquido,
                     'saldo'
                 );
+
+                try {
+                    app(\App\Services\AffiliateCommissionService::class)
+                        ->reverseCashInCommissionForRefundedDeposit($locked);
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('[FINANCIAL] Falha ao estornar comissão de afiliado no estorno', [
+                        'deposit_id' => $locked->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
             }
 
             Helper::calculaSaldoLiquido($locked->user_id);
