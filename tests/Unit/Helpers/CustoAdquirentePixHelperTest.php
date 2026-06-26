@@ -42,12 +42,19 @@ class CustoAdquirentePixHelperTest extends TestCase
     }
 
     /** @test */
-    public function piso_taxa_usa_percentual_da_adquirente_principal(): void
+    public function sql_custo_cash_out_nao_referencia_adquirente_ref(): void
     {
-        config()->set('treeal.taxa_percentual_transacao', 1.0);
+        $expr = CustoAdquirentePixHelper::sqlCustoPorTransacaoExpr('amount', true);
 
-        // 1% de R$ 10,00 = R$ 0,10
-        $this->assertEqualsWithDelta(0.10, CustoAdquirentePixHelper::pisoTaxa(10.00), 0.0001);
-        $this->assertSame(1.0, CustoAdquirentePixHelper::percentualPrincipal());
+        $this->assertStringNotContainsString('adquirente_ref', $expr);
+        $this->assertStringContainsString('executor_ordem', $expr);
+    }
+
+    /** @test */
+    public function sql_custo_depositos_inclui_adquirente_ref(): void
+    {
+        $expr = CustoAdquirentePixHelper::sqlCustoPorTransacaoExpr('amount', false);
+
+        $this->assertStringContainsString('adquirente_ref', $expr);
     }
 }

@@ -36,7 +36,7 @@ class DashboardService
             $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
             $pctTreeal = (float) config('treeal.taxa_percentual_transacao', 1.0);
 
-            $custoSaqueExpr = \App\Helpers\CustoAdquirentePixHelper::sqlCustoPorTransacaoExpr('amount');
+            $custoSaqueExpr = \App\Helpers\CustoAdquirentePixHelper::sqlCustoPorTransacaoExpr('amount', true);
 
             // Query única otimizada usando UNION ALL
             // Lucro líquido = taxa − custo adquirente (taxa explícita na linha ou custo por executor_ordem).
