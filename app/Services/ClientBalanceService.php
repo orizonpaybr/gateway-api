@@ -17,7 +17,7 @@ use Illuminate\Support\Facades\Cache;
  */
 class ClientBalanceService
 {
-    private const PAID_STATUSES = ['PAID_OUT', 'COMPLETED'];
+    private const PAID_STATUSES = Solicitacoes::CONFIRMED_REVENUE_STATUSES;
 
     /**
      * Retorna o resumo de saldo do usuário (saldo disponível + movimentação do mês corrente).
@@ -48,6 +48,9 @@ class ClientBalanceService
      * @return array{
      *     moeda: string,
      *     saldo_disponivel: float,
+     *     saldo_bruto: float,
+     *     saldo_em_mediacao: float,
+     *     qtd_em_mediacao: int,
      *     entradas_mes: float,
      *     saidas_mes: float,
      *     fluxo_liquido_mes: float,
@@ -60,14 +63,11 @@ class ClientBalanceService
         $startOfMonth = Carbon::now()->startOfMonth();
         $endOfMonth = Carbon::now()->endOfMonth();
 
-        $userSaldo = User::where('id', $user->id)->first(['saldo', 'saldo_afiliado']);
-        $saldoDisponivel = $userSaldo
-            ? round((float) ($userSaldo->saldo ?? 0) + (float) ($userSaldo->saldo_afiliado ?? 0), 2)
-            : 0.0;
+        $balanceBreakdown = app(BalanceService::class)->getBalanceBreakdown($user);
 
-        $entradasMes = Solicitacoes::where('user_id', $user->username)
+        $entradasMes = Solicitacoes::forAccount($user)
             ->whereBetween('date', [$startOfMonth, $endOfMonth])
-            ->whereIn('status', self::PAID_STATUSES)
+            ->confirmedRevenue()
             ->sum('amount');
 
         $saidasMes = SolicitacoesCashOut::where(function ($q) use ($user) {
@@ -82,7 +82,10 @@ class ClientBalanceService
 
         return [
             'moeda' => 'BRL',
-            'saldo_disponivel' => $saldoDisponivel,
+            'saldo_disponivel' => $balanceBreakdown['saldo_disponivel'],
+            'saldo_bruto' => $balanceBreakdown['saldo_bruto'],
+            'saldo_em_mediacao' => $balanceBreakdown['saldo_em_mediacao'],
+            'qtd_em_mediacao' => $balanceBreakdown['qtd_em_mediacao'],
             'entradas_mes' => $entradasMes,
             'saidas_mes' => $saidasMes,
             'fluxo_liquido_mes' => round($entradasMes - $saidasMes, 2),

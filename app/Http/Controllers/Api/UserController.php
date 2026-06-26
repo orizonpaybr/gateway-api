@@ -76,8 +76,8 @@ class UserController extends Controller
             $totalInflows = $balanceData['totalInflows'];
             $totalOutflows = $balanceData['totalOutflows'];
 
-            // Saldo disponível = saldo principal + saldo de afiliados (para exibição e saque)
-            $currentBalance = round((float) ($user->saldo ?? 0) + (float) ($user->saldo_afiliado ?? 0), 2);
+            $balanceBreakdown = app(\App\Services\BalanceService::class)->getBalanceBreakdown($user);
+            $currentBalance = $balanceBreakdown['saldo_disponivel'];
             $totalInflowsRounded = round((float) $totalInflows, 2);
             $totalOutflowsRounded = round((float) $totalOutflows, 2);
 
@@ -100,6 +100,9 @@ class UserController extends Controller
                 'success' => true,
                 'data' => [
                     'current' => $currentBalance,
+                    'saldo_bruto' => $balanceBreakdown['saldo_bruto'],
+                    'saldo_em_mediacao' => $balanceBreakdown['saldo_em_mediacao'],
+                    'qtd_em_mediacao' => $balanceBreakdown['qtd_em_mediacao'],
                     'totalInflows' => number_format($totalInflowsRounded, 2, '.', ''),
                     'totalOutflows' => number_format($totalOutflowsRounded, 2, '.', ''),
                 ]
@@ -1258,9 +1261,9 @@ class UserController extends Controller
     {
         $username = $user->username ?? $user->user_id;
         // Query otimizada para depósitos
-        $depositosData = \App\Models\Solicitacoes::where('user_id', $username)
+        $depositosData = \App\Models\Solicitacoes::forAccount($user)
             ->whereBetween('date', [$dates['inicio'], $dates['fim']])
-            ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
+            ->confirmedRevenue()
             ->selectRaw('COUNT(*) as quantidade, SUM(amount) as total_valor')
             ->first();
 
@@ -1291,9 +1294,9 @@ class UserController extends Controller
         $groupBy = $this->getGroupByInterval($periodo);
         
         // Query otimizada para depósitos agrupados
-        $depositosChart = \App\Models\Solicitacoes::where('user_id', $username)
+        $depositosChart = \App\Models\Solicitacoes::forAccount($user)
             ->whereBetween('date', [$dates['inicio'], $dates['fim']])
-            ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
+            ->confirmedRevenue()
             ->selectRaw("DATE_FORMAT(date, '{$groupBy}') as periodo, SUM(amount) as valor")
             ->groupBy('periodo')
             ->orderBy('periodo')
@@ -1401,14 +1404,13 @@ class UserController extends Controller
             $startOfMonth = \Carbon\Carbon::now()->startOfMonth();
             $endOfMonth = \Carbon\Carbon::now()->endOfMonth();
 
-            $userSaldo = \App\Models\User::where('id', $user->id)->first(['saldo', 'saldo_afiliado']);
-            $saldoFresco = $userSaldo ? ((float) ($userSaldo->saldo ?? 0) + (float) ($userSaldo->saldo_afiliado ?? 0)) : 0;
+            $balanceBreakdown = app(\App\Services\BalanceService::class)->getBalanceBreakdown($user);
 
             $cacheKey = sprintf('dash:stats:%s:%s:%s', $user->username, $startOfMonth->format('Ym'), $endOfMonth->format('Ym'));
             $payload = cache()->remember($cacheKey, 10, function () use ($user, $startOfMonth, $endOfMonth) {
-                $entradasMes = \App\Models\Solicitacoes::where('user_id', $user->username)
+                $entradasMes = \App\Models\Solicitacoes::forAccount($user)
                     ->whereBetween('date', [$startOfMonth, $endOfMonth])
-                    ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
+                    ->confirmedRevenue()
                     ->sum('amount');
                 $saidasMes = \App\Models\SolicitacoesCashOut::where(function ($q) use ($user) {
                     $q->where('user_id', $user->user_id)->orWhere('user_id', $user->username);
@@ -1430,7 +1432,10 @@ class UserController extends Controller
             });
 
 
-            $payload['saldo_disponivel'] = $saldoFresco;
+            $payload['saldo_disponivel'] = $balanceBreakdown['saldo_disponivel'];
+            $payload['saldo_bruto'] = $balanceBreakdown['saldo_bruto'];
+            $payload['saldo_em_mediacao'] = $balanceBreakdown['saldo_em_mediacao'];
+            $payload['qtd_em_mediacao'] = $balanceBreakdown['qtd_em_mediacao'];
 
             Log::info('Dashboard Stats (com cache)', [
                 'user_id' => $user->username,
@@ -1486,50 +1491,36 @@ class UserController extends Controller
 
             $cacheKey = sprintf('dash:summary:%s:%s:%s', $user->username, $periodo, $dates['inicio']->format('YmdHis'));
             $payload = cache()->remember($cacheKey, 60, function () use ($user, $dates) {
-                $quantidadeDepositos = \App\Models\Solicitacoes::where('user_id', $user->username)
+                $depositosConfirmados = \App\Models\Solicitacoes::forAccount($user)
                     ->whereBetween('date', [$dates['inicio'], $dates['fim']])
-                    ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
-                    ->count();
+                    ->confirmedRevenue();
+
+                $quantidadeDepositos = (clone $depositosConfirmados)->count();
                 $quantidadeSaques = \App\Models\SolicitacoesCashOut::where(function ($q) use ($user) {
                     $q->where('user_id', $user->user_id)->orWhere('user_id', $user->username);
                 })
                     ->whereBetween('date', [$dates['inicio'], $dates['fim']])
                     ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
                     ->count();
-                $tarifaCobrada = \App\Models\Solicitacoes::where('user_id', $user->username)
-                    ->whereBetween('date', [$dates['inicio'], $dates['fim']])
-                    ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
-                    ->sum('taxa_cash_in');
-                $qrCodesPagos = \App\Models\Solicitacoes::where('user_id', $user->username)
-                    ->whereBetween('date', [$dates['inicio'], $dates['fim']])
-                    ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
-                    ->count();
-                $qrCodesGerados = \App\Models\Solicitacoes::where('user_id', $user->username)
+                $tarifaCobrada = (clone $depositosConfirmados)->sum('taxa_cash_in');
+                $qrCodesPagos = $quantidadeDepositos;
+                $qrCodesGerados = \App\Models\Solicitacoes::forAccount($user)
                     ->whereBetween('date', [$dates['inicio'], $dates['fim']])
                     ->count();
-                $ticketMedioDepositos = \App\Models\Solicitacoes::where('user_id', $user->username)
-                    ->whereBetween('date', [$dates['inicio'], $dates['fim']])
-                    ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
-                    ->avg('amount') ?: 0;
+                $ticketMedioDepositos = (clone $depositosConfirmados)->avg('amount') ?: 0;
                 $ticketMedioSaques = \App\Models\SolicitacoesCashOut::where(function ($q) use ($user) {
                     $q->where('user_id', $user->user_id)->orWhere('user_id', $user->username);
                 })
                     ->whereBetween('date', [$dates['inicio'], $dates['fim']])
                     ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
                     ->avg('amount') ?: 0;
-                $valorMinDepositos = \App\Models\Solicitacoes::where('user_id', $user->username)
-                    ->whereBetween('date', [$dates['inicio'], $dates['fim']])
-                    ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
-                    ->min('amount') ?: 0;
-                $valorMaxDepositos = \App\Models\Solicitacoes::where('user_id', $user->username)
-                    ->whereBetween('date', [$dates['inicio'], $dates['fim']])
-                    ->whereIn('status', ['PAID_OUT', 'COMPLETED'])
-                    ->max('amount') ?: 0;
-                $infracoes = \App\Models\Solicitacoes::where('user_id', $user->username)
+                $valorMinDepositos = (clone $depositosConfirmados)->min('amount') ?: 0;
+                $valorMaxDepositos = (clone $depositosConfirmados)->max('amount') ?: 0;
+                $infracoes = \App\Models\Solicitacoes::forAccount($user)
                     ->whereBetween('date', [$dates['inicio'], $dates['fim']])
                     ->whereIn('status', ['MEDIATION', 'CHARGEBACK', 'DISPUTE'])
                     ->count();
-                $valorInfracoes = \App\Models\Solicitacoes::where('user_id', $user->username)
+                $valorInfracoes = \App\Models\Solicitacoes::forAccount($user)
                     ->whereBetween('date', [$dates['inicio'], $dates['fim']])
                     ->whereIn('status', ['MEDIATION', 'CHARGEBACK', 'DISPUTE'])
                     ->sum('amount');

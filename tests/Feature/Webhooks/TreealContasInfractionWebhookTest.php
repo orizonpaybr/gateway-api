@@ -134,6 +134,47 @@ class TreealContasInfractionWebhookTest extends TestCase
         ]);
     }
 
+    public function test_closed_agreed_reverses_affiliate_commission(): void
+    {
+        $affiliate = AuthTestHelper::createTestUser([
+            'username' => 'aff_parent_'.uniqid(),
+            'email' => 'aff_parent_'.uniqid().'@example.com',
+            'saldo_afiliado' => 5.00,
+        ]);
+
+        $user = AuthTestHelper::createTestUser([
+            'username' => 'inf_aff_'.uniqid(),
+            'email' => 'inf_aff_'.uniqid().'@example.com',
+            'saldo' => 200.00,
+            'affiliate_id' => $affiliate->id,
+        ]);
+
+        $deposit = $this->createTreealDeposit($user->username, 'E_AFF_FRAUD_1', 'COMPLETED', liquido: 97.50);
+
+        \App\Models\AffiliateCommission::create([
+            'user_id' => $user->user_id,
+            'affiliate_id' => $affiliate->id,
+            'transaction_type' => 'cash_in',
+            'solicitacao_id' => $deposit->id,
+            'commission_value' => 0.50,
+            'transaction_amount' => 100.00,
+            'status' => 'paid',
+        ]);
+
+        $this->postInfraction([
+            'id' => 'inf-aff-fraud-1',
+            'status' => 'CLOSED',
+            'analysisResult' => 'AGREED',
+            'endToEndId' => 'E_AFF_FRAUD_1',
+        ])->assertOk()->assertJson(['received' => true, 'processed' => true]);
+
+        $this->assertEquals(4.50, (float) $affiliate->fresh()->saldo_afiliado);
+        $this->assertDatabaseHas('affiliate_commissions', [
+            'solicitacao_id' => $deposit->id,
+            'status' => 'reversed',
+        ]);
+    }
+
     public function test_cancelled_releases_hold(): void
     {
         $user = AuthTestHelper::createTestUser([

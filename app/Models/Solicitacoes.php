@@ -59,4 +59,30 @@ class Solicitacoes extends Model
     {
         return $this->belongsTo(User::class, 'user_id', 'user_id');
     }
+
+    /**
+     * Depósitos que contam como receita confirmada (entradas, gráficos, jornada).
+     * Exclui mediação, chargeback, disputa e estorno — o valor ainda não é definitivo do lojista.
+     */
+    public const CONFIRMED_REVENUE_STATUSES = ['PAID_OUT', 'COMPLETED'];
+
+    public function scopeConfirmedRevenue($query)
+    {
+        return $query->whereIn('status', self::CONFIRMED_REVENUE_STATUSES);
+    }
+
+    /**
+     * Filtra depósitos da conta (user_id na tabela costuma ser o username).
+     */
+    public function scopeForAccount($query, User $user)
+    {
+        $username = $user->username ?? $user->user_id;
+
+        return $query->where(function ($q) use ($user, $username) {
+            $q->where('user_id', $username);
+            if (! empty($user->user_id) && $user->user_id !== $username) {
+                $q->orWhere('user_id', $user->user_id);
+            }
+        });
+    }
 }
