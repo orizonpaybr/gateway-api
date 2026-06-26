@@ -523,7 +523,7 @@ class PixInfracoesController extends Controller
     {
         return match (strtoupper(trim($result))) {
             'AGREED' => 'Contestação aceita — pagador recebeu a devolução',
-            'DISAGREED' => 'Contestação rejeitada — valor mantido com você (lojista)',
+            'DISAGREED' => 'Contestação rejeitada — valor mantido com você',
             default => ucfirst(strtolower(str_replace('_', ' ', $result))),
         };
     }
