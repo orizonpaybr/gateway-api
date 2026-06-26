@@ -90,6 +90,38 @@ class PixInfracoesEndpointsTest extends TestCase
         $this->assertNotContains('E_OTHER_1', $e2es);
     }
 
+    public function test_index_maps_resolvida_and_estorno_by_analysis_result(): void
+    {
+        $user = AuthTestHelper::createTestUser([
+            'username' => 'idx_'.uniqid(),
+            'email' => 'idx_'.uniqid().'@example.com',
+        ]);
+
+        $this->insertInfraction($user->username, [
+            'end_to_end' => 'E_IDX_WIN',
+            'status' => 'RESOLVIDA',
+            'analysis_result' => 'DISAGREED',
+            'detalhes' => json_encode(['analysisResult' => 'DISAGREED']),
+        ]);
+        $this->insertInfraction($user->username, [
+            'end_to_end' => 'E_IDX_LOSE',
+            'status' => 'RESOLVIDA',
+            'analysis_result' => 'AGREED',
+            'detalhes' => json_encode(['analysisResult' => 'AGREED']),
+        ]);
+
+        $token = AuthTestHelper::generateTestToken($user);
+
+        $response = $this->withHeader('Authorization', 'Bearer '.$token)
+            ->getJson('/api/pix/infracoes');
+
+        $response->assertOk();
+
+        $byE2e = collect($response->json('data.data'))->keyBy('end_to_end');
+        $this->assertSame('Resolvida', $byE2e->get('E_IDX_WIN')['status']);
+        $this->assertSame('Estorno', $byE2e->get('E_IDX_LOSE')['status']);
+    }
+
     public function test_show_returns_detail_and_404_for_foreign(): void
     {
         $user = AuthTestHelper::createTestUser([
@@ -101,7 +133,16 @@ class PixInfracoesEndpointsTest extends TestCase
             'email' => 'showx_'.uniqid().'@example.com',
         ]);
 
-        $id = $this->insertInfraction($user->username, ['end_to_end' => 'E_SHOW_1']);
+        $id = $this->insertInfraction($user->username, [
+            'end_to_end' => 'E_SHOW_1',
+            'tipo' => 'refund_request',
+            'detalhes' => json_encode([
+                'infractionId' => 'inf-show-1',
+                'status' => 'WAITING_PSP',
+                'analysisResult' => null,
+                'reportedBy' => 'DEBITED_PARTICIPANT',
+            ]),
+        ]);
         $foreignId = $this->insertInfraction($other->username);
 
         $token = AuthTestHelper::generateTestToken($user);
@@ -110,12 +151,74 @@ class PixInfracoesEndpointsTest extends TestCase
             ->getJson('/api/pix/infracoes/'.$id)
             ->assertOk()
             ->assertJsonPath('success', true)
-            ->assertJsonPath('data.end_to_end', 'E_SHOW_1');
+            ->assertJsonPath('data.end_to_end', 'E_SHOW_1')
+            ->assertJsonPath('data.tipo_legivel', 'Solicitação de devolução (MED)')
+            ->assertJsonPath('data.detalhes_adicionais.0.label', 'ID na adquirente (Treeal)')
+            ->assertJsonPath('data.pode_apresentar_defesa', true)
+            ->assertJsonPath('data.defesa_enviada_para', 'Treeal (adquirente Pix / MED)');
 
         $this->withHeader('Authorization', 'Bearer '.$token)
             ->getJson('/api/pix/infracoes/'.$foreignId)
             ->assertStatus(404)
             ->assertJsonPath('success', false);
+    }
+
+    public function test_show_resolvida_when_merchant_wins_disagreed(): void
+    {
+        $user = AuthTestHelper::createTestUser([
+            'username' => 'win_'.uniqid(),
+            'email' => 'win_'.uniqid().'@example.com',
+        ]);
+
+        $id = $this->insertInfraction($user->username, [
+            'status' => 'RESOLVIDA',
+            'analysis_result' => 'DISAGREED',
+            'detalhes' => json_encode([
+                'infractionId' => 'inf-win-1',
+                'status' => 'CLOSED',
+                'analysisResult' => 'DISAGREED',
+                'reportedBy' => 'DEBITED_PARTICIPANT',
+            ]),
+        ]);
+
+        $token = AuthTestHelper::generateTestToken($user);
+
+        $this->withHeader('Authorization', 'Bearer '.$token)
+            ->getJson('/api/pix/infracoes/'.$id)
+            ->assertOk()
+            ->assertJsonPath('data.status', 'Resolvida')
+            ->assertJsonPath('data.favoravel_lojista', true)
+            ->assertJsonPath('data.desfecho_titulo', 'Contestação encerrada a seu favor')
+            ->assertJsonPath('data.pode_apresentar_defesa', false);
+    }
+
+    public function test_show_estorno_when_payer_wins_agreed(): void
+    {
+        $user = AuthTestHelper::createTestUser([
+            'username' => 'lose_'.uniqid(),
+            'email' => 'lose_'.uniqid().'@example.com',
+        ]);
+
+        $id = $this->insertInfraction($user->username, [
+            'status' => 'RESOLVIDA',
+            'analysis_result' => 'AGREED',
+            'detalhes' => json_encode([
+                'infractionId' => 'inf-lose-1',
+                'status' => 'CLOSED',
+                'analysisResult' => 'AGREED',
+                'reportedBy' => 'DEBITED_PARTICIPANT',
+            ]),
+        ]);
+
+        $token = AuthTestHelper::generateTestToken($user);
+
+        $this->withHeader('Authorization', 'Bearer '.$token)
+            ->getJson('/api/pix/infracoes/'.$id)
+            ->assertOk()
+            ->assertJsonPath('data.status', 'Estorno')
+            ->assertJsonPath('data.favoravel_lojista', false)
+            ->assertJsonPath('data.desfecho_titulo', 'Valor estornado ao pagador')
+            ->assertJsonPath('data.pode_apresentar_defesa', false);
     }
 
     public function test_defense_requires_authentication(): void
