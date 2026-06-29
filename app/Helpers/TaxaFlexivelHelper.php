@@ -86,7 +86,7 @@ class TaxaFlexivelHelper
             $percentualAplicado = max(0, (float) ($user->taxa_percentual_deposito ?? 0));
             $taxaPercentualBruta = ($amount * $percentualAplicado) / 100;
 
-            // PISO: nunca menor que o custo percentual da adquirente principal (Treeal).
+            // PISO: nunca menor que o custo fixo da adquirente principal (Treeal).
             $piso = CustoAdquirentePixHelper::pisoTaxa($amount);
             $taxaTotal = max($taxaPercentualBruta, $piso);
             $descricao = 'PERSONALIZADA_PERCENTUAL';

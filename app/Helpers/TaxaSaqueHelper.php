@@ -95,7 +95,7 @@ class TaxaSaqueHelper
             $percentualAplicado = max(0, (float) ($user->taxa_percentual_pix ?? 0));
             $taxaPercentualBruta = ($amount * $percentualAplicado) / 100;
 
-            // PISO: nunca menor que o custo percentual da adquirente principal (Treeal).
+            // PISO: nunca menor que o custo fixo da adquirente principal (Treeal).
             $piso = CustoAdquirentePixHelper::pisoTaxa($amount);
             $taxaTotal = max($taxaPercentualBruta, $piso);
             $descricao = $isInterfaceWeb ? 'PERSONALIZADA_INTERFACE_WEB_PERCENTUAL' : 'PERSONALIZADA_API_PERCENTUAL';

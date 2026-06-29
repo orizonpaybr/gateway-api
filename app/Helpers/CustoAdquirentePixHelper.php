@@ -5,8 +5,7 @@ namespace App\Helpers;
 /**
  * Custo da rede/adquirente por transação PIX (split interno: taxa cliente − custo − afiliado).
  *
- * Treeal: percentual sobre o valor (ex.: 1%).
- * Fyhub / Simpay: custo fixo em R$ por transação.
+ * Treeal / Fyhub / Simpay: custo fixo em R$ por transação.
  */
 class CustoAdquirentePixHelper
 {
@@ -15,42 +14,31 @@ class CustoAdquirentePixHelper
      */
     public static function percentualTransacao(?string $adquirenteReferencia = null): float
     {
-        return match ($adquirenteReferencia) {
-            'treeal' => (float) config('treeal.taxa_percentual_transacao', 1.0),
-            default => 0.0,
-        };
+        return 0.0;
     }
 
     /**
-     * Custo fixo por transação (R$). Treeal não usa mais custo fixo — retorna 0.
+     * Custo fixo por transação (R$).
      *
+     * @see config('treeal.custo_fixo_transacao')
      * @see config('simpay.custo_fixo_transacao')
      * @see config('fyhub.custo_fixo_transacao')
      */
     public static function custoFixoTransacao(?string $adquirenteReferencia = null): float
     {
         return match ($adquirenteReferencia) {
+            'treeal' => (float) config('treeal.custo_fixo_transacao', 0.05),
             'fyhub' => (float) config('fyhub.custo_fixo_transacao', 0.04),
             'simpay' => (float) config('simpay.custo_fixo_transacao', 0.035),
-            'treeal' => 0.0,
             default => 0.0,
         };
     }
 
     /**
      * Custo total da adquirente para uma transação (R$).
-     *
-     * Percentual (Treeal) tem prioridade; demais adquirentes usam custo fixo.
      */
     public static function custoTransacao(float $amount, ?string $adquirenteReferencia = null): float
     {
-        $amount = max(0, $amount);
-        $percentual = self::percentualTransacao($adquirenteReferencia);
-
-        if ($percentual > 0 && $amount > 0) {
-            return ($amount * $percentual) / 100;
-        }
-
         return self::custoFixoTransacao($adquirenteReferencia);
     }
 
@@ -65,9 +53,7 @@ class CustoAdquirentePixHelper
     }
 
     /**
-     * Percentual mínimo da adquirente principal (ex.: 1% Treeal).
-     *
-     * Usado como piso percentual ao configurar taxas individuais por porcentagem.
+     * Percentual mínimo da adquirente principal (legado — Treeal usa custo fixo).
      */
     public static function percentualPrincipal(): float
     {
@@ -77,11 +63,11 @@ class CustoAdquirentePixHelper
     /**
      * Piso da taxa cobrada do usuário (em R$) no modo percentual.
      *
-     * Garante que o valor cobrado nunca seja menor que o custo da adquirente principal.
+     * Garante que o valor cobrado nunca seja menor que o custo fixo da adquirente principal.
      */
     public static function pisoTaxa(float $amount): float
     {
-        return self::custoTransacao($amount, self::adquirentePrincipal());
+        return self::custoFixoTransacao(self::adquirentePrincipal());
     }
 
     /**
@@ -91,16 +77,16 @@ class CustoAdquirentePixHelper
      */
     public static function sqlCustoPorTransacaoExpr(string $amountColumn = 'amount', bool $cashOutTable = false): string
     {
+        $custoTreeal = (float) config('treeal.custo_fixo_transacao', 0.05);
         $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.035);
         $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
-        $pctTreeal = (float) config('treeal.taxa_percentual_transacao', 1.0);
 
         $simpayMatch = $cashOutTable
             ? "executor_ordem = 'simpay' OR executor_ordem = 'Adquirente PIX'"
             : "executor_ordem = 'simpay' OR executor_ordem = 'Adquirente PIX' OR adquirente_ref = 'Adquirente PIX'";
 
         return "(CASE
-            WHEN executor_ordem = 'treeal' THEN ({$amountColumn} * {$pctTreeal} / 100)
+            WHEN executor_ordem = 'treeal' THEN {$custoTreeal}
             WHEN executor_ordem = 'fyhub' THEN {$custoFyhub}
             WHEN {$simpayMatch} THEN {$custoSimpay}
             ELSE {$custoSimpay}

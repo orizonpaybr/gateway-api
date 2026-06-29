@@ -16,7 +16,7 @@ use Tests\TestCase;
  *
  * Regras cobertas:
  * - Quando taxa_modo_percentual = true, a taxa é um % sobre o valor (substitui a fixa).
- * - O valor cobrado nunca fica abaixo do piso (1% da adquirente principal/Treeal).
+ * - O valor cobrado nunca fica abaixo do piso (custo fixo da adquirente principal/Treeal).
  * - Com taxa_modo_percentual = false, a taxa fixa em reais continua valendo (comportamento atual).
  */
 class TaxaPercentualTest extends TestCase
@@ -29,8 +29,8 @@ class TaxaPercentualTest extends TestCase
     {
         parent::setUp();
 
-        // Piso determinístico: Treeal 1% sobre o valor
-        config()->set('treeal.taxa_percentual_transacao', 1.0);
+        // Piso determinístico: Treeal R$ 0,05 por transação
+        config()->set('treeal.custo_fixo_transacao', 0.05);
 
         $this->setting = App::factory()->create([
             'taxa_fixa_padrao' => 1.00,
@@ -61,18 +61,18 @@ class TaxaPercentualTest extends TestCase
         $this->assertTrue($r['modo_percentual']);
         $this->assertEqualsWithDelta(0.20, $r['taxa_cash_in'], 0.0001);
         $this->assertEqualsWithDelta(9.80, $r['deposito_liquido'], 0.0001);
-        $this->assertEqualsWithDelta(0.10, $r['taxa_adquirente'], 0.0001);
+        $this->assertEqualsWithDelta(0.05, $r['taxa_adquirente'], 0.0001);
     }
 
     /** @test */
     public function deposito_percentual_respeita_piso_da_adquirente(): void
     {
-        $user = $this->makeUser(['taxa_percentual_deposito' => 0.50]);
+        $user = $this->makeUser(['taxa_percentual_deposito' => 0.01]);
 
-        // 0,5% de R$ 10,00 = R$ 0,05, abaixo do piso de 1% (R$ 0,10) → cobra o piso
+        // 0,01% de R$ 10,00 = R$ 0,001, abaixo do piso fixo (R$ 0,05) → cobra o piso
         $r = TaxaFlexivelHelper::calcularTaxaDeposito(10.00, $this->setting, $user, 'treeal');
 
-        $this->assertEqualsWithDelta(0.10, $r['taxa_cash_in'], 0.0001);
+        $this->assertEqualsWithDelta(0.05, $r['taxa_cash_in'], 0.0001);
     }
 
     /** @test */
@@ -85,18 +85,18 @@ class TaxaPercentualTest extends TestCase
         $this->assertTrue($r['modo_percentual']);
         $this->assertEqualsWithDelta(0.20, $r['taxa_cash_out'], 0.0001);
         $this->assertEqualsWithDelta(10.20, $r['valor_total_descontar'], 0.0001);
-        $this->assertEqualsWithDelta(0.10, $r['taxa_adquirente'], 0.0001);
+        $this->assertEqualsWithDelta(0.05, $r['taxa_adquirente'], 0.0001);
     }
 
     /** @test */
     public function saque_percentual_respeita_piso_da_adquirente(): void
     {
-        $user = $this->makeUser(['taxa_percentual_pix' => 0.50]);
+        $user = $this->makeUser(['taxa_percentual_pix' => 0.01]);
 
-        // 0,5% de R$ 10,00 = R$ 0,05, abaixo do piso de 1% (R$ 0,10) → cobra o piso
+        // 0,01% de R$ 10,00 = R$ 0,001, abaixo do piso fixo (R$ 0,05) → cobra o piso
         $r = TaxaSaqueHelper::calcularTaxaSaque(10.00, $this->setting, $user, true, false, 'treeal');
 
-        $this->assertEqualsWithDelta(0.10, $r['taxa_cash_out'], 0.0001);
+        $this->assertEqualsWithDelta(0.05, $r['taxa_cash_out'], 0.0001);
     }
 
     /** @test */
@@ -112,6 +112,6 @@ class TaxaPercentualTest extends TestCase
         $this->assertFalse($r['modo_percentual']);
         $this->assertSame('PERSONALIZADA_FIXA', $r['descricao']);
         $this->assertEqualsWithDelta(0.90, $r['taxa_cash_in'], 0.0001);
-        $this->assertEqualsWithDelta(0.10, $r['taxa_adquirente'], 0.0001);
+        $this->assertEqualsWithDelta(0.05, $r['taxa_adquirente'], 0.0001);
     }
 }

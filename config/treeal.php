@@ -55,27 +55,15 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Taxa percentual por transação PIX (%)
+    | Custo fixo por transação PIX (R$)
     |--------------------------------------------------------------------------
     |
-    | A Treeal cobra percentual sobre o valor da transação (ex.: 1 = 1%).
-    | Usado no split interno (TaxaSaqueHelper / TaxaFlexível) e nas métricas de lucro.
+    | Custo da Treeal por transação (cash-in e cash-out). Usado no split interno
+    | (TaxaSaqueHelper / TaxaFlexível) e nas métricas de lucro.
     |
     */
 
-    'taxa_percentual_transacao' => (float) env('TREEAL_TAXA_PERCENTUAL_TRANSACAO', 1.0),
-
-    /*
-    |--------------------------------------------------------------------------
-    | Custo fixo por transação PIX (R$) — legado, não usado pela Treeal
-    |--------------------------------------------------------------------------
-    |
-    | Mantido apenas para compatibilidade de .env antigos. A Treeal passou a
-    | cobrar somente percentual (taxa_percentual_transacao).
-    |
-    */
-
-    'custo_fixo_transacao' => (float) env('TREEAL_CUSTO_FIXO_TRANSACAO', 0.0),
+    'custo_fixo_transacao' => (float) env('TREEAL_CUSTO_FIXO_TRANSACAO', 0.05),
 
     /*
     |--------------------------------------------------------------------------
