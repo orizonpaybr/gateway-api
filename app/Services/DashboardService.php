@@ -32,9 +32,9 @@ class DashboardService
         $cacheKey = sprintf('dashboard:stats:%s:%s', $username, now()->format('Y-m-d'));
         
         return Cache::remember($cacheKey, self::CACHE_TTL_STATS, function () use ($username, $startOfMonth, $endOfMonth) {
+            $custoTreeal = (float) config('treeal.custo_fixo_transacao', 0.05);
             $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.035);
             $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
-            $pctTreeal = (float) config('treeal.taxa_percentual_transacao', 1.0);
 
             $custoSaqueExpr = \App\Helpers\CustoAdquirentePixHelper::sqlCustoPorTransacaoExpr('amount', true);
 
@@ -49,7 +49,7 @@ class DashboardService
                         CASE
                             WHEN taxa_pix_cash_in_adquirente IS NOT NULL AND taxa_pix_cash_in_adquirente > 0
                             THEN taxa_pix_cash_in_adquirente
-                            WHEN executor_ordem = 'treeal' THEN amount * {$pctTreeal} / 100
+                            WHEN executor_ordem = 'treeal' THEN {$custoTreeal}
                             WHEN executor_ordem = 'fyhub' THEN {$custoFyhub}
                             WHEN executor_ordem = 'simpay' OR executor_ordem = 'Adquirente PIX' OR adquirente_ref = 'Adquirente PIX'
                             THEN {$custoSimpay}

@@ -751,9 +751,9 @@ class FinancialService
      */
     private function getDepositsStatsAggregated(array $dateRange): array
     {
+        $custoTreeal = (float) config('treeal.custo_fixo_transacao', 0.05);
         $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.035);
         $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
-        $pctTreeal = (float) config('treeal.taxa_percentual_transacao', 1.0);
 
         $stats = Solicitacoes::whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
             ->selectRaw('
@@ -763,7 +763,7 @@ class FinancialService
                     CASE
                         WHEN taxa_pix_cash_in_adquirente IS NOT NULL AND taxa_pix_cash_in_adquirente > 0
                         THEN taxa_pix_cash_in_adquirente
-                        WHEN executor_ordem = \'treeal\' THEN amount * ' . $pctTreeal . ' / 100
+                        WHEN executor_ordem = \'treeal\' THEN ' . $custoTreeal . '
                         WHEN executor_ordem = \'fyhub\' THEN ' . $custoFyhub . '
                         WHEN executor_ordem = \'simpay\' OR executor_ordem = \'Adquirente PIX\' OR adquirente_ref = \'Adquirente PIX\'
                         THEN ' . $custoSimpay . '
@@ -817,9 +817,9 @@ class FinancialService
     private function calculateProfit(string $periodo): float
     {
         $dateRange = $this->getDateRange($periodo);
+        $custoTreeal = (float) config('treeal.custo_fixo_transacao', 0.05);
         $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.035);
         $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
-        $pctTreeal = (float) config('treeal.taxa_percentual_transacao', 1.0);
         $custoSaqueExpr = \App\Helpers\CustoAdquirentePixHelper::sqlCustoPorTransacaoExpr('amount', true);
 
         // Lucro líquido de depósitos: taxa_cash_in − custo por adquirente quando não há taxa explícita na linha
@@ -829,7 +829,7 @@ class FinancialService
                 CASE
                     WHEN taxa_pix_cash_in_adquirente IS NOT NULL AND taxa_pix_cash_in_adquirente > 0
                     THEN taxa_pix_cash_in_adquirente
-                    WHEN executor_ordem = 'treeal' THEN amount * {$pctTreeal} / 100
+                    WHEN executor_ordem = 'treeal' THEN {$custoTreeal}
                     WHEN executor_ordem = 'fyhub' THEN {$custoFyhub}
                     WHEN executor_ordem = 'simpay' OR executor_ordem = 'Adquirente PIX' OR adquirente_ref = 'Adquirente PIX'
                     THEN {$custoSimpay}

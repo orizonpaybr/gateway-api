@@ -15,10 +15,11 @@ class CustoAdquirentePixHelperTest extends TestCase
     /** @test */
     public function custo_fixo_transacao_retorna_valor_por_adquirente(): void
     {
+        config()->set('treeal.custo_fixo_transacao', 0.05);
         config()->set('fyhub.custo_fixo_transacao', 0.04);
         config()->set('simpay.custo_fixo_transacao', 0.035);
 
-        $this->assertSame(0.0, CustoAdquirentePixHelper::custoFixoTransacao('treeal'));
+        $this->assertSame(0.05, CustoAdquirentePixHelper::custoFixoTransacao('treeal'));
         $this->assertSame(0.04, CustoAdquirentePixHelper::custoFixoTransacao('fyhub'));
         $this->assertSame(0.035, CustoAdquirentePixHelper::custoFixoTransacao('simpay'));
         $this->assertSame(0.0, CustoAdquirentePixHelper::custoFixoTransacao(null));
@@ -26,13 +27,13 @@ class CustoAdquirentePixHelperTest extends TestCase
     }
 
     /** @test */
-    public function treeal_cobra_percentual_sobre_o_valor(): void
+    public function treeal_cobra_custo_fixo_por_transacao(): void
     {
-        config()->set('treeal.taxa_percentual_transacao', 1.0);
+        config()->set('treeal.custo_fixo_transacao', 0.05);
 
-        $this->assertSame(1.0, CustoAdquirentePixHelper::percentualTransacao('treeal'));
-        $this->assertEqualsWithDelta(0.10, CustoAdquirentePixHelper::custoTransacao(10.00, 'treeal'), 0.0001);
-        $this->assertEqualsWithDelta(1.00, CustoAdquirentePixHelper::custoTransacao(100.00, 'treeal'), 0.0001);
+        $this->assertSame(0.0, CustoAdquirentePixHelper::percentualTransacao('treeal'));
+        $this->assertEqualsWithDelta(0.05, CustoAdquirentePixHelper::custoTransacao(10.00, 'treeal'), 0.0001);
+        $this->assertEqualsWithDelta(0.05, CustoAdquirentePixHelper::custoTransacao(100.00, 'treeal'), 0.0001);
     }
 
     /** @test */

@@ -642,28 +642,28 @@ class AdminDashboardController extends Controller
      */
     private function calculateAcquirerFees($solicitacoes, $saques): array
     {
+        $custoTreeal = (float) config('treeal.custo_fixo_transacao', 0.05);
         $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.035);
         $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
-        $pctTreeal = (float) config('treeal.taxa_percentual_transacao', 1.0);
 
         $custosEntradasRow = (clone $solicitacoes)->selectRaw(
             'SUM(CASE
-                WHEN executor_ordem = ? THEN amount * ? / 100
+                WHEN executor_ordem = ? THEN ?
                 WHEN executor_ordem = ? THEN ?
                 WHEN executor_ordem = ? THEN ?
                 ELSE ?
             END) as total',
-            ['treeal', $pctTreeal, 'fyhub', $custoFyhub, 'simpay', $custoSimpay, $custoSimpay]
+            ['treeal', $custoTreeal, 'fyhub', $custoFyhub, 'simpay', $custoSimpay, $custoSimpay]
         )->first();
 
         $custosSaidasRow = (clone $saques)->selectRaw(
             'SUM(CASE
-                WHEN executor_ordem = ? THEN amount * ? / 100
+                WHEN executor_ordem = ? THEN ?
                 WHEN executor_ordem = ? THEN ?
                 WHEN executor_ordem = ? THEN ?
                 ELSE ?
             END) as total',
-            ['treeal', $pctTreeal, 'fyhub', $custoFyhub, 'simpay', $custoSimpay, $custoSimpay]
+            ['treeal', $custoTreeal, 'fyhub', $custoFyhub, 'simpay', $custoSimpay, $custoSimpay]
         )->first();
 
         return [
