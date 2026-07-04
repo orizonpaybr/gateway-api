@@ -4,78 +4,193 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\RegisterUserRequest;
+use App\Http\Requests\Api\Auth\ApiLoginRequest;
+use App\Http\Requests\Api\Auth\Verify2FARequest;
 use App\Models\User;
 use App\Models\UsersKey;
 use App\Constants\UserStatus;
-use App\Helpers\{UserStatusHelper, AppSettingsHelper};
+use App\Constants\UserPermission;
+use App\Constants\AuthEventType;
+use App\Helpers\UserStatusHelper;
 use App\Services\JWTService;
+use App\Services\LoginLockoutService;
+use App\Services\AuthAuditService;
+use App\Services\TurnstileVerificationService;
+use App\Services\JwtBlacklistService;
+use App\Services\TwoFactorVerificationService;
+use App\Services\TotpMigrationService;
+use App\Services\AuthRegistrationService;
+use App\Support\AuthUserPresenter;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
-use PragmaRX\Google2FA\Google2FA;
 
 class AuthController extends Controller
 {
-    private JWTService $jwtService;
-    
-    public function __construct(JWTService $jwtService)
+    public function __construct(
+        private JWTService $jwtService,
+        private LoginLockoutService $lockout,
+        private AuthAuditService $audit,
+        private TurnstileVerificationService $turnstile,
+        private JwtBlacklistService $jwtBlacklist,
+        private TwoFactorVerificationService $twoFactorVerification,
+        private TotpMigrationService $totpMigration,
+        private AuthRegistrationService $registration,
+    ) {}
+
+    private function invalidCredentialsResponse(Request $request, ?User $user, string $username): \Illuminate\Http\JsonResponse
     {
-        $this->jwtService = $jwtService;
+        $failure = $this->lockout->recordFailedAttempt($request, $user, $username);
+
+        if ($failure['banned']) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Conta bloqueada permanentemente por excesso de tentativas. Entre em contato com o suporte.',
+                'account_banned' => true,
+            ], 403);
+        }
+
+        if ($failure['locked']) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Conta temporariamente bloqueada por excesso de tentativas. Tente novamente mais tarde.',
+                'retry_after' => $failure['retry_after'],
+            ], 429)->header('Retry-After', (string) $failure['retry_after']);
+        }
+
+        $payload = [
+            'success' => false,
+            'message' => 'Credenciais inválidas',
+        ];
+
+        if ($this->lockout->requiresCaptcha($request)) {
+            $payload['requires_captcha'] = true;
+        }
+
+        return response()->json($payload, 401);
+    }
+
+    private function validateTurnstileIfRequired(Request $request, bool $always = false): ?\Illuminate\Http\JsonResponse
+    {
+        if (! $this->turnstile->isConfigured()) {
+            return null;
+        }
+
+        $required = $always || $this->lockout->requiresCaptcha($request);
+
+        if ($required && empty($request->input('turnstile_token'))) {
+            $this->audit->log(AuthEventType::CAPTCHA_REQUIRED, $request, null, $request->input('username'));
+        }
+
+        if (! $required) {
+            return null;
+        }
+
+        if (! $this->turnstile->verify($request->input('turnstile_token'), $request->ip())) {
+            $this->audit->log(AuthEventType::CAPTCHA_FAILED, $request, null, $request->input('username'));
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Verificação de segurança inválida. Tente novamente.',
+                'requires_captcha' => true,
+            ], 422);
+        }
+
+        return null;
+    }
+
+    private function validateTurnstileForTwoFa(Request $request, User $user): ?\Illuminate\Http\JsonResponse
+    {
+        if (! $this->turnstile->isConfigured()) {
+            return null;
+        }
+
+        if (! $this->lockout->requiresTwoFaCaptcha($request)) {
+            return null;
+        }
+
+        if (empty($request->input('turnstile_token'))) {
+            $this->audit->log(AuthEventType::CAPTCHA_REQUIRED, $request, $user, $user->username, [
+                'context' => 'verify-2fa',
+            ]);
+        }
+
+        if (! $this->turnstile->verify($request->input('turnstile_token'), $request->ip())) {
+            $this->audit->log(AuthEventType::CAPTCHA_FAILED, $request, $user, $user->username, [
+                'context' => 'verify-2fa',
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Verificação de segurança inválida. Tente novamente.',
+                'requires_captcha' => true,
+            ], 422);
+        }
+
+        return null;
+    }
+
+    private function blockedTwoFaResponse(array $result): \Illuminate\Http\JsonResponse
+    {
+        $status = $result['status'];
+        $payload = $result['payload'];
+        $response = response()->json($payload, $status);
+
+        if (isset($payload['retry_after'])) {
+            $response->header('Retry-After', (string) $payload['retry_after']);
+        }
+
+        return $response;
     }
     
     /**
      * Login do usuário via API
      */
-    public function login(Request $request)
+    public function login(ApiLoginRequest $request)
     {
         try {
-            // Validar dados de entrada
-            $validator = Validator::make($request->all(), [
-                'username' => 'required|string',
-                'password' => 'required|string',
-            ]);
-
-            if ($validator->fails()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Dados inválidos',
-                    'errors' => $validator->errors()
-                ], 400);
-            }
-
             $username = $request->input('username');
             $password = $request->input('password');
+
+            if ($captchaError = $this->validateTurnstileIfRequired($request)) {
+                return $captchaError;
+            }
 
             // Buscar usuário pelo username ou email
             $user = User::where('username', $username)
                        ->orWhere('email', $username)
                        ->first();
 
-            if (!$user) {
-                Log::warning('Tentativa de login com usuário inexistente', [
-                    'username' => $username,
-                    'ip' => $request->ip()
-                ]);
-                
+            if ($user && $user->banido) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Usuário não encontrado'
-                ], 401);
+                    'message' => 'Conta bloqueada permanentemente por excesso de tentativas. Entre em contato com o suporte.',
+                    'account_banned' => true,
+                ], 403);
             }
 
-            // Verificar senha
-            if (!Hash::check($password, $user->password)) {
-                Log::warning('Tentativa de login com senha incorreta', [
-                    'username' => $username,
-                    'ip' => $request->ip()
-                ]);
-                
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Senha incorreta'
-                ], 401);
+            if ($user && $this->lockout->isLocked($user)) {
+                $this->audit->log(AuthEventType::LOCKOUT, $request, $user, $username);
+                $locked = $this->lockout->lockedJsonResponse(
+                    $user,
+                    'Conta temporariamente bloqueada por excesso de tentativas. Tente novamente mais tarde.',
+                );
+
+                return response()->json($locked['payload'], $locked['status'])
+                    ->header('Retry-After', (string) ($locked['payload']['retry_after'] ?? 0));
             }
+
+            if (! $user || ! Hash::check($password, $user->password)) {
+                Log::warning('Tentativa de login com credenciais inválidas', [
+                    'username' => $username,
+                    'ip' => $request->ip(),
+                ]);
+
+                return $this->invalidCredentialsResponse($request, $user, $username);
+            }
+
+            $this->lockout->clearFailedAttempts($user);
 
             // Verificar se usuário pode fazer login
             if (!UserStatusHelper::canLogin($user)) {
@@ -96,21 +211,39 @@ class AuthController extends Controller
                 ], 403);
             }
 
-            // Verificar se o usuário tem 2FA ativo (PIN-based)
-            if ($user->twofa_enabled && $user->twofa_pin) {
+            // Configurar 2FA (primeiro acesso / admin obrigatório) — QR Code
+            if ($this->mustSetupTwoFactor($user)) {
+                return $this->pendingTwoFactorSetupResponse($request, $user, $username);
+            }
+
+            // Verificar 2FA já configurado (TOTP ou PIN legado)
+            if ($user->twofa_enabled && $this->isTwoFactorConfigured($user)) {
                 // Gerar token temporário para verificação 2FA (usando JWT real)
                 $tempToken = $this->jwtService->generate2FAToken($user->username);
 
+                $this->audit->log(AuthEventType::TWO_FA_REQUIRED, $request, $user, $username);
+
                 Log::info('Login requer verificação 2FA', [
                     'username' => $username,
-                    'ip' => $request->ip()
+                    'ip' => $request->ip(),
+                    'twofa_method' => $user->twofa_method ?? 'pin',
                 ]);
+
+                $requiresTotpMigration = $this->totpMigration->requiresMigration($user);
 
                 return response()->json([
                     'success' => false,
                     'requires_2fa' => true,
-                    'message' => 'Digite o código de 6 dígitos do seu app autenticador',
-                    'temp_token' => $tempToken
+                    'twofa_method' => $user->twofa_method ?? ($user->twofa_secret ? 'totp' : 'pin'),
+                    'requires_totp_migration' => $requiresTotpMigration,
+                    'migration_deadline_passed' => $this->totpMigration->migrationDeadlinePassed(),
+                    'message' => $requiresTotpMigration && $this->totpMigration->migrationDeadlinePassed()
+                        ? $this->twoFactorVerification->migrationRequiredMessage()
+                        : 'Digite o código de 6 dígitos do seu app autenticador',
+                    'temp_token' => $tempToken,
+                    'data' => [
+                        'user' => AuthUserPresenter::loginProfile($user),
+                    ],
                 ], 200);
             }
 
@@ -144,19 +277,14 @@ class AuthController extends Controller
                 'ip' => $request->ip()
             ]);
 
+            $this->audit->log(AuthEventType::LOGIN_SUCCESS, $request, $user, $username);
+            $this->lockout->clearIpLimiter($request);
+
             return response()->json([
                 'success' => true,
                 'message' => 'Login realizado com sucesso',
                 'data' => [
-                    'user' => [
-                        'id' => $user->username,
-                        'username' => $user->username,
-                        'email' => $user->email ?? '',
-                        'name' => $user->name ?? $user->username,
-                        'gender' => $user->gender ?? null,
-                        'permission' => $user->permission ?? null,
-                        'status' => $user->status ?? null,
-                    ],
+                    'user' => AuthUserPresenter::loginProfile($user),
                     'token' => $token,
                     'api_token' => $apiToken,
                     'api_secret' => $apiSecret,
@@ -179,86 +307,142 @@ class AuthController extends Controller
     /**
      * Verificar código 2FA
      */
-    public function verify2FA(Request $request)
+    public function verify2FA(Verify2FARequest $request)
     {
         try {
-            // Validar dados de entrada
-            $validator = Validator::make($request->all(), [
-                'temp_token' => 'required|string',
-                'code' => 'required|string|size:6'
-            ]);
-
-            if ($validator->fails()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Dados inválidos',
-                    'errors' => $validator->errors()
-                ], 400);
-            }
-
             $tempToken = $request->input('temp_token');
             $code = $request->input('code');
 
-            // Validar token temporário usando JWT real
             $decoded = $this->jwtService->validateToken($tempToken);
-            
-            if (!$decoded) {
+
+            if (! $decoded) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Token temporário expirado ou inválido'
-                ], 401);
-            }
-            
-            // Verificar se é realmente um token temporário para 2FA
-            if (!isset($decoded->temp) || $decoded->temp !== true || 
-                !isset($decoded->purpose) || $decoded->purpose !== '2fa_verification') {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Token temporário inválido'
+                    'message' => 'Sessão de verificação expirada ou inválida. Faça login novamente.',
+                    'session_terminated' => true,
                 ], 401);
             }
 
-            // Buscar usuário
+            if (! isset($decoded->temp) || $decoded->temp !== true
+                || ! in_array($decoded->purpose ?? '', ['2fa_verification', '2fa_setup'], true)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Token temporário inválido',
+                    'session_terminated' => true,
+                ], 401);
+            }
+
             $user = User::where('username', $decoded->sub)->first();
-            
-            if (!$user || !$user->twofa_enabled || !$user->twofa_pin) {
+
+            if (! $user || ! $user->twofa_enabled || (! $user->twofa_pin && ! $user->twofa_secret)) {
+                $this->jwtBlacklist->blacklistFromToken($decoded);
+
                 return response()->json([
                     'success' => false,
-                    'message' => 'Usuário não encontrado ou 2FA não configurado'
+                    'message' => 'Sessão de verificação inválida. Faça login novamente.',
+                    'session_terminated' => true,
                 ], 401);
             }
 
-            // Verificar se usuário pode fazer login
-            if (!UserStatusHelper::canLogin($user)) {
+            if ($blocked = $this->lockout->checkTwoFaAllowed($request, $user)) {
+                $this->jwtBlacklist->blacklistFromToken($decoded);
+
+                return $this->blockedTwoFaResponse($blocked);
+            }
+
+            if (! UserStatusHelper::canLogin($user)) {
                 $message = $user->status == UserStatus::PENDING
                     ? 'Sua conta está aguardando aprovação. Você poderá acessar o dashboard após aprovação pelo administrador.'
                     : 'Sua conta foi desativada ou bloqueada. Entre em contato com o suporte.';
+                $this->jwtBlacklist->blacklistFromToken($decoded);
                 Log::warning('Tentativa de login 2FA com conta não permitida', [
                     'username' => $user->username,
                     'status' => $user->status,
                     'banido' => $user->banido,
-                    'ip' => $request->ip()
+                    'ip' => $request->ip(),
                 ]);
+
                 return response()->json([
                     'success' => false,
-                    'message' => $message
+                    'message' => $message,
+                    'session_terminated' => true,
                 ], 403);
             }
 
-            // Verificar PIN 2FA
-            $valid = Hash::check($code, $user->twofa_pin);
+            if ($captchaError = $this->validateTurnstileForTwoFa($request, $user)) {
+                return $captchaError;
+            }
 
-            if (!$valid) {
-                Log::warning('Código 2FA inválido', [
-                    'username' => $user->username,
-                    'ip' => $request->ip()
-                ]);
+            if ($this->totpMigration->mustMigrateBeforeVerify($user)) {
+                $this->jwtBlacklist->blacklistFromToken($decoded);
 
                 return response()->json([
                     'success' => false,
-                    'message' => 'Código inválido'
-                ], 400);
+                    'message' => $this->twoFactorVerification->migrationRequiredMessage(),
+                    'requires_totp_migration' => true,
+                    'session_terminated' => true,
+                ], 403);
             }
+
+            $valid = $this->twoFactorVerification->verify($user, $code);
+
+            if (! $valid) {
+                $failure = $this->lockout->recordTwoFaFailedAttempt(
+                    $request,
+                    $user,
+                    $decoded,
+                    $this->jwtBlacklist,
+                );
+
+                Log::warning('Código 2FA inválido', [
+                    'username' => $user->username,
+                    'ip' => $request->ip(),
+                    'temp_failures' => $failure['temp_failures'],
+                ]);
+
+                if ($failure['banned']) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Conta bloqueada permanentemente por excesso de tentativas. Entre em contato com o suporte.',
+                        'session_terminated' => true,
+                        'account_banned' => true,
+                    ], 403);
+                }
+
+                if ($failure['session_terminated'] || $failure['account_locked']) {
+                    $retryAfter = $failure['retry_after'] > 0
+                        ? $failure['retry_after']
+                        : max(60, $this->lockout->retryAfterSeconds($user->fresh()));
+
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Muitas tentativas inválidas. Sessão encerrada — faça login novamente.',
+                        'session_terminated' => true,
+                        'requires_login' => true,
+                        'retry_after' => $retryAfter,
+                    ], 429)->header('Retry-After', (string) $retryAfter);
+                }
+
+                if ($blocked = $this->lockout->checkTwoFaAllowed($request, $user->fresh())) {
+                    $this->jwtBlacklist->blacklistFromToken($decoded);
+
+                    return $this->blockedTwoFaResponse($blocked);
+                }
+
+                $payload = [
+                    'success' => false,
+                    'message' => 'Código inválido',
+                ];
+
+                if ($this->lockout->requiresTwoFaCaptcha($request)) {
+                    $payload['requires_captcha'] = true;
+                }
+
+                return response()->json($payload, 400);
+            }
+
+            $this->lockout->clearFailedAttempts($user);
+            $this->lockout->clearIpLimiter($request);
 
             // Buscar as chaves do usuário
             $userKeys = UsersKey::where('user_id', $user->username)->first();
@@ -280,19 +464,14 @@ class AuthController extends Controller
                 'ip' => $request->ip()
             ]);
 
+            $this->audit->log(AuthEventType::TWO_FA_SUCCESS, $request, $user, $user->username);
+            $this->audit->log(AuthEventType::LOGIN_SUCCESS, $request, $user, $user->username);
+
             return response()->json([
                 'success' => true,
                 'message' => 'Login realizado com sucesso',
                 'data' => [
-                    'user' => [
-                        'id' => $user->username,
-                        'username' => $user->username,
-                        'email' => $user->email ?? '',
-                        'name' => $user->name ?? $user->username,
-                        'gender' => $user->gender ?? null,
-                        'permission' => $user->permission ?? null,
-                        'status' => $user->status ?? null,
-                    ],
+                    'user' => AuthUserPresenter::loginProfile($user),
                     'token' => $token,
                     'api_token' => $userKeys->token,
                     'api_secret' => $userKeys->secret,
@@ -382,14 +561,22 @@ class AuthController extends Controller
      */
     public function logout(Request $request)
     {
-        // Com JWT stateless, não há como invalidar o token no servidor
-        // Para uma implementação completa, seria necessário uma blacklist em cache/banco
-        // Por enquanto, o frontend deve remover o token localmente
-        
+        $token = $request->bearerToken();
+
+        if ($token) {
+            $decoded = $this->jwtService->validateToken($token);
+            if ($decoded) {
+                $this->jwtBlacklist->blacklistFromToken($decoded);
+            }
+        }
+
+        $user = $request->user() ?? $request->user_auth;
+        $this->audit->log(AuthEventType::LOGOUT, $request, $user);
+
         Log::info('Logout realizado', [
             'ip' => $request->ip(),
         ]);
-        
+
         return response()->json([
             'success' => true,
             'message' => 'Logout realizado com sucesso'
@@ -402,224 +589,28 @@ class AuthController extends Controller
     public function register(RegisterUserRequest $request)
     {
         try {
-
-            $senhaHash = Hash::make($request->password);
-
-            // Gerando IDs e valores adicionais
-            $clienteId = \Illuminate\Support\Str::uuid()->toString();
-            $saldo = 0;
-            $status = UserStatus::PENDING; // Status pendente - aguardando aprovação do admin
-            $dataCadastroFormatada = \Carbon\Carbon::now('America/Sao_Paulo')->format('Y-m-d H:i:s');
-            
-            // Processar upload de documentos
-            $fotoRgFrente = null;
-            $fotoRgVerso = null;
-            $selfieRg = null;
-            
-            if ($request->hasFile('documentoFrente')) {
-                $file = $request->file('documentoFrente');
-                $filename = 'doc_frente_' . time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-                $saved = $file->storeAs('uploads/documentos', $filename, 'public');
-                if ($saved) {
-                    $fotoRgFrente = '/storage/uploads/documentos/' . $filename;
-                    Log::info('[REGISTRO] Documento frente salvo', ['path' => $fotoRgFrente]);
-                } else {
-                    Log::error('[REGISTRO] Falha ao salvar documento frente');
-                }
-            }
-            
-            if ($request->hasFile('documentoVerso')) {
-                $file = $request->file('documentoVerso');
-                $filename = 'doc_verso_' . time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-                $saved = $file->storeAs('uploads/documentos', $filename, 'public');
-                if ($saved) {
-                    $fotoRgVerso = '/storage/uploads/documentos/' . $filename;
-                    Log::info('[REGISTRO] Documento verso salvo', ['path' => $fotoRgVerso]);
-                } else {
-                    Log::error('[REGISTRO] Falha ao salvar documento verso');
-                }
-            }
-            
-            if ($request->hasFile('selfieDocumento')) {
-                $file = $request->file('selfieDocumento');
-                $filename = 'selfie_' . time() . '_' . uniqid() . '.' . $file->getClientOriginalExtension();
-                $saved = $file->storeAs('uploads/documentos', $filename, 'public');
-                if ($saved) {
-                    $selfieRg = '/storage/uploads/documentos/' . $filename;
-                    Log::info('[REGISTRO] Selfie salvo', ['path' => $selfieRg]);
-                } else {
-                    Log::error('[REGISTRO] Falha ao salvar selfie');
-                }
+            if ($captchaError = $this->validateTurnstileIfRequired($request, always: true)) {
+                return $captchaError;
             }
 
-            $indicador_ref = $request->input('ref') ?? NULL;
-
-            // Não é necessário buscar App aqui, apenas gerar code_ref
-            $code_ref = uniqid();
-
-            $gerenteComMenosClientes = null;
-            try {
-                $gerenteComMenosClientes = User::where('permission', \App\Constants\UserPermission::MANAGER)
-                    ->withCount('clientes')
-                    ->orderBy('clientes_count', 'asc')
-                    ->first();
-            } catch (\Exception $e) {
-                Log::warning('Erro ao buscar gerente com withCount, tentando sem', [
-                    'error' => $e->getMessage()
-                ]);
-                $gerenteComMenosClientes = User::where('permission', \App\Constants\UserPermission::MANAGER)
-                    ->first();
-            }
-
-            if (isset($indicador_ref) && !is_null($indicador_ref)) {
-                $indicador = User::where('code_ref', $indicador_ref)->first();
-                // Se o indicador for gerente (permission = 2), usar ele como gerente
-                if ($indicador && $indicador->permission == \App\Constants\UserPermission::MANAGER) {
-                    $gerenteComMenosClientes = $indicador;
-                }
-            }
-
-            // Gerar código e link de afiliado único (automaticamente para todos os usuários)
-            // Remover espaços e caracteres especiais do user_id para gerar código limpo
-            $userIdClean = preg_replace('/[^a-zA-Z0-9]/', '', $request->username);
-            $codigoBase = strtoupper(substr($userIdClean, 0, 4));
-            $numeroAleatorio = rand(1000, 9999);
-            $affiliateCode = $codigoBase . $numeroAleatorio;
-            
-            // Verificar unicidade do código de afiliado
-            while (User::where('affiliate_code', $affiliateCode)->exists()) {
-                $numeroAleatorio = rand(1000, 9999);
-                $affiliateCode = $codigoBase . $numeroAleatorio;
-            }
-            
-            $affiliateLink = config('app.affiliado_url') . '/cadastro?ref=' . $affiliateCode;
-
-            $setting = AppSettingsHelper::getSettings();
-            $taxaFixaDeposito = $setting ? (float) ($setting->taxa_fixa_padrao ?? 1.00) : 1.00;
-            $taxaFixaPix = $setting ? (float) ($setting->taxa_fixa_pix ?? 1.00) : 1.00;
-
-            // Criando usuário
-            $user = User::create([
-                'username' => $request->username,
-                'user_id' => $request->username,
-                'name' => $request->name,
-                'gender' => $request->gender,
-                'email' => $request->email,
-                'password' => $senhaHash,
-                'telefone' => $request->telefone,
-                'cpf_cnpj' => $request->cpf_cnpj,
-                'saldo' => $saldo,
-                'data_cadastro' => $dataCadastroFormatada,
-                'status' => $status,
-                'permission' => \App\Constants\UserPermission::CLIENT, // Sempre CLIENT (1) no cadastro
-                'cliente_id' => $clienteId,
-                'code_ref' => $code_ref,
-                'indicador_ref' => $indicador_ref,
-                'gerente_id' => $gerenteComMenosClientes->id ?? NULL,
-                'gerente_percentage' => $gerenteComMenosClientes->gerente_percentage ?? 0.00,
-                'avatar' => "/uploads/avatars/avatar_default.jpg",
-                'foto_rg_frente' => $fotoRgFrente,
-                'foto_rg_verso' => $fotoRgVerso,
-                'selfie_rg' => $selfieRg,
-                'affiliate_code' => $affiliateCode,
-                'affiliate_link' => $affiliateLink,
-                'is_affiliate' => true,
-                'taxa_fixa_deposito' => $taxaFixaDeposito,
-                'taxa_fixa_pix' => $taxaFixaPix,
-            ]);
-            
-            Log::info('[REGISTRO] Código de afiliado gerado automaticamente', [
-                'user_id' => $request->username,
-                'affiliate_code' => $affiliateCode,
-                'affiliate_link' => $affiliateLink,
-            ]);
-
-            // Criar chaves de API para o usuário
-            $apiToken = \Illuminate\Support\Str::uuid()->toString();
-            $apiSecret = \Illuminate\Support\Str::uuid()->toString();
-            $user_id = $user->user_id;
-
-            UsersKey::create([
-                'user_id' => $user_id,
-                'token' => $apiToken,
-                'secret' => $apiSecret,
-                'status' => 'active' // Campo obrigatório na tabela users_key
-            ]);
-
-            // PROCESSAR AFILIADO SE houver parâmetro 'ref' na URL
-            // Qualquer usuário com affiliate_code pode ser pai afiliado (sistema 1 para 1)
-            $affiliateCode = $request->get('ref'); 
-            $affiliateUser = null;
-            if ($affiliateCode) {
-                // Buscar usuário pelo affiliate_code (qualquer usuário pode ter código)
-                $affiliateUser = User::where('affiliate_code', $affiliateCode)
-                    ->where('id', '!=', $user->id) // Não pode ser o próprio usuário
-                    ->first();
-                    
-                if ($affiliateUser) {
-                    // Vincular filho ao pai afiliado (relação 1 para 1)
-                    $user->update([
-                        'affiliate_id' => $affiliateUser->id,
-                    ]);
-                    
-                    Log::info('[REGISTRO AFFILIATE API] Usuário registrado via affiliate', [
-                        'novo_usuario_id' => $user->id,
-                        'affiliate_id' => $affiliateUser->id,
-                        'affiliate_code' => $affiliateCode,
-                    ]);
-                }
-            }
-
-            // Criar split interno automático se usuário tem gerente configurado
-            if ($gerenteComMenosClientes && $gerenteComMenosClientes->gerente_percentage > 0) {
-                try {
-                    \App\Models\SplitInterno::create([
-                        'usuario_pagador_id' => $user->id,
-                        'usuario_beneficiario_id' => $gerenteComMenosClientes->id,
-                        'porcentagem_split' => $gerenteComMenosClientes->gerente_percentage,
-                        'tipo_taxa' => \App\Models\SplitInterno::TAXA_DEPOSITO,
-                        'ativo' => true,
-                        'criado_por_admin_id' => 1,
-                        'data_inicio' => now(),
-                        'data_fim' => null,
-                    ]);
-                } catch (\Exception $e) {
-                    Log::error('[REGISTRO AUTOMATICO API] Erro ao criar split interno', [
-                        'erro' => $e->getMessage(),
-                        'novo_usuario_id' => $user->id,
-                        'gerente_id' => $gerenteComMenosClientes->id ?? null
-                    ]);
-                }
-            }
-
-            // NOTA: Não criar split interno para afiliados
-            // O sistema de afiliados agora funciona com comissão fixa de R$0,50
-            // processada automaticamente pelo AffiliateCommissionService nas transações
+            $user = $this->registration->register($request);
 
             Log::info('Usuário registrado com sucesso via API', [
                 'username' => $request->username,
                 'ip' => $request->ip(),
-                'status' => 'pendente_aprovacao'
+                'status' => 'pendente_aprovacao',
             ]);
 
-            // Não devolver token/credenciais: usuário só poderá logar após aprovação
+            $this->audit->log(AuthEventType::REGISTER, $request, $user, $request->username);
+
             return response()->json([
                 'success' => true,
                 'message' => 'Cadastro realizado. Sua conta está aguardando aprovação. Você poderá fazer login após a aprovação pelo administrador.',
                 'data' => [
-                    'user' => [
-                        'id' => $user->username,
-                        'username' => $user->username,
-                        'email' => $user->email,
-                        'name' => $user->name,
-                        'gender' => $user->gender,
-                        'status' => $user->status,
-                        'status_text' => 'Pendente de Aprovação'
-                    ],
-                    'pending_approval' => true
-                ]
+                    'user' => AuthUserPresenter::registrationProfile($user),
+                    'pending_approval' => true,
+                ],
             ], 201);
-
         } catch (\Exception $e) {
             Log::error('Erro no registro via API', [
                 'error' => $e->getMessage(),
@@ -630,13 +621,13 @@ class AuthController extends Controller
                     'username' => $request->input('username'),
                     'email' => $request->input('email'),
                     'has_files' => $request->hasFile('documentoFrente') || $request->hasFile('documentoVerso') || $request->hasFile('selfieDocumento'),
-                ]
+                ],
             ]);
 
             return response()->json([
                 'success' => false,
                 'message' => 'Erro interno do servidor',
-                'error' => app()->environment('local') ? $e->getMessage() : null
+                'error' => app()->environment('local') ? $e->getMessage() : null,
             ], 500);
         }
     }
@@ -707,5 +698,59 @@ class AuthController extends Controller
                 'message' => 'Erro interno do servidor'
             ], 500);
         }
+    }
+
+    private function isTwoFactorConfigured(User $user): bool
+    {
+        if (! $user->twofa_secret) {
+            return false;
+        }
+
+        return $user->twofa_method === 'totp' || ! $user->twofa_method;
+    }
+
+    private function mustSetupTwoFactor(User $user): bool
+    {
+        if ($this->isTwoFactorConfigured($user)) {
+            return false;
+        }
+
+        if ($this->totpMigration->requiresMigration($user)) {
+            return true;
+        }
+
+        if (config('auth_security.require_2fa_for_admins', true)
+            && $user->permission === UserPermission::ADMIN) {
+            return true;
+        }
+
+        return (bool) $user->twofa_enabled;
+    }
+
+    private function pendingTwoFactorSetupResponse(
+        Request $request,
+        User $user,
+        string $username,
+    ): \Illuminate\Http\JsonResponse {
+        $tempToken = $this->jwtService->generate2FASetupToken($user->username);
+
+        $this->audit->log(AuthEventType::TWO_FA_REQUIRED, $request, $user, $username, [
+            'context' => 'setup',
+        ]);
+
+        Log::info('Login requer configuração 2FA', [
+            'username' => $username,
+            'ip' => $request->ip(),
+        ]);
+
+        return response()->json([
+            'success' => false,
+            'requires_2fa_setup' => true,
+            'message' => 'Configure o Google Authenticator para continuar.',
+            'temp_token' => $tempToken,
+            'data' => [
+                'user' => AuthUserPresenter::loginProfile($user),
+            ],
+        ], 200);
     }
 }

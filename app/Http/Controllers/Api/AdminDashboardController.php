@@ -4,7 +4,8 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\{User, Solicitacoes, SolicitacoesCashOut, AffiliateCommission};
-use App\Services\{AdminUserService, CacheKeyService};
+use App\Services\{AdminUserService, CacheKeyService, LoginLockoutService, AuthAuditService};
+use App\Constants\AuthEventType;
 use App\Models\UsersKey;
 use App\Models\Adquirente;
 use App\Http\Requests\Admin\{StoreUserRequest, UpdateUserRequest};
@@ -1462,6 +1463,34 @@ class AdminDashboardController extends Controller
         }
     }
     
+    /**
+     * Desbloquear conta após lockout por tentativas de login
+     */
+    public function unlockLogin(int $id, LoginLockoutService $lockout, AuthAuditService $audit)
+    {
+        try {
+            $user = User::findOrFail($id);
+            $lockout->unlockByAdmin($user, request());
+
+            $admin = request()->user() ?? request()->user_auth;
+            $audit->log(AuthEventType::LOGIN_UNLOCKED, request(), $user, $user->username, [
+                'admin_id' => $admin?->id,
+            ]);
+
+            Log::channel('security')->info('Login unlock manual', [
+                'user_id' => $id,
+                'admin' => $admin?->id,
+            ]);
+
+            return $this->successResponse([
+                'message' => 'Bloqueio de login removido com sucesso',
+                'user' => ['id' => $user->id, 'username' => $user->username],
+            ]);
+        } catch (\Exception $e) {
+            return $this->errorResponse($e->getMessage(), 500);
+        }
+    }
+
     /**
      * Bloquear/desbloquear saque do usuário
      * 

@@ -4,214 +4,220 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use PragmaRX\Google2FA\Google2FA;
-use PragmaRX\Google2FAQRCode\Google2FA as Google2FAQRCode;
-use SimpleSoftwareIO\QrCode\Facades\QrCode;
+use BaconQrCode\Renderer\ImageRenderer;
+use BaconQrCode\Renderer\Image\SvgImageBackEnd;
+use BaconQrCode\Renderer\RendererStyle\RendererStyle;
+use BaconQrCode\Writer;
 use App\Models\User;
+use App\Services\TwoFactorVerificationService;
+use App\Services\TotpMigrationService;
 
 class TwoFactorAuthController extends Controller
 {
-    protected $google2fa;
+    public function __construct(
+        private Google2FA $google2fa,
+        private TwoFactorVerificationService $twoFactorVerification,
+        private TotpMigrationService $totpMigration,
+    ) {}
 
-    public function __construct()
-    {
-        $this->google2fa = new Google2FA();
-    }
-
-    /**
-     * Gerar QR Code para configuração do 2FA
-     */
     public function generateQrCode(Request $request)
     {
+        /** @var User|null $user */
+        $user = $request->user() ?? $request->user_auth ?? Auth::user();
+
+        if (! $user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Usuário não autenticado',
+            ], 401);
+        }
+
+        $secret = $this->google2fa->generateSecretKey();
+        $issuer = config('auth_security.totp_issuer', 'Coratri Finance');
+        $otpUrl = $this->google2fa->getQRCodeUrl($issuer, $user->email ?? $user->username, $secret);
+
+        $renderer = new ImageRenderer(
+            new RendererStyle(200),
+            new SvgImageBackEnd(),
+        );
+        $writer = new Writer($renderer);
+        $qrSvg = $writer->writeString($otpUrl);
+
+        cache()->put('twofa_setup:'.$user->id, $secret, 600);
+
         return response()->json([
-            'success' => false,
-            'message' => 'Fluxo de QR Code desativado. O sistema usa apenas PIN.',
-        ], 410);
+            'success' => true,
+            'data' => [
+                'qr_svg' => 'data:image/svg+xml;base64,'.base64_encode($qrSvg),
+            ],
+        ]);
     }
 
-    /**
-     * Verificar código 2FA (PIN)
-     */
     public function verifyCode(Request $request)
     {
         $request->validate([
-            'code' => 'required|string|size:6'
+            'code' => 'required|string|size:6',
         ]);
 
-        // Usar usuário autenticado via JWT
-        /** @var \App\Models\User|null $user */
+        /** @var User|null $user */
         $user = $request->user() ?? $request->user_auth ?? Auth::user();
-        
-        if (!$user) {
+
+        if (! $user) {
             return response()->json([
                 'success' => false,
-                'message' => 'Usuário não autenticado'
-            ], 401)->header('Access-Control-Allow-Origin', '*');
-        }
-        
-        if (!$user->twofa_pin) {
-            return response()->json([
-                'success' => false,
-                'message' => '2FA não configurado'
-            ], 400)->header('Access-Control-Allow-Origin', '*');
+                'message' => 'Usuário não autenticado',
+            ], 401);
         }
 
-        // Verificar se o PIN está correto
-        if (Hash::check($request->code, $user->twofa_pin)) {
+        if ($this->twoFactorVerification->verify($user, $request->code)) {
             return response()->json([
                 'success' => true,
-                'message' => 'PIN válido'
-            ])->header('Access-Control-Allow-Origin', '*');
+                'message' => 'Código válido',
+            ]);
         }
+
+        $message = $this->totpMigration->mustMigrateBeforeVerify($user)
+            ? $this->twoFactorVerification->migrationRequiredMessage()
+            : 'Código inválido';
 
         return response()->json([
             'success' => false,
-            'message' => 'PIN inválido'
-        ], 400)->header('Access-Control-Allow-Origin', '*');
+            'message' => $message,
+            'requires_totp_migration' => $this->totpMigration->mustMigrateBeforeVerify($user),
+        ], 400);
     }
 
-    /**
-     * Ativar 2FA
-     */
     public function enable(Request $request)
     {
         try {
-            Log::info('Tentativa de ativar 2FA', [
-                'request_data' => $request->all(),
-                'user_agent' => $request->userAgent(),
-                'ip' => $request->ip()
-            ]);
-            
             $request->validate([
-                'code' => 'required|string|size:6'
+                'code' => 'required|string|size:6',
             ]);
 
-            // Usar usuário autenticado via JWT
-            /** @var \App\Models\User|null $user */
+            /** @var User|null $user */
             $user = $request->user() ?? $request->user_auth ?? Auth::user();
-            
-            if (!$user) {
-                Log::error('Usuário não autenticado via JWT');
+
+            if (! $user) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Usuário não autenticado'
-                ], 401)->header('Access-Control-Allow-Origin', '*');
+                    'message' => 'Usuário não autenticado',
+                ], 401);
             }
-            
-            Log::info('Usuário encontrado', [
-                'user_id' => $user->id,
-                'username' => $user->username,
-                'status' => $user->status
-            ]);
-            
-            // Para PIN-based 2FA, não precisamos verificar twofa_secret
-            // O PIN será salvo diretamente
 
-            Log::info('Salvando PIN e ativando 2FA para usuário: ' . $user->id);
-            
-            // Salvar o PIN criptografado
-            $user->twofa_pin = bcrypt($request->code);
+            $pendingSecret = cache()->get('twofa_setup:'.$user->id);
+
+            if (! $pendingSecret) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Sessão de configuração expirada. Gere um novo QR Code.',
+                ], 400);
+            }
+
+            if (! $this->google2fa->verifyKey($pendingSecret, $request->code)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Código inválido. Verifique o app autenticador.',
+                ], 400);
+            }
+
+            $user->twofa_secret = encrypt($pendingSecret);
+            $user->twofa_method = 'totp';
+            $user->twofa_pin = null;
             $user->twofa_enabled = true;
             $user->twofa_enabled_at = now();
             $user->save();
 
-            Log::info('2FA ativado com sucesso para usuário: ' . $user->id);
+            cache()->forget('twofa_setup:'.$user->id);
+
+            Log::info('2FA TOTP ativado', ['user_id' => $user->id]);
+
             return response()->json([
                 'success' => true,
-                'message' => '2FA ativado com sucesso'
-            ])->header('Access-Control-Allow-Origin', '*');
+                'message' => '2FA ativado com sucesso',
+            ]);
         } catch (\Exception $e) {
-            Log::error('Erro ao ativar 2FA: ' . $e->getMessage());
-            Log::error('Stack trace: ' . $e->getTraceAsString());
+            Log::error('Erro ao ativar 2FA: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
-                'message' => 'Erro interno: ' . $e->getMessage()
-            ], 500)->header('Access-Control-Allow-Origin', '*');
+                'message' => 'Erro interno ao ativar 2FA',
+            ], 500);
         }
     }
 
-    /**
-     * Desativar 2FA
-     */
     public function disable(Request $request)
     {
         $request->validate([
-            'code' => 'required|string|size:6'
+            'code' => 'required|string|size:6',
         ]);
 
-        // Usar usuário autenticado via JWT
-        /** @var \App\Models\User|null $user */
+        /** @var User|null $user */
         $user = $request->user() ?? $request->user_auth ?? Auth::user();
-        
-        if (!$user) {
+
+        if (! $user) {
             return response()->json([
                 'success' => false,
-                'message' => 'Usuário não autenticado'
-            ], 401)->header('Access-Control-Allow-Origin', '*');
+                'message' => 'Usuário não autenticado',
+            ], 401);
         }
-        
-        if (!$user->twofa_enabled) {
+
+        if (! $user->twofa_enabled) {
             return response()->json([
                 'success' => false,
-                'message' => '2FA não está ativado'
-            ], 400)->header('Access-Control-Allow-Origin', '*');
+                'message' => '2FA não está ativado',
+            ], 400);
         }
 
-        // Para PIN-based 2FA, verificar o PIN diretamente
-        $valid = Hash::check($request->code, $user->twofa_pin);
-
-        if ($valid) {
+        if ($this->twoFactorVerification->verify($user, $request->code)) {
             $user->twofa_enabled = false;
-            // ❌ NÃO apagar twofa_enabled_at - mantém histórico de que já foi configurado
-            // $user->twofa_enabled_at = null;
-            $user->twofa_pin = null; // Limpar o PIN quando desativar
+            $user->twofa_pin = null;
+            $user->twofa_secret = null;
+            $user->twofa_method = null;
             $user->save();
 
             return response()->json([
                 'success' => true,
-                'message' => '2FA desativado com sucesso'
-            ])->header('Access-Control-Allow-Origin', '*');
+                'message' => '2FA desativado com sucesso',
+            ]);
         }
 
         return response()->json([
             'success' => false,
-            'message' => 'Código inválido'
-        ], 400)->header('Access-Control-Allow-Origin', '*');
+            'message' => 'Código inválido',
+        ], 400);
     }
 
-    /**
-     * Verificar status do 2FA
-     */
     public function status(Request $request)
     {
         try {
-            // Usar usuário autenticado via JWT
-            /** @var \App\Models\User|null $user */
+            /** @var User|null $user */
             $user = $request->user() ?? $request->user_auth ?? Auth::user();
-            
-            if (!$user) {
+
+            if (! $user) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Usuário não autenticado'
-                ], 401)->header('Access-Control-Allow-Origin', '*');
+                    'message' => 'Usuário não autenticado',
+                ], 401);
             }
-            
+
             return response()->json([
                 'success' => true,
                 'enabled' => $user->twofa_enabled ?? false,
-                // 'configured' = true se foi configurado ALGUMA VEZ (tem enabled_at)
-                // Não pode usar twofa_pin porque é deletado quando desativa
-                'configured' => !is_null($user->twofa_enabled_at),
-                'enabled_at' => $user->twofa_enabled_at
-            ])->header('Access-Control-Allow-Origin', '*');
+                'configured' => ! is_null($user->twofa_enabled_at),
+                'method' => $user->twofa_method,
+                'requires_totp_migration' => $this->totpMigration->requiresMigration($user),
+                'migration_deadline_passed' => $this->totpMigration->migrationDeadlinePassed(),
+                'enabled_at' => $user->twofa_enabled_at,
+            ]);
         } catch (\Exception $e) {
-            Log::error('Erro ao verificar status 2FA: ' . $e->getMessage());
+            Log::error('Erro ao verificar status 2FA: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
-                'message' => 'Erro interno: ' . $e->getMessage()
-            ], 500)->header('Access-Control-Allow-Origin', '*');
+                'message' => 'Erro interno',
+            ], 500);
         }
     }
 }

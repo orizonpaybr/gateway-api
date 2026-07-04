@@ -51,3 +51,13 @@ action   = ufw
 maxretry = 2
 bantime  = 604800
 findtime = 86400
+
+# Brute force em login — 401/429 repetidos em /api/auth/*
+[nginx-auth-bruteforce]
+enabled  = true
+port     = http,https
+filter   = nginx-auth-bruteforce
+logpath  = /var/log/nginx/access.log
+maxretry = 10
+bantime  = 3600
+findtime = 300

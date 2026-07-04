@@ -42,6 +42,11 @@ class AdminUserSeeder extends Seeder
                 'telefone' => '(00) 0000-0000',
                 'cliente_id' => 'cliente_admin',
                 'user_id' => $adminUsername, // Necessário para users_key
+                'twofa_enabled' => false,
+                'twofa_enabled_at' => null,
+                'twofa_pin' => null,
+                'twofa_secret' => null,
+                'twofa_method' => null,
             ]
         );
 

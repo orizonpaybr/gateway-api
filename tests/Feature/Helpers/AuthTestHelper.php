@@ -8,6 +8,7 @@ use App\Services\JWTService;
 use App\Constants\UserPermission;
 use App\Constants\UserStatus;
 use Illuminate\Support\Facades\Hash;
+use PragmaRX\Google2FA\Google2FA;
 
 /**
  * Helper para criar dados de teste de autenticação
@@ -98,6 +99,38 @@ class AuthTestHelper
     public static function getAuthToken(User $user): string
     {
         return self::generateTestToken($user);
+    }
+
+    public static function generate2FATempToken(User $user): string
+    {
+        return app(JWTService::class)->generate2FAToken($user->username ?? $user->user_id);
+    }
+
+    public static function generate2FASetupTempToken(User $user): string
+    {
+        return app(JWTService::class)->generate2FASetupToken($user->username ?? $user->user_id);
+    }
+
+    /**
+     * @return array{user: User, secret: string, code: string}
+     */
+    public static function createTotpTestUser(array $attributes = []): array
+    {
+        $google2fa = app(Google2FA::class);
+        $secret = $google2fa->generateSecretKey();
+
+        $user = self::createTestUser(array_merge([
+            'twofa_enabled' => true,
+            'twofa_method' => 'totp',
+            'twofa_secret' => encrypt($secret),
+            'twofa_pin' => null,
+        ], $attributes));
+
+        return [
+            'user' => $user,
+            'secret' => $secret,
+            'code' => $google2fa->getCurrentOtp($secret),
+        ];
     }
 }
 

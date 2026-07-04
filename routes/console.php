@@ -28,3 +28,13 @@ Schedule::command('treeal:reconcile-deposits')
     ->everyMinute()
     ->withoutOverlapping()
     ->onOneServer();
+
+Schedule::job(new \App\Jobs\MonitorLoginFailuresJob)
+    ->everyFiveMinutes()
+    ->withoutOverlapping()
+    ->onOneServer();
+
+Schedule::command('auth:prune-events')
+    ->daily()
+    ->withoutOverlapping()
+    ->onOneServer();

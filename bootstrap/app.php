@@ -117,6 +117,10 @@ return Application::configure(basePath: dirname(__DIR__))
             'throttle.fyhub.pix' => \App\Http\Middleware\ThrottleFyhubPixThroughput::class,
             'throttle.treeal.pix' => \App\Http\Middleware\ThrottleTreealPixThroughput::class,
             'throttle.balance.failures' => \App\Http\Middleware\ThrottleBalanceCheckFailures::class,
+            'throttle.login.failures' => \App\Http\Middleware\ThrottleLoginFailures::class,
+            'check.ip.reputation' => \App\Http\Middleware\CheckIpReputation::class,
+            'throttle.two.factor' => \App\Http\Middleware\ThrottleTwoFactorAttempts::class,
+            'verify.jwt.or.2fa.setup' => \App\Http\Middleware\VerifyJWTOr2FASetup::class,
         ]);
 
         // Aplicar CORS seguro globalmente nas rotas API

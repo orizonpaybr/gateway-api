@@ -1918,18 +1918,22 @@ class UserController extends Controller
                 ],
             ];
 
-            // Se 2FA está ativado, PIN é obrigatório
+            // Se 2FA está ativado, código TOTP/PIN é obrigatório
             if ($user->twofa_enabled) {
-                $rules['twofa_pin'] = 'required|string|size:6|regex:/^\d+/';
+                $rules['twofa_code'] = 'required_without:twofa_pin|string|size:6|regex:/^\d+/';
+                $rules['twofa_pin'] = 'required_without:twofa_code|string|size:6|regex:/^\d+/';
             } else {
-                // Se 2FA está desativado, PIN é opcional (será ignorado)
+                $rules['twofa_code'] = 'nullable|string';
                 $rules['twofa_pin'] = 'nullable|string';
             }
 
             $validator = Validator::make($request->all(), $rules, [
-                'twofa_pin.required' => 'PIN de 2FA é obrigatório para trocar senha.',
-                'twofa_pin.size' => 'PIN deve ter exatamente 6 dígitos.',
-                'twofa_pin.regex' => 'PIN deve conter apenas dígitos.',
+                'twofa_code.required_without' => 'Código 2FA é obrigatório para trocar senha.',
+                'twofa_pin.required_without' => 'Código 2FA é obrigatório para trocar senha.',
+                'twofa_code.size' => 'Código 2FA deve ter exatamente 6 dígitos.',
+                'twofa_pin.size' => 'Código 2FA deve ter exatamente 6 dígitos.',
+                'twofa_code.regex' => 'Código 2FA deve conter apenas dígitos.',
+                'twofa_pin.regex' => 'Código 2FA deve conter apenas dígitos.',
                 'new_password.regex' => 'A senha deve conter letras maiúsculas, minúsculas e números.',
                 'new_password.different' => 'A nova senha não pode ser igual à senha atual.',
                 'new_password.confirmed' => 'As senhas não conferem.',
@@ -1946,9 +1950,11 @@ class UserController extends Controller
                 ], 422)->header('Access-Control-Allow-Origin', '*');
             }
 
-            // 🔐 Verificar PIN de 2FA APENAS se está ativado
+            // 🔐 Verificar 2FA APENAS se está ativado
             if ($user->twofa_enabled) {
-                if (!Hash::check($request->input('twofa_pin'), $user->twofa_pin)) {
+                $twoFactorService = app(\App\Services\TwoFactorVerificationService::class);
+                $twoFaCode = $request->input('twofa_code') ?? $request->input('twofa_pin');
+                if (! $twoFactorService->verify($user, $twoFaCode)) {
                     // Incrementar tentativas (falha de autenticação)
                     Cache::put($rateLimitKey, $attempts + 1, 3600);
 
@@ -1960,7 +1966,7 @@ class UserController extends Controller
 
                     return response()->json([
                         'success' => false,
-                        'message' => 'PIN de 2FA inválido'
+                        'message' => 'Código 2FA inválido',
                     ], 401)->header('Access-Control-Allow-Origin', '*');
                 }
             }
