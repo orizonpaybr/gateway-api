@@ -22,9 +22,12 @@ class JWTService
     private string $algorithm = 'HS256';
     private int $expirationHours;
     private string $issuer;
-    
-    public function __construct()
+
+    private JwtBlacklistService $blacklist;
+
+    public function __construct(JwtBlacklistService $blacklist)
     {
+        $this->blacklist = $blacklist;
         $this->secret = config('jwt.secret');
         $this->algorithm = config('jwt.algorithm', 'HS256');
         $this->expirationHours = config('jwt.expiration_hours', 24);
@@ -122,6 +125,27 @@ class JWTService
         
         return JWT::encode($payload, $this->secret, $this->algorithm);
     }
+
+    /**
+     * Token temporário exclusivo para configurar 2FA (QR + enable) antes do login completo.
+     */
+    public function generate2FASetupToken(string $userId): string
+    {
+        $now = time();
+
+        $payload = [
+            'iss' => $this->issuer,
+            'sub' => $userId,
+            'iat' => $now,
+            'exp' => $now + (15 * 60),
+            'nbf' => $now,
+            'jti' => bin2hex(random_bytes(16)),
+            'temp' => true,
+            'purpose' => '2fa_setup',
+        ];
+
+        return JWT::encode($payload, $this->secret, $this->algorithm);
+    }
     
     /**
      * Valida e decodifica um token JWT
@@ -133,7 +157,15 @@ class JWTService
     {
         try {
             $decoded = JWT::decode($token, new Key($this->secret, $this->algorithm));
-            
+
+            if ($this->blacklist->isBlacklisted($decoded->jti ?? null)) {
+                Log::warning('JWTService::validateToken - Token revogado (blacklist)', [
+                    'jti' => $decoded->jti ?? null,
+                ]);
+
+                return null;
+            }
+
             Log::debug('JWTService::validateToken - Token válido', [
                 'user_id' => $decoded->sub ?? 'unknown',
                 'expires_at' => isset($decoded->exp) ? date('Y-m-d H:i:s', $decoded->exp) : 'unknown',

@@ -25,11 +25,19 @@ use App\Http\Controllers\Api\SimpayDebugController;
 */
 
 /* AUTHENTICATION ROUTES (públicas) */
-Route::post('auth/login', [AuthController::class, 'login']);
-Route::post('auth/register', [AuthController::class, 'register']);
-Route::post('auth/verify-2fa', [AuthController::class, 'verify2FA']);
-Route::post('auth/validate-registration', [AuthController::class, 'validateRegistrationData']);
-Route::post('auth/logout', [AuthController::class, 'logout']);
+Route::middleware(['check.ip.reputation', 'throttle.login.failures'])->group(function () {
+    Route::post('auth/login', [AuthController::class, 'login']);
+    Route::post('auth/register', [AuthController::class, 'register']);
+    Route::post('auth/verify-2fa', [AuthController::class, 'verify2FA']);
+    Route::post('auth/validate-registration', [AuthController::class, 'validateRegistrationData']);
+    Route::post('auth/logout', [AuthController::class, 'logout']);
+});
+
+// Setup 2FA no login — fora do verify.jwt para aceitar token temporário 2fa_setup
+Route::middleware(['verify.jwt.or.2fa.setup', 'throttle.two.factor:10,60'])->group(function () {
+    Route::post('2fa/generate-qr', [App\Http\Controllers\TwoFactorAuthController::class, 'generateQrCode']);
+    Route::post('2fa/enable', [App\Http\Controllers\TwoFactorAuthController::class, 'enable']);
+});
 
 // Rotas protegidas com JWT (para frontend)
 // throttle:120,1 protege contra abuso/flood nas rotas de dashboard, transações e saldo
@@ -110,6 +118,12 @@ Route::middleware(['verify.jwt', 'throttle:120,1'])->group(function () {
         Route::post('admin/levels/toggle-active', [App\Http\Controllers\Api\AdminLevelsController::class, 'toggleActive']);
 
         Route::get('admin/simpay/receipt-transaction', [SimpayDebugController::class, 'receiptTransaction']);
+
+        // Auditoria de autenticação e IPs bloqueados
+        Route::get('admin/auth-events', [App\Http\Controllers\Api\AdminAuthEventsController::class, 'index']);
+        Route::get('admin/blocked-ips', [App\Http\Controllers\Api\AdminAuthEventsController::class, 'listBlockedIps']);
+        Route::post('admin/blocked-ips', [App\Http\Controllers\Api\AdminAuthEventsController::class, 'storeBlockedIp']);
+        Route::delete('admin/blocked-ips/{id}', [App\Http\Controllers\Api\AdminAuthEventsController::class, 'destroyBlockedIp'])->where('id', '[0-9]+');
     });
     
     // Rotas compartilhadas entre Admin (3) e Gerente (2)
@@ -133,6 +147,7 @@ Route::middleware(['verify.jwt', 'throttle:120,1'])->group(function () {
         
         // Bloquear/desbloquear usuário
         Route::post('admin/users/{id}/toggle-block', [App\Http\Controllers\Api\AdminDashboardController::class, 'toggleBlockUser']);
+        Route::post('admin/users/{id}/unlock-login', [App\Http\Controllers\Api\AdminDashboardController::class, 'unlockLogin']);
         
         // Bloquear/desbloquear saque do usuário
         Route::post('admin/users/{id}/toggle-withdraw-block', [App\Http\Controllers\Api\AdminDashboardController::class, 'toggleWithdrawBlock']);
@@ -149,12 +164,13 @@ Route::middleware(['verify.jwt', 'throttle:120,1'])->group(function () {
         Route::post('admin/withdrawals/{id}/reject', [App\Http\Controllers\Api\WithdrawalController::class, 'reject'])->where('id', '[0-9]+');
     });
     
-    // Rotas do 2FA
-    Route::get('2fa/status', [App\Http\Controllers\TwoFactorAuthController::class, 'status']);
-    Route::post('2fa/generate-qr', [App\Http\Controllers\TwoFactorAuthController::class, 'generateQrCode']);
-    Route::post('2fa/verify', [App\Http\Controllers\TwoFactorAuthController::class, 'verifyCode']);
-    Route::post('2fa/enable', [App\Http\Controllers\TwoFactorAuthController::class, 'enable']);
-    Route::post('2fa/disable', [App\Http\Controllers\TwoFactorAuthController::class, 'disable']);
+    Route::middleware(['throttle.two.factor:10,60'])->group(function () {
+        Route::get('2fa/status', [App\Http\Controllers\TwoFactorAuthController::class, 'status']);
+        Route::post('2fa/verify', [App\Http\Controllers\TwoFactorAuthController::class, 'verifyCode']);
+    });
+    Route::middleware(['throttle.two.factor:5,60'])->group(function () {
+        Route::post('2fa/disable', [App\Http\Controllers\TwoFactorAuthController::class, 'disable']);
+    });
     
     // SIMPAY - Validação de CPF
     Route::middleware(['throttle:30,1'])->post('simpay/validate-cpf', [SimpayCpfController::class, 'validateCpf']);
