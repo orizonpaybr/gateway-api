@@ -17,6 +17,7 @@ use App\Services\CashOut\CashOutClientCallbackResolver;
 use App\Services\CashOut\CashOutOutcomeApplier;
 use App\Services\ClientWebhookPayloadBuilder;
 use App\Services\FinancialService;
+use App\Services\FluxPayments\FluxPaymentsCashOutOutcomeService;
 use App\Services\Fyhub\FyhubCashOutOutcomeService;
 use App\Services\Fyhub\FyhubPixAcquirerService;
 use App\Services\Treeal\TreealCashOutOutcomeService;
@@ -373,12 +374,15 @@ class WithdrawalController extends Controller
         }
 
         $correlationID = preg_replace('/[^a-zA-Z0-9]/', '', str()->uuid()->toString());
-        $recipientName = $saque->beneficiaryname ?: null;
+        $recipientName = trim((string) ($saque->beneficiaryname ?? ''));
+        if ($recipientName === '') {
+            $recipientName = $userSaque->name ?? 'Não informado';
+        }
 
         $pixKeyTypeNorm = strtolower((string) ($saque->pixkey ?? ''));
         $recipientDocument = in_array($pixKeyTypeNorm, ['cpf', 'cnpj'], true)
             ? preg_replace('/\D/', '', (string) $saque->pix)
-            : null;
+            : preg_replace('/\D/', '', (string) ($userSaque->cpf_cnpj ?? ''));
         if ($recipientDocument === '') {
             $recipientDocument = null;
         }
@@ -483,6 +487,11 @@ class WithdrawalController extends Controller
 
         if ($acquirerService->getReference() === 'simpay') {
             app(SimpayCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($saque);
+            $saque->refresh();
+        }
+
+        if ($acquirerService->getReference() === 'fluxpayments') {
+            app(FluxPaymentsCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($saque);
             $saque->refresh();
         }
 

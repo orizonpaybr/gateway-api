@@ -8,6 +8,8 @@ use App\Models\User;
 use App\Observers\SolicitacoesCashOutObserver;
 use App\Observers\SolicitacoesObserver;
 use App\Observers\UserObserver;
+use App\Services\FluxPayments\FluxPaymentsAuthService;
+use App\Services\FluxPayments\FluxPaymentsPixAcquirerService;
 use App\Services\Fyhub\FyhubAuthService;
 use App\Services\Fyhub\FyhubPixAcquirerService;
 use App\Services\FyhubContas\FyhubContasAccountService;
@@ -112,6 +114,12 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(TreealWebhookRegistrationService::class, function ($app) {
             return new TreealWebhookRegistrationService($app->make(TreealAuthService::class));
         });
+
+        $this->app->singleton(FluxPaymentsAuthService::class);
+
+        $this->app->singleton(FluxPaymentsPixAcquirerService::class, function ($app) {
+            return new FluxPaymentsPixAcquirerService($app->make(FluxPaymentsAuthService::class));
+        });
     }
 
     /**
@@ -127,6 +135,9 @@ class AppServiceProvider extends ServiceProvider
 
         $this->app->make(PixAcquirerManager::class)
             ->register('treeal', TreealPixAcquirerService::class);
+
+        $this->app->make(PixAcquirerManager::class)
+            ->register('fluxpayments', FluxPaymentsPixAcquirerService::class);
 
         // Registrar Observers para monitorar mudanças de status
         Solicitacoes::observe(SolicitacoesObserver::class);

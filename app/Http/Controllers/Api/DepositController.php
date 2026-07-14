@@ -7,6 +7,7 @@ use App\Helpers\ApiResponseStandardizer;
 use App\Helpers\Helper;
 use App\Helpers\TaxaFlexivelHelper;
 use App\Http\Controllers\Controller;
+use App\Jobs\ReconcileFluxPaymentsDepositJob;
 use App\Jobs\ReconcileFyhubDepositJob;
 use App\Jobs\ReconcileTreealDepositJob;
 use App\Models\App;
@@ -675,6 +676,11 @@ class DepositController extends Controller
         if ($acquirerService->getReference() === 'treeal') {
             ReconcileTreealDepositJob::dispatch($deposit->id)->delay(now()->addSeconds(45));
             ReconcileTreealDepositJob::dispatch($deposit->id)->delay(now()->addSeconds(120));
+        }
+
+        if ($acquirerService->getReference() === 'fluxpayments') {
+            ReconcileFluxPaymentsDepositJob::dispatch($deposit->id)->delay(now()->addSeconds(45));
+            ReconcileFluxPaymentsDepositJob::dispatch($deposit->id)->delay(now()->addSeconds(120));
         }
 
         return [
