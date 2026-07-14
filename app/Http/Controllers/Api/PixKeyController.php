@@ -8,6 +8,7 @@ use App\Models\App;
 use App\Models\PixKey;
 use App\Models\SolicitacoesCashOut;
 use App\Services\CashOut\CashOutOutcomeApplier;
+use App\Services\FluxPayments\FluxPaymentsCashOutOutcomeService;
 use App\Services\Fyhub\FyhubCashOutOutcomeService;
 use App\Services\PixAcquirer\PixAcquirerManager;
 use App\Services\Simpay\SimpayCashOutOutcomeService;
@@ -616,7 +617,10 @@ class PixKeyController extends Controller
                 $recipientName = $user->name ?? 'Não informado';
                 $recipientDocument = in_array(strtolower($keyType), ['cpf', 'cnpj'], true)
                     ? preg_replace('/\D/', '', $keyValue)
-                    : null;
+                    : preg_replace('/\D/', '', (string) ($user->cpf_cnpj ?? ''));
+                if ($recipientDocument === '') {
+                    $recipientDocument = null;
+                }
 
                 $payoutResult = $acquirerService->createPayout(
                     (float) $amount,
@@ -739,6 +743,11 @@ class PixKeyController extends Controller
 
                 if ($acquirerService->getReference() === 'simpay') {
                     app(SimpayCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($withdrawal);
+                    $withdrawal->refresh();
+                }
+
+                if ($acquirerService->getReference() === 'fluxpayments') {
+                    app(FluxPaymentsCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($withdrawal);
                     $withdrawal->refresh();
                 }
 

@@ -13,6 +13,7 @@ use App\Models\SolicitacoesCashOut;
 use App\Models\User;
 use App\Services\CashOut\CashOutOutcomeApplier;
 use App\Services\ClientWebhookPayloadBuilder;
+use App\Services\FluxPayments\FluxPaymentsCashOutOutcomeService;
 use App\Services\Fyhub\FyhubCashOutOutcomeService;
 use App\Services\Treeal\TreealCashOutOutcomeService;
 use App\Services\PixAcquirer\PixAcquirerManager;
@@ -302,7 +303,7 @@ class SaqueController extends Controller
             $recipientName = $user->name ?? 'Não informado';
             $recipientDocument = in_array($keyType, ['cpf', 'cnpj'], true)
                 ? preg_replace('/\D/', '', (string) $keyValue)
-                : null;
+                : preg_replace('/\D/', '', (string) ($user->cpf_cnpj ?? ''));
             if ($recipientDocument === '') {
                 $recipientDocument = null;
             }
@@ -453,6 +454,11 @@ class SaqueController extends Controller
 
             if ($acquirerService->getReference() === 'simpay') {
                 app(SimpayCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($withdrawal);
+                $withdrawal->refresh();
+            }
+
+            if ($acquirerService->getReference() === 'fluxpayments') {
+                app(FluxPaymentsCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($withdrawal);
                 $withdrawal->refresh();
             }
 

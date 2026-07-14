@@ -754,6 +754,7 @@ class FinancialService
         $custoTreeal = (float) config('treeal.custo_fixo_transacao', 0.05);
         $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.035);
         $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
+        $custoFluxpayments = (float) config('fluxpayments.custo_fixo_transacao', 0.09);
 
         $stats = Solicitacoes::whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
             ->selectRaw('
@@ -765,6 +766,7 @@ class FinancialService
                         THEN taxa_pix_cash_in_adquirente
                         WHEN executor_ordem = \'treeal\' THEN ' . $custoTreeal . '
                         WHEN executor_ordem = \'fyhub\' THEN ' . $custoFyhub . '
+                        WHEN executor_ordem = \'fluxpayments\' THEN ' . $custoFluxpayments . '
                         WHEN executor_ordem = \'simpay\' OR executor_ordem = \'Adquirente PIX\' OR adquirente_ref = \'Adquirente PIX\'
                         THEN ' . $custoSimpay . '
                         ELSE 0
@@ -820,6 +822,7 @@ class FinancialService
         $custoTreeal = (float) config('treeal.custo_fixo_transacao', 0.05);
         $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.035);
         $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
+        $custoFluxpayments = (float) config('fluxpayments.custo_fixo_transacao', 0.09);
         $custoSaqueExpr = \App\Helpers\CustoAdquirentePixHelper::sqlCustoPorTransacaoExpr('amount', true);
 
         // Lucro líquido de depósitos: taxa_cash_in − custo por adquirente quando não há taxa explícita na linha
@@ -831,6 +834,7 @@ class FinancialService
                     THEN taxa_pix_cash_in_adquirente
                     WHEN executor_ordem = 'treeal' THEN {$custoTreeal}
                     WHEN executor_ordem = 'fyhub' THEN {$custoFyhub}
+                    WHEN executor_ordem = 'fluxpayments' THEN {$custoFluxpayments}
                     WHEN executor_ordem = 'simpay' OR executor_ordem = 'Adquirente PIX' OR adquirente_ref = 'Adquirente PIX'
                     THEN {$custoSimpay}
                     ELSE 0
@@ -982,7 +986,7 @@ class FinancialService
     private function depositPodeEstornar(Solicitacoes $item): bool
     {
         $acq = strtolower(trim((string) ($item->adquirente_ref ?? $item->executor_ordem ?? '')));
-        if (! in_array($acq, ['simpay', 'fyhub', 'treeal'], true)) {
+        if (! in_array($acq, ['simpay', 'fyhub', 'treeal', 'fluxpayments'], true)) {
             return false;
         }
 
@@ -995,12 +999,12 @@ class FinancialService
             return trim((string) ($item->end_to_end ?? '')) !== '';
         }
 
-        // Simpay / Fyhub: idTransaction (comportamento original da UI)
+        // Simpay / Fyhub / FluxPayments: idTransaction
         return trim((string) ($item->idTransaction ?? '')) !== '';
     }
 
     /**
-     * Solicita estorno na adquirente (Simpay/Fyhub/Treeal) e atualiza depósito/saldo localmente.
+     * Solicita estorno na adquirente (Simpay/Fyhub/Treeal/FluxPayments) e atualiza depósito/saldo localmente.
      *
      * @throws \Exception com código HTTP em $e->getCode() quando aplicável
      */
@@ -1018,8 +1022,8 @@ class FinancialService
         }
 
         $acq = strtolower(trim((string) ($deposit->adquirente_ref ?? $deposit->executor_ordem ?? '')));
-        if (! in_array($acq, ['simpay', 'fyhub', 'treeal'], true)) {
-            throw new \Exception('Estorno disponível apenas para depósitos Simpay/Fyhub/Treeal.', 422);
+        if (! in_array($acq, ['simpay', 'fyhub', 'treeal', 'fluxpayments'], true)) {
+            throw new \Exception('Estorno disponível apenas para depósitos Simpay/Fyhub/Treeal/FluxPayments.', 422);
         }
 
         $st = strtoupper((string) $deposit->status);

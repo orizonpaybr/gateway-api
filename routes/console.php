@@ -13,6 +13,11 @@ Schedule::job(new \App\Jobs\ReconcileSimpayPayoutsJob)
     ->withoutOverlapping()
     ->onOneServer();
 
+Schedule::job(new \App\Jobs\ReconcileFluxPaymentsPayoutsJob)
+    ->everyTwoMinutes()
+    ->withoutOverlapping()
+    ->onOneServer();
+
 Schedule::job(new \App\Jobs\ReconcileSimpayDepositsJob)
     ->everyTwoMinutes()
     ->withoutOverlapping()

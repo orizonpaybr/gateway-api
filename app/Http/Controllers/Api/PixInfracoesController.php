@@ -3,9 +3,9 @@
 /**
  * Infrações Pix (MED — Mecanismo Especial de Devolução).
  *
- * Listagem/detalhe leem a tabela local `pix_infracoes` (alimentada pelo webhook
- * INFRACTION da Treeal Contas). A defesa é encaminhada à adquirente via
- * TreealContasInfractionService (POST /infractions/{id}/defense).
+ * Listagem/detalhe leem a tabela local `pix_infracoes` (alimentada pelos webhooks
+ * Treeal Contas INFRACTION e FluxPayments transaction.infraction).
+ * A defesa é encaminhada conforme o provider do registro.
  */
 
 namespace App\Http\Controllers\Api;
@@ -106,7 +106,7 @@ class PixInfracoesController extends Controller
                     
                     $analysisResult = $this->extractAnalysisResult($r);
                     $statusLegivel = $this->getStatusLegivel((string) $r->status, $analysisResult);
-                    $desfecho = $this->getDesfecho($analysisResult, (string) $r->status);
+                    $desfecho = $this->getDesfecho($analysisResult, (string) $r->status, $this->resolveProvider($r));
 
                     return [
                         'id' => (int) ($r->id ?? 0),
@@ -195,7 +195,7 @@ class PixInfracoesController extends Controller
                 
                 $analysisResult = $this->extractAnalysisResult($row);
                 $statusLegivel = $this->getStatusLegivel((string) $row->status, $analysisResult);
-                $desfecho = $this->getDesfecho($analysisResult, (string) $row->status);
+                $desfecho = $this->getDesfecho($analysisResult, (string) $row->status, $this->resolveProvider($row));
 
                 // Buscar transação relacionada se houver transaction_id
                 $transacaoRelacionada = null;
@@ -229,9 +229,13 @@ class PixInfracoesController extends Controller
                     'tipo_legivel' => $this->getTipoLegivel((string) ($row->tipo ?? 'pix')),
                     'descricao' => (string) ($row->descricao ?? ''),
                     'detalhes' => (string) ($row->detalhes ?? ''),
-                    'detalhes_adicionais' => $this->buildDetalhesAdicionais((string) ($row->detalhes ?? '')),
+                    'detalhes_adicionais' => $this->buildDetalhesAdicionais(
+                        (string) ($row->detalhes ?? ''),
+                        $this->resolveProvider($row)
+                    ),
                     'pode_apresentar_defesa' => $this->canPresentDefense($row),
-                    'defesa_enviada_para' => 'Treeal (adquirente Pix / MED)',
+                    'defesa_enviada_para' => $this->resolveDefenseTargetLabel($row),
+                    'provider' => $this->resolveProvider($row),
                     'transacao_relacionada' => $transacaoRelacionada,
                     'created_at' => Carbon::parse($row->created_at)->toIso8601String(),
                     'updated_at' => Carbon::parse($row->updated_at)->toIso8601String(),
@@ -304,13 +308,18 @@ class PixInfracoesController extends Controller
                 ], 422)->header('Access-Control-Allow-Origin', '*');
             }
 
-            $service = app(TreealContasInfractionService::class);
+            $provider = $this->resolveProvider($row);
             $files = $request->file('files') ?? [];
             if (! is_array($files)) {
                 $files = [$files];
             }
 
-            $result = $service->submitDefense($providerId, (string) $validated['defense'], $files);
+            if ($provider === 'fluxpayments') {
+                $result = $this->submitFluxPaymentsDefenseLocally($row, (string) $validated['defense'], $files);
+            } else {
+                $service = app(TreealContasInfractionService::class);
+                $result = $service->submitDefense($providerId, (string) $validated['defense'], $files);
+            }
 
             if (! ($result['success'] ?? false)) {
                 return response()->json([
@@ -333,7 +342,7 @@ class PixInfracoesController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Defesa enviada com sucesso.',
+                'message' => $result['message'] ?? 'Defesa enviada com sucesso.',
                 'data' => $result['raw'] ?? null,
             ])->header('Access-Control-Allow-Origin', '*');
         } catch (\Illuminate\Validation\ValidationException $e) {
@@ -385,16 +394,18 @@ class PixInfracoesController extends Controller
     /**
      * @return array{titulo: string, mensagem: string, favoravel_lojista: bool|null}|null
      */
-    private function getDesfecho(?string $analysisResult, string $status): ?array
+    private function getDesfecho(?string $analysisResult, string $status, string $provider = 'treeal'): ?array
     {
         if (strtoupper(trim($status)) !== 'RESOLVIDA') {
             return null;
         }
 
+        $adquirente = $this->providerDisplayName($provider);
+
         return match (strtoupper(trim((string) $analysisResult))) {
             'DISAGREED' => [
                 'titulo' => 'Contestação encerrada a seu favor',
-                'mensagem' => 'A Treeal não confirmou a fraude. O valor saiu da mediação e permanece no seu saldo disponível.',
+                'mensagem' => "A {$adquirente} não confirmou a fraude. O valor saiu da mediação e permanece no seu saldo disponível.",
                 'favoravel_lojista' => true,
             ],
             'AGREED' => [
@@ -438,7 +449,7 @@ class PixInfracoesController extends Controller
             'refund_request', 'refund' => 'Solicitação de devolução (MED)',
             'fraud', 'fraude' => 'Suspeita de fraude',
             'operational_flaw', 'operational' => 'Falha operacional',
-            'pix' => 'Infração Pix',
+            'med', 'pix' => 'Infração Pix (MED)',
             default => ucfirst(str_replace('_', ' ', strtolower($tipo))),
         };
     }
@@ -446,7 +457,7 @@ class PixInfracoesController extends Controller
     /**
      * @return list<array{label: string, value: string}>
      */
-    private function buildDetalhesAdicionais(string $detalhesJson): array
+    private function buildDetalhesAdicionais(string $detalhesJson, string $provider = 'treeal'): array
     {
         if (trim($detalhesJson) === '') {
             return [];
@@ -457,18 +468,19 @@ class PixInfracoesController extends Controller
             return [['label' => 'Informação', 'value' => $detalhesJson]];
         }
 
+        $adquirente = $this->providerDisplayName($provider);
         $items = [];
 
         if (! empty($parsed['infractionId'])) {
             $items[] = [
-                'label' => 'ID na adquirente (Treeal)',
+                'label' => "ID na adquirente ({$adquirente})",
                 'value' => (string) $parsed['infractionId'],
             ];
         }
 
         if (! empty($parsed['status'])) {
             $items[] = [
-                'label' => 'Situação na Treeal',
+                'label' => "Situação na {$adquirente}",
                 'value' => $this->mapTreealInfractionStatus((string) $parsed['status']),
             ];
         }
@@ -501,7 +513,103 @@ class PixInfracoesController extends Controller
             ];
         }
 
+        if (! empty($parsed['reason']) && empty($parsed['reportedBy'])) {
+            $items[] = [
+                'label' => 'Motivo reportado',
+                'value' => (string) $parsed['reason'],
+            ];
+        }
+
+        if (! empty($parsed['defense_text'])) {
+            $items[] = [
+                'label' => 'Defesa registrada',
+                'value' => (string) $parsed['defense_text'],
+            ];
+        }
+
         return $items;
+    }
+
+    /**
+     * FluxPayments ainda não documenta API de defesa MED — registra localmente
+     * (mesmo efeito visual da Treeal: status EM_ANALISE) até haver endpoint.
+     *
+     * @param  array<int, \Illuminate\Http\UploadedFile>  $files
+     * @return array{success: bool, message?: string, raw?: array}
+     */
+    private function submitFluxPaymentsDefenseLocally(object $row, string $defense, array $files): array
+    {
+        $detalhes = [];
+        $rawDetalhes = trim((string) ($row->detalhes ?? ''));
+        if ($rawDetalhes !== '') {
+            $parsed = json_decode($rawDetalhes, true);
+            if (is_array($parsed)) {
+                $detalhes = $parsed;
+            }
+        }
+
+        $detalhes['defense_text'] = mb_substr($defense, 0, 4000);
+        $detalhes['defense_submitted_at'] = Carbon::now()->toIso8601String();
+        $detalhes['defense_files_count'] = count($files);
+        $detalhes['status'] = 'DEFENDED';
+
+        DB::table('pix_infracoes')->where('id', $row->id)->update([
+            'detalhes' => json_encode($detalhes, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            'updated_at' => Carbon::now(),
+        ]);
+
+        Log::info('[FLUXPAYMENTS][INFRACTION] Defesa registrada localmente', [
+            'infraction_id' => $row->id,
+            'provider_infraction_id' => $row->provider_infraction_id ?? null,
+            'files' => count($files),
+        ]);
+
+        return [
+            'success' => true,
+            'message' => 'Defesa registrada. A FluxPayments será notificada quando a API de defesa MED estiver disponível; o status foi atualizado para Em Análise.',
+            'raw' => [
+                'provider' => 'fluxpayments',
+                'mode' => 'local_pending_api',
+            ],
+        ];
+    }
+
+    private function resolveProvider(object $row): string
+    {
+        if (Schema::hasColumn('pix_infracoes', 'provider')) {
+            $p = strtolower(trim((string) ($row->provider ?? '')));
+            if ($p !== '') {
+                return $p;
+            }
+        }
+
+        $detalhes = trim((string) ($row->detalhes ?? ''));
+        if ($detalhes !== '') {
+            $parsed = json_decode($detalhes, true);
+            if (is_array($parsed) && ! empty($parsed['provider'])) {
+                return strtolower(trim((string) $parsed['provider']));
+            }
+        }
+
+        return 'treeal';
+    }
+
+    private function resolveDefenseTargetLabel(object $row): string
+    {
+        return match ($this->resolveProvider($row)) {
+            'fluxpayments' => 'FluxPayments (adquirente Pix / MED)',
+            default => 'Treeal (adquirente Pix / MED)',
+        };
+    }
+
+    private function providerDisplayName(string $provider): string
+    {
+        return match (strtolower(trim($provider))) {
+            'fluxpayments' => 'FluxPayments',
+            'fyhub' => 'Fyhub',
+            'simpay' => 'Simpay',
+            default => 'Treeal',
+        };
     }
 
     private function mapTreealInfractionStatus(string $status): string
