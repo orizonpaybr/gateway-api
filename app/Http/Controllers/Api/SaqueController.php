@@ -98,10 +98,13 @@ class SaqueController extends Controller
         $valorTotalNecessario = (float) $taxaPreview['valor_total_descontar'];
 
         if ($saldoRealDisponivel < $valorTotalNecessario) {
-            $this->dispatchWebhookFalhaSaldoCoratri(
+            $this->registrarFalhaSaldoCoratri(
                 $request,
                 $user,
                 $amountSolicitado,
+                $saldoRealDisponivel,
+                $valorTotalNecessario,
+                (float) ($taxaPreview['taxa_cash_out'] ?? 0),
             );
 
             return response()->json([
@@ -211,7 +214,14 @@ class SaqueController extends Controller
             $balanceService = app(\App\Services\BalanceService::class);
             $saldoTotalDisponivel = $balanceService->getTotalAvailableBalance($user);
             if ($saldoTotalDisponivel < $valorTotalDescontar) {
-                $this->dispatchWebhookFalhaSaldoCoratri($request, $user, $amount);
+                $this->registrarFalhaSaldoCoratri(
+                    $request,
+                    $user,
+                    $amount,
+                    $saldoTotalDisponivel,
+                    $valorTotalDescontar,
+                    (float) $taxaCashOut,
+                );
 
                 return response()->json([
                     'status' => 'error',
@@ -513,20 +523,37 @@ class SaqueController extends Controller
     }
 
     /**
-     * Webhook FAILED quando o saldo Coratri do usuário não cobre valor + taxa.
-     * Mensagem genérica (não expõe saldo nem conta master Treeal/Fyhub).
+     * Persiste FAILED quando o saldo Coratri não cobre valor + taxa.
+     * Sempre grava em solicitacoes_cash_out (comprovação operacional), mesmo sem callback.
+     * Webhook só dispara se houver baasPostbackUrl válido.
+     * Mensagem ao cliente permanece genérica (não expõe saldo).
      */
-    private function dispatchWebhookFalhaSaldoCoratri(Request $request, User $user, float $amountRequested): void
-    {
+    private function registrarFalhaSaldoCoratri(
+        Request $request,
+        User $user,
+        float $amountRequested,
+        float $saldoDisponivel,
+        float $valorTotalNecessario,
+        float $taxaCashOut = 0.0,
+    ): void {
         $callbackUrl = $request->filled('baasPostbackUrl') && $request->baasPostbackUrl !== 'web'
-            ? $request->baasPostbackUrl
+            ? trim((string) $request->baasPostbackUrl)
             : null;
-        if (! $callbackUrl) {
-            return;
+        if ($callbackUrl === '') {
+            $callbackUrl = null;
         }
 
         $idTransaction = 'PAYOUT_API_'.preg_replace('/[^a-zA-Z0-9]/', '', Str::uuid()->toString());
         $messageWebhook = 'Não foi possível sacar, entre em contato com o suporte.';
+        $breakdown = app(\App\Services\BalanceService::class)->getBalanceBreakdown($user);
+        $provaInterna = sprintf(
+            'disp=%.2f need=%.2f taxa=%.2f bruto=%.2f med=%.2f',
+            $saldoDisponivel,
+            $valorTotalNecessario,
+            $taxaCashOut,
+            (float) ($breakdown['saldo_bruto'] ?? 0),
+            (float) ($breakdown['saldo_em_mediacao'] ?? 0),
+        );
 
         try {
             $row = SolicitacoesCashOut::create([
@@ -541,31 +568,46 @@ class SaqueController extends Controller
                 'status' => 'FAILED',
                 'type' => 'PIX',
                 'idTransaction' => $idTransaction,
-                'taxa_cash_out' => 0,
+                'taxa_cash_out' => round($taxaCashOut, 2),
+                'valor_total_descontado' => round($valorTotalNecessario, 4),
                 'cash_out_liquido' => $amountRequested,
+                'descricao_transacao' => 'SALDO_INSUFICIENTE_API',
+                'descricao_externa' => substr($provaInterna, 0, 255),
                 'callback' => $callbackUrl,
             ]);
 
-            ClientWebhookDispatchJob::send(
-                $callbackUrl,
-                $idTransaction,
-                'FAILED',
-                $amountRequested,
-                now()->toIso8601String(),
-                ClientWebhookPayloadBuilder::extraForCashOut($row),
-                $messageWebhook
-            );
+            if ($callbackUrl) {
+                ClientWebhookDispatchJob::send(
+                    $callbackUrl,
+                    $idTransaction,
+                    'FAILED',
+                    $amountRequested,
+                    now()->toIso8601String(),
+                    ClientWebhookPayloadBuilder::extraForCashOut($row),
+                    $messageWebhook
+                );
+            }
 
-            Log::info('[PIXOUT][WEBHOOK] Postback FAILED por saldo Coratri insuficiente', [
+            Log::warning('[PIXOUT] FAILED por saldo Coratri insuficiente', [
                 'user_id' => $user->username,
-                'amount' => $amountRequested,
+                'amount_solicitado' => $amountRequested,
+                'taxa_cash_out' => $taxaCashOut,
+                'valor_total_necessario' => $valorTotalNecessario,
+                'saldo_disponivel' => $saldoDisponivel,
+                'saldo_bruto' => $breakdown['saldo_bruto'] ?? null,
+                'saldo_em_mediacao' => $breakdown['saldo_em_mediacao'] ?? null,
                 'callback' => $callbackUrl,
+                'webhook_enviado' => (bool) $callbackUrl,
                 'transaction_id' => $idTransaction,
+                'cash_out_id' => $row->id,
             ]);
         } catch (\Throwable $e) {
-            Log::warning('SaqueController::dispatchWebhookFalhaSaldoCoratri - Erro ao criar registro ou disparar webhook', [
+            Log::warning('SaqueController::registrarFalhaSaldoCoratri - Erro ao criar registro ou disparar webhook', [
                 'error' => $e->getMessage(),
                 'user_id' => $user->username,
+                'amount_solicitado' => $amountRequested,
+                'saldo_disponivel' => $saldoDisponivel,
+                'valor_total_necessario' => $valorTotalNecessario,
             ]);
         }
     }
