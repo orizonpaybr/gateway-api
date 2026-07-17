@@ -468,8 +468,16 @@ class PixKeyController extends Controller
             $taxaCashOut = $taxaCalculada['taxa_cash_out'];           // Taxa total cobrada do cliente
             $taxaAplicacao = $taxaCalculada['taxa_aplicacao'];        // Lucro Coratri
             $taxaAdquirente = $taxaCalculada['taxa_adquirente'];      // Custo AdquirentePIX
-            $cashOutLiquido = $taxaCalculada['saque_liquido'];        // Valor que o cliente recebe
-            $valorTotalDescontar = $taxaCalculada['valor_total_descontar']; // Total a debitar do saldo
+            $cashOutLiquido = $taxaCalculada['saque_liquido'];        // Valor que o cliente recebe (valor - taxa)
+            $valorTotalDescontar = $taxaCalculada['valor_total_descontar']; // Total a debitar do saldo (= valor solicitado)
+
+            // Taxa por dentro: o cliente recebe (valor - taxa). O valor precisa ser maior que a taxa.
+            if ((float) $cashOutLiquido < 0.01) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'O valor do saque precisa ser maior que a taxa.',
+                ], 422)->header('Access-Control-Allow-Origin', '*');
+            }
 
             // Verificar saldo total disponível (saldo principal + saldo de afiliados)
             $balanceService = app(\App\Services\BalanceService::class);
@@ -623,7 +631,7 @@ class PixKeyController extends Controller
                 }
 
                 $payoutResult = $acquirerService->createPayout(
-                    (float) $amount,
+                    (float) $cashOutLiquido,
                     $keyValue,
                     $keyType,
                     $description,

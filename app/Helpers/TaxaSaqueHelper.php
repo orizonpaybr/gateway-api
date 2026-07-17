@@ -17,21 +17,25 @@ use Illuminate\Support\Facades\Log;
  * 4. Split da taxa: custo adquirente (CustoAdquirentePixHelper) → Afiliado (R$ 0,50 se houver) → Coratri (resto)
  * 5. Cliente sempre recebe o valor solicitado; taxa é descontada do saldo
  *
- * EXEMPLOS (mesmo padrão do depósito):
+ * TAXA POR DENTRO: o valor solicitado é o valor debitado do saldo. A taxa sai de
+ * dentro desse valor e o cliente recebe (valor - taxa). Assim o usuário pode sacar
+ * exatamente o saldo disponível sem estourar por causa da taxa.
+ *
+ * EXEMPLOS (taxa por dentro):
  *
  * Caso 1: Taxa global R$ 1,00, sem afiliado, saque R$ 5,00
- * - Cliente recebe: R$ 5,00
- * - Saldo descontado: R$ 6,00 (5 + 1)
+ * - Saldo descontado: R$ 5,00 (exatamente o valor solicitado)
+ * - Cliente recebe: R$ 4,00 (5 - 1)
  * - Taxa: R$ 1,00 → Adquirente R$ 0,025 + Coratri R$ 0,975
  *
  * Caso 2: Taxa personalizada R$ 0,90, sem afiliado, saque R$ 5,00
- * - Cliente recebe: R$ 5,00
- * - Saldo descontado: R$ 5,90 (5 + 0,90)
+ * - Saldo descontado: R$ 5,00
+ * - Cliente recebe: R$ 4,10 (5 - 0,90)
  * - Taxa: R$ 0,90 → Adquirente R$ 0,025 + Coratri R$ 0,875
  *
  * Caso 3: Taxa personalizada R$ 0,90, COM afiliado, saque R$ 5,00
- * - Cliente recebe: R$ 5,00 (taxa NÃO muda com afiliado)
- * - Saldo descontado: R$ 5,90 (5 + 0,90)
+ * - Saldo descontado: R$ 5,00 (taxa NÃO muda com afiliado)
+ * - Cliente recebe: R$ 4,10 (5 - 0,90)
  * - Taxa: R$ 0,90 → Adquirente R$ 0,025 + Afiliado R$ 0,50 + Coratri R$ 0,375
  */
 class TaxaSaqueHelper
@@ -163,10 +167,12 @@ class TaxaSaqueHelper
             'descricao' => $descricao,
         ]);
 
-        // Cliente sempre recebe o valor solicitado, taxa é descontada do saldo
-        $saque_liquido = $amount;
+        // Taxa POR DENTRO: debita exatamente o valor solicitado e o cliente recebe (valor - taxa).
+        // saque_liquido pode ficar <= 0 se o valor for menor/igual à taxa — os controllers validam
+        // isso antes de enviar o Pix Out (valor precisa ser maior que a taxa).
         $taxa_cash_out = $taxaTotal;
-        $valor_total_descontar = $amount + $taxaTotal;
+        $valor_total_descontar = $amount;
+        $saque_liquido = round($amount - $taxaTotal, 2);
 
         Log::info('TaxaSaqueHelper: Valores finais calculados', [
             'user_id' => $user->user_id ?? 'N/A',
@@ -243,13 +249,10 @@ class TaxaSaqueHelper
             $percentualMinimo = CustoAdquirentePixHelper::percentualPrincipal();
             $taxaEfetivaPercent = max($percentual, $percentualMinimo);
 
-            $valorMaximo = $taxaEfetivaPercent > 0
-                ? $saldoDisponivel / (1 + ($taxaEfetivaPercent / 100))
-                : $saldoDisponivel;
-
+            // Taxa por dentro: pode solicitar o saldo inteiro; a taxa percentual sai de dentro do valor.
+            $valorMaximo = max(0, $saldoDisponivel);
             $taxaTotal = ($valorMaximo * $taxaEfetivaPercent) / 100;
-            $valorMaximo = max(0, $valorMaximo);
-            $saldoRestante = $saldoDisponivel - $valorMaximo - $taxaTotal;
+            $saldoRestante = max(0, $saldoDisponivel - $valorMaximo);
 
             return [
                 'valor_maximo' => $valorMaximo,
@@ -267,13 +270,13 @@ class TaxaSaqueHelper
 
         $taxaFixa = max(0, (float) $taxaFixa);
 
-        // Valor máximo = saldo disponível - taxa fixa
-        $valorMaximo = max(0, $saldoDisponivel - $taxaFixa);
+        // Taxa por dentro: pode solicitar até o saldo inteiro (a taxa sai do próprio valor).
+        $valorMaximo = max(0, $saldoDisponivel);
 
         // Taxa total para o valor máximo é a própria taxa fixa
         $taxaTotal = $taxaFixa;
 
-        $saldoRestante = $saldoDisponivel - $valorMaximo - $taxaTotal;
+        $saldoRestante = max(0, $saldoDisponivel - $valorMaximo);
 
         return [
             'valor_maximo' => $valorMaximo,
