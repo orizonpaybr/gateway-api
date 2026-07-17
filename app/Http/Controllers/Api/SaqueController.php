@@ -97,6 +97,14 @@ class SaqueController extends Controller
         $taxaPreview = TaxaSaqueHelper::calcularTaxaSaque($amountSolicitado, $setting, $user, $isInterfaceWeb, false, $default);
         $valorTotalNecessario = (float) $taxaPreview['valor_total_descontar'];
 
+        // Taxa por dentro: o cliente recebe (valor - taxa). O valor precisa ser maior que a taxa.
+        if ((float) $taxaPreview['saque_liquido'] < 0.01) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'O valor do saque precisa ser maior que a taxa.',
+            ], 422);
+        }
+
         if ($saldoRealDisponivel < $valorTotalNecessario) {
             $this->registrarFalhaSaldoCoratri(
                 $request,
@@ -196,6 +204,14 @@ class SaqueController extends Controller
             $taxaAdquirente = $taxaCalculada['taxa_adquirente'];
             $cashOutLiquido = $taxaCalculada['saque_liquido'];
             $valorTotalDescontar = $taxaCalculada['valor_total_descontar'];
+
+            // Taxa por dentro: o valor precisa ser maior que a taxa (líquido a pagar ao cliente).
+            if ((float) $cashOutLiquido < 0.01) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'O valor do saque precisa ser maior que a taxa.',
+                ], 422);
+            }
 
             $clientPostbackUrl = ($request->filled('baasPostbackUrl') && $request->baasPostbackUrl !== 'web')
                 ? trim((string) $request->baasPostbackUrl)
@@ -342,7 +358,7 @@ class SaqueController extends Controller
             $provisionedAutoWithdrawal = $withdrawal;
 
             $payoutResult = $acquirerService->createPayout(
-                $amount,
+                $cashOutLiquido,
                 $keyValue,
                 $keyType,
                 $description,

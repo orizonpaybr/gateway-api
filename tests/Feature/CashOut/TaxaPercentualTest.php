@@ -82,9 +82,11 @@ class TaxaPercentualTest extends TestCase
 
         $r = TaxaSaqueHelper::calcularTaxaSaque(10.00, $this->setting, $user, true, false, 'treeal');
 
+        // Taxa por dentro: debita exatamente o valor solicitado e o cliente recebe (valor - taxa).
         $this->assertTrue($r['modo_percentual']);
         $this->assertEqualsWithDelta(0.20, $r['taxa_cash_out'], 0.0001);
-        $this->assertEqualsWithDelta(10.20, $r['valor_total_descontar'], 0.0001);
+        $this->assertEqualsWithDelta(10.00, $r['valor_total_descontar'], 0.0001);
+        $this->assertEqualsWithDelta(9.80, $r['saque_liquido'], 0.0001);
         $this->assertEqualsWithDelta(0.05, $r['taxa_adquirente'], 0.0001);
     }
 

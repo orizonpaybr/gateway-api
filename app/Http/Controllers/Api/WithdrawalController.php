@@ -387,8 +387,12 @@ class WithdrawalController extends Controller
             $recipientDocument = null;
         }
 
+        // Taxa por dentro: paga-se o líquido (valor - taxa). Fallback para amount em
+        // registros antigos que não tenham cash_out_liquido preenchido.
+        $valorPagar = (float) ($saque->cash_out_liquido ?: $saque->amount);
+
         $payoutResult = $acquirerService->createPayout(
-            (float) $saque->amount,
+            $valorPagar,
             $saque->pix,
             $saque->pixkey,
             'Saque aprovado manualmente - ID: '.$saque->id,
