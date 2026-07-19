@@ -107,6 +107,10 @@ Route::middleware(['verify.jwt', 'throttle:120,1'])->group(function () {
         Route::get('admin/financial/withdrawals', [App\Http\Controllers\Api\FinancialController::class, 'getWithdrawals']);
         Route::get('admin/financial/withdrawals/stats', [App\Http\Controllers\Api\FinancialController::class, 'getWithdrawalsStats']);
         
+        // Relatório de conciliação diária por usuário (Admin)
+        Route::get('admin/reports/reconciliation', [App\Http\Controllers\Api\AdminReconciliationController::class, 'getReport']);
+        Route::get('admin/reports/reconciliation/export', [App\Http\Controllers\Api\AdminReconciliationController::class, 'exportReport']);
+        
         // Rotas de configurações do gateway (Admin)
         Route::get('admin/settings', [App\Http\Controllers\Api\GatewaySettingsController::class, 'getSettings']);
         Route::put('admin/settings', [App\Http\Controllers\Api\GatewaySettingsController::class, 'updateSettings']);
