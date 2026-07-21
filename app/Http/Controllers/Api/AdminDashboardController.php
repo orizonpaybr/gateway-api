@@ -13,6 +13,7 @@ use App\Constants\{UserStatus, UserPermission};
 use App\Helpers\{UserStatusHelper, AppSettingsHelper};
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\{Cache, DB, Log, Storage};
+use Illuminate\Support\Str;
 use Carbon\Carbon;
 
 /**
@@ -882,19 +883,7 @@ class AdminDashboardController extends Controller
 
             $acquirers = $query->orderBy('adquirente')->paginate($perPage);
 
-            $items = $acquirers->getCollection()->map(function ($row) {
-                return [
-                    'id' => (int) $row->id,
-                    'adquirente' => (string) ($row->adquirente ?? ''),
-                    'status' => (int) ($row->status ?? 0),
-                    'url' => (string) ($row->url ?? ''),
-                    'referencia' => (string) ($row->referencia ?? ''),
-                    'is_default' => (int) ($row->is_default ?? 0),
-                    'is_default_card_billet' => (int) ($row->is_default_card_billet ?? 0),
-                    'created_at' => $row->created_at?->format('c'),
-                    'updated_at' => $row->updated_at?->format('c'),
-                ];
-            });
+            $items = $acquirers->getCollection()->map(fn ($row) => $this->formatAcquirerRow($row));
 
             return $this->successResponse([
                 'acquirers' => $items->values()->all(),
@@ -985,18 +974,146 @@ class AdminDashboardController extends Controller
     }
 
     /**
+     * Providers que suportam múltiplas nominais (contas com credenciais próprias).
+     * Para os demais (simpay/fyhub/treeal) só existe a conta única do .env —
+     * adicionar aqui exige antes implementar o build por credencial em
+     * PixAcquirerManager::buildWithCredentials().
+     */
+    private const MULTI_ACCOUNT_PROVIDERS = ['fluxpayments'];
+
+    /**
+     * Criar uma nova nominal (conta com credenciais próprias) para um provider
+     * que já suporta múltiplas contas.
+     *
+     * POST /api/admin/acquirers
+     */
+    public function storeAcquirer(Request $request)
+    {
+        try {
+            $request->validate([
+                'adquirente' => 'required|string|max:255|unique:adquirentes,adquirente',
+                'provider' => 'required|string|in:' . implode(',', self::MULTI_ACCOUNT_PROVIDERS),
+                'url' => 'nullable|string|max:255',
+                'status' => 'nullable|boolean',
+                'credentials' => 'required|array',
+                'credentials.api_key' => 'required|string',
+                'credentials.public_key' => 'required|string',
+                'credentials.webhook_secret' => 'nullable|string',
+                'credentials.webhook_url' => 'nullable|url|max:255',
+            ]);
+
+            $provider = (string) $request->input('provider');
+            $baseSlug = Str::slug($provider . '-' . $request->input('adquirente'));
+            $referencia = $baseSlug;
+            $suffix = 2;
+            while (Adquirente::where('referencia', $referencia)->exists()) {
+                $referencia = $baseSlug . '-' . $suffix++;
+            }
+
+            $acquirer = Adquirente::create([
+                'adquirente' => $request->input('adquirente'),
+                'status' => $request->boolean('status', true),
+                'url' => $request->input('url') ?: (string) config("$provider.base_url", ''),
+                'referencia' => $referencia,
+                'provider' => $provider,
+                'credentials' => $request->input('credentials'),
+                'is_default' => false,
+                'is_default_card_billet' => false,
+            ]);
+
+            Log::info('Nova nominal de adquirente criada pelo admin', [
+                'acquirer_id' => $acquirer->id,
+                'provider' => $provider,
+                'referencia' => $referencia,
+                'created_by' => optional($request->user())->id,
+            ]);
+
+            return $this->successResponse([
+                'message' => 'Nominal criada com sucesso',
+                'acquirer' => $this->formatAcquirerRow($acquirer),
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->errorResponse($e->validator->errors()->first(), 422);
+        } catch (\Exception $e) {
+            Log::error('Erro ao criar nominal de adquirente', ['error' => $e->getMessage()]);
+            return $this->errorResponse('Erro ao criar nominal de adquirente', 500);
+        }
+    }
+
+    /**
+     * Atualizar nome, URL, status ou credenciais de uma nominal existente.
+     * `referencia` e `provider` são imutáveis após a criação (evita quebrar
+     * resoluções já apontando para essa referencia).
+     *
+     * PUT /api/admin/acquirers/{id}
+     */
+    public function updateAcquirer(Request $request, int $id)
+    {
+        try {
+            $acquirer = Adquirente::find($id);
+            if (!$acquirer) {
+                return $this->errorResponse('Adquirente não encontrada', 404);
+            }
+
+            $request->validate([
+                'adquirente' => 'sometimes|required|string|max:255|unique:adquirentes,adquirente,' . $id,
+                'url' => 'sometimes|nullable|string|max:255',
+                'status' => 'sometimes|boolean',
+                'credentials' => 'sometimes|array',
+                'credentials.api_key' => 'sometimes|required|string',
+                'credentials.public_key' => 'sometimes|required|string',
+                'credentials.webhook_secret' => 'nullable|string',
+                'credentials.webhook_url' => 'nullable|url|max:255',
+            ]);
+
+            if ($request->has('credentials') && !in_array($acquirer->provider, self::MULTI_ACCOUNT_PROVIDERS, true)) {
+                return $this->errorResponse(
+                    'Este provider ainda não suporta credenciais por nominal.',
+                    422
+                );
+            }
+
+            $acquirer->fill($request->only(['adquirente', 'url', 'status']));
+
+            if ($request->has('credentials')) {
+                $acquirer->credentials = array_merge($acquirer->credentials ?? [], $request->input('credentials'));
+            }
+
+            $acquirer->save();
+
+            Log::info('Nominal de adquirente atualizada pelo admin', [
+                'acquirer_id' => $acquirer->id,
+                'updated_by' => optional($request->user())->id,
+            ]);
+
+            return $this->successResponse([
+                'message' => 'Nominal atualizada com sucesso',
+                'acquirer' => $this->formatAcquirerRow($acquirer),
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return $this->errorResponse($e->validator->errors()->first(), 422);
+        } catch (\Exception $e) {
+            Log::error('Erro ao atualizar nominal de adquirente', ['acquirer_id' => $id, 'error' => $e->getMessage()]);
+            return $this->errorResponse('Erro ao atualizar nominal de adquirente', 500);
+        }
+    }
+
+    /**
      * Formata uma linha de adquirente para resposta da API.
+     * `credentials` nunca é exposta ao frontend (dado sensível).
      */
     private function formatAcquirerRow(Adquirente $row): array
     {
         return [
             'id' => (int) $row->id,
             'adquirente' => (string) ($row->adquirente ?? ''),
-            'status' => (int) ($row->status ?? 0),
+            'status' => (int) $row->status,
             'url' => (string) ($row->url ?? ''),
             'referencia' => (string) ($row->referencia ?? ''),
-            'is_default' => (int) ($row->is_default ?? 0),
-            'is_default_card_billet' => (int) ($row->is_default_card_billet ?? 0),
+            'provider' => (string) ($row->provider ?? ''),
+            'has_credentials' => !empty($row->credentials),
+            'is_default' => (int) $row->is_default,
+            'is_default_card_billet' => (int) $row->is_default_card_billet,
             'created_at' => $row->created_at?->format('c'),
             'updated_at' => $row->updated_at?->format('c'),
         ];
