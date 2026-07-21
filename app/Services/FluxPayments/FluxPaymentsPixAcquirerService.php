@@ -95,7 +95,7 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
             'postbackUrl' => $this->resolveWebhookUrl(),
         ];
 
-        $webhookSecret = trim((string) config('fluxpayments.webhook_secret', ''));
+        $webhookSecret = $this->auth->webhookSecret();
         if ($webhookSecret !== '') {
             $payload['webhookSecret'] = $webhookSecret;
         }
@@ -231,7 +231,7 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
             'postbackUrl' => $this->resolveWebhookUrl(),
         ];
 
-        $webhookSecret = trim((string) config('fluxpayments.webhook_secret', ''));
+        $webhookSecret = $this->auth->webhookSecret();
         if ($webhookSecret !== '') {
             $payload['webhookSecret'] = $webhookSecret;
         }
@@ -685,7 +685,7 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
 
     private function resolveWebhookUrl(): string
     {
-        $configured = trim((string) config('fluxpayments.webhook_url', ''));
+        $configured = $this->auth->webhookUrl();
         if ($configured !== '') {
             return $configured;
         }
