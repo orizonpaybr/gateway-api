@@ -985,8 +985,11 @@ class FinancialService
      */
     private function depositPodeEstornar(Solicitacoes $item): bool
     {
-        $acq = strtolower(trim((string) ($item->adquirente_ref ?? $item->executor_ordem ?? '')));
-        if (! in_array($acq, ['simpay', 'fyhub', 'treeal', 'fluxpayments'], true)) {
+        // executor_ordem = família do provider (fixo por serviço); adquirente_ref
+        // pode variar por nominal (várias contas FluxPayments), então o gate de
+        // "provider suportado" precisa usar executor_ordem, não adquirente_ref.
+        $provider = strtolower(trim((string) ($item->executor_ordem ?? '')));
+        if (! in_array($provider, ['simpay', 'fyhub', 'treeal', 'fluxpayments'], true)) {
             return false;
         }
 
@@ -995,7 +998,7 @@ class FinancialService
             return false;
         }
 
-        if ($acq === 'treeal') {
+        if ($provider === 'treeal') {
             return trim((string) ($item->end_to_end ?? '')) !== '';
         }
 
@@ -1021,8 +1024,10 @@ class FinancialService
             throw new \Exception('Depósito não encontrado', 404);
         }
 
-        $acq = strtolower(trim((string) ($deposit->adquirente_ref ?? $deposit->executor_ordem ?? '')));
-        if (! in_array($acq, ['simpay', 'fyhub', 'treeal', 'fluxpayments'], true)) {
+        // executor_ordem = família do provider (fixo por serviço); adquirente_ref
+        // pode variar por nominal (várias contas FluxPayments).
+        $provider = strtolower(trim((string) ($deposit->executor_ordem ?? '')));
+        if (! in_array($provider, ['simpay', 'fyhub', 'treeal', 'fluxpayments'], true)) {
             throw new \Exception('Estorno disponível apenas para depósitos Simpay/Fyhub/Treeal/FluxPayments.', 422);
         }
 
@@ -1035,22 +1040,25 @@ class FinancialService
         }
 
         $tid = trim((string) ($deposit->idTransaction ?? ''));
-        if (in_array($acq, ['fyhub', 'treeal'], true)) {
+        if (in_array($provider, ['fyhub', 'treeal'], true)) {
             $tid = trim((string) ($deposit->end_to_end ?? ''));
         }
         if ($tid === '') {
             throw new \Exception(
-                in_array($acq, ['fyhub', 'treeal'], true)
-                    ? 'Depósito '.strtoupper($acq).' sem endToEndId para devolução.'
+                in_array($provider, ['fyhub', 'treeal'], true)
+                    ? 'Depósito '.strtoupper($provider).' sem endToEndId para devolução.'
                     : 'Transação sem identificador na adquirente.',
                 422
             );
         }
 
+        // adquirente_ref carrega a nominal específica (credenciais próprias);
+        // cai pro provider quando não houver (depósitos antigos, single-nominal).
+        $nominal = strtolower(trim((string) ($deposit->adquirente_ref ?? '')));
         $manager = app(PixAcquirerManager::class);
-        $acquirer = $manager->resolve($acq);
+        $acquirer = $manager->resolve($nominal !== '' ? $nominal : $provider);
         if (! $acquirer->isActive()) {
-            throw new \Exception('Integração '.$acq.' indisponível.', 503);
+            throw new \Exception('Integração '.$provider.' indisponível.', 503);
         }
 
         $refundResult = $acquirer->createRefund($tid, (float) $deposit->amount, $reason);
