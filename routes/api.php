@@ -90,6 +90,7 @@ Route::middleware(['verify.jwt', 'throttle:120,1'])->group(function () {
         
         // Rotas de gerenciamento de adquirentes (Admin)
         Route::get('admin/acquirers', [App\Http\Controllers\Api\AdminDashboardController::class, 'listAcquirers']);
+        Route::get('admin/acquirers/{id}', [App\Http\Controllers\Api\AdminDashboardController::class, 'showAcquirer'])->where('id', '[0-9]+');
         Route::post('admin/acquirers', [App\Http\Controllers\Api\AdminDashboardController::class, 'storeAcquirer']);
         Route::put('admin/acquirers/{id}', [App\Http\Controllers\Api\AdminDashboardController::class, 'updateAcquirer'])->where('id', '[0-9]+');
         Route::post('admin/acquirers/{id}/set-default', [App\Http\Controllers\Api\AdminDashboardController::class, 'setDefaultAcquirer'])->where('id', '[0-9]+');

@@ -904,6 +904,33 @@ class AdminDashboardController extends Controller
     }
 
     /**
+     * Detalhe de uma nominal, incluindo as credenciais decriptadas — usado
+     * apenas pelo modal de edição (nunca pela listagem) pra evitar que o
+     * admin precise redigitar tudo do zero só pra trocar um campo.
+     *
+     * Rota já protegida por 'ensure.admin' (só permission=3 chega aqui).
+     *
+     * GET /api/admin/acquirers/{id}
+     */
+    public function showAcquirer(int $id)
+    {
+        try {
+            $acquirer = Adquirente::find($id);
+            if (!$acquirer) {
+                return $this->errorResponse('Adquirente não encontrada', 404);
+            }
+
+            $data = $this->formatAcquirerRow($acquirer);
+            $data['credentials'] = $acquirer->credentials;
+
+            return $this->successResponse(['acquirer' => $data]);
+        } catch (\Exception $e) {
+            Log::error('Erro ao buscar adquirente', ['acquirer_id' => $id, 'error' => $e->getMessage()]);
+            return $this->errorResponse('Erro ao buscar adquirente', 500);
+        }
+    }
+
+    /**
      * Definir uma adquirente como a Global (is_default PIX) do sistema.
      *
      * Comportamento:
