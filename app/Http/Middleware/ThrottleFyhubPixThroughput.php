@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use App\Helpers\Helper;
 use App\Models\User;
+use App\Services\PixAcquirer\PixAcquirerManager;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
@@ -11,6 +12,8 @@ use Symfony\Component\HttpFoundation\Response;
 
 /**
  * Respeita o limite informado pela FYHUB (ex.: 200 TPS) apenas quando o PIX padrão do usuário é fyhub.
+ *
+ * Compara pelo `provider`, não pela `referencia` da nominal (ver ThrottleFluxPaymentsPixThroughput).
  */
 class ThrottleFyhubPixThroughput
 {
@@ -22,7 +25,8 @@ class ThrottleFyhubPixThroughput
         }
 
         $ref = Helper::adquirenteDefault($user->username, 'pix');
-        if ($ref !== 'fyhub') {
+        $provider = app(PixAcquirerManager::class)->resolve($ref)->getReference();
+        if ($provider !== 'fyhub') {
             return $next($request);
         }
 

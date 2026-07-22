@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use App\Helpers\Helper;
 use App\Models\User;
+use App\Services\PixAcquirer\PixAcquirerManager;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
@@ -11,6 +12,8 @@ use Symfony\Component\HttpFoundation\Response;
 
 /**
  * Respeita o limite informado pela TREEAL (300 TPS) quando o PIX padrão do usuário é treeal.
+ *
+ * Compara pelo `provider`, não pela `referencia` da nominal (ver ThrottleFluxPaymentsPixThroughput).
  */
 class ThrottleTreealPixThroughput
 {
@@ -22,7 +25,8 @@ class ThrottleTreealPixThroughput
         }
 
         $ref = Helper::adquirenteDefault($user->username, 'pix');
-        if ($ref !== 'treeal') {
+        $provider = app(PixAcquirerManager::class)->resolve($ref)->getReference();
+        if ($provider !== 'treeal') {
             return $next($request);
         }
 
