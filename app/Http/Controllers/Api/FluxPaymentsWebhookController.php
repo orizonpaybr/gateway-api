@@ -6,6 +6,7 @@ use App\Helpers\Helper;
 use App\Helpers\WebhookClientMessages;
 use App\Http\Controllers\Controller;
 use App\Jobs\ClientWebhookDispatchJob;
+use App\Models\Adquirente;
 use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
 use App\Services\ClientWebhookPayloadBuilder;
@@ -325,10 +326,16 @@ class FluxPaymentsWebhookController extends Controller
         return null;
     }
 
+    /**
+     * Cada nominal FluxPayments tem seu próprio webhook_secret — o evento
+     * pode ter vindo de qualquer uma delas, então valida contra todas as
+     * conhecidas (secret global do .env + credentials de cada nominal) e
+     * aceita se alguma bater.
+     */
     private function passesOptionalSignature(Request $request): bool
     {
-        $secret = trim((string) config('fluxpayments.webhook_secret', ''));
-        if ($secret === '') {
+        $secrets = $this->knownWebhookSecrets();
+        if ($secrets === []) {
             return true;
         }
 
@@ -338,9 +345,37 @@ class FluxPaymentsWebhookController extends Controller
         }
 
         $raw = $request->getContent();
-        $expected = hash_hmac('sha256', $raw, $secret);
 
-        return hash_equals($expected, $signature);
+        foreach ($secrets as $secret) {
+            if (hash_equals(hash_hmac('sha256', $raw, $secret), $signature)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function knownWebhookSecrets(): array
+    {
+        $secrets = [];
+
+        $global = trim((string) config('fluxpayments.webhook_secret', ''));
+        if ($global !== '') {
+            $secrets[] = $global;
+        }
+
+        $nominais = Adquirente::where('provider', 'fluxpayments')->whereNotNull('credentials')->get();
+        foreach ($nominais as $nominal) {
+            $secret = trim((string) ($nominal->credentials['webhook_secret'] ?? ''));
+            if ($secret !== '') {
+                $secrets[] = $secret;
+            }
+        }
+
+        return array_values(array_unique($secrets));
     }
 
     private function findDeposit(string $transactionId, string $externalRef): ?Solicitacoes
