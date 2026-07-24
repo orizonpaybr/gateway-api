@@ -668,50 +668,56 @@ class PixKeyController extends Controller
                     ? $acquirerService->resolveInitialPayoutStatus($providerStatus, $payoutE2e !== '' ? $payoutE2e : null)
                     : $acquirerService->mapPayoutStatus($providerStatus);
 
-                // Alinhado com SaqueController: terminal síncrono → PROCESSING + OutcomeApplier (estorno em FAILED).
+                // Alinhado com SaqueController: create+debit atômicos (sem PENDING intermediário sem débito).
                 $statusForDb = CashOutOutcomeApplier::isTerminalStatus($statusMapped)
                     ? 'PROCESSING'
                     : $statusMapped;
 
-                $withdrawal = SolicitacoesCashOut::create([
-                    'user_id' => $user->user_id ?? $user->username,
-                    'externalreference' => $correlationID,
-                    'amount' => $amount,
-                    'beneficiaryname' => '',
-                    'beneficiarydocument' => '',
-                    'pix' => $keyValue,
-                    'pixkey' => $keyType,
-                    'idTransaction' => $correlationID,
-                    'status' => 'PENDING',
-                    'type' => 'PIX',
-                    'date' => now(),
-                    'taxa_cash_out' => $taxaCashOut,
-                    'valor_total_descontado' => round($valorTotalDescontar, 4),
-                    'cash_out_liquido' => $cashOutLiquido,
-                    'descricao_transacao' => 'WEB',
-                    'executor_ordem' => $acquirerService->getReference(),
-                    'descricao_externa' => $correlationID,
-                    'callback' => 'web',
-                ]);
-
-                DB::transaction(function () use ($withdrawal, $user, $valorTotalDescontar, $idTxn, $statusForDb, $payoutE2e) {
+                $withdrawal = DB::transaction(function () use (
+                    $user,
+                    $correlationID,
+                    $amount,
+                    $keyValue,
+                    $keyType,
+                    $taxaCashOut,
+                    $cashOutLiquido,
+                    $valorTotalDescontar,
+                    $acquirerService,
+                    $idTxn,
+                    $statusForDb,
+                    $payoutE2e
+                ) {
                     $balanceService = app(\App\Services\BalanceService::class);
-                    $w = SolicitacoesCashOut::where('id', $withdrawal->id)->lockForUpdate()->first();
-                    if ($w === null) {
-                        return;
-                    }
+                    $w = SolicitacoesCashOut::create([
+                        'user_id' => $user->user_id ?? $user->username,
+                        'externalreference' => $correlationID,
+                        'amount' => $amount,
+                        'beneficiaryname' => '',
+                        'beneficiarydocument' => '',
+                        'pix' => $keyValue,
+                        'pixkey' => $keyType,
+                        'idTransaction' => $idTxn,
+                        'status' => $statusForDb,
+                        'type' => 'PIX',
+                        'date' => now(),
+                        'taxa_cash_out' => $taxaCashOut,
+                        'valor_total_descontado' => round($valorTotalDescontar, 4),
+                        'cash_out_liquido' => $cashOutLiquido,
+                        'descricao_transacao' => 'WEB',
+                        'executor_ordem' => $acquirerService->getReference(),
+                        'descricao_externa' => $correlationID,
+                        'callback' => 'web',
+                        'end_to_end' => $payoutE2e !== '' ? $payoutE2e : null,
+                    ]);
+
                     $dec = $balanceService->decrementCombinedBalanceWithSplit($user, $valorTotalDescontar);
                     $w->update([
-                        'idTransaction' => $idTxn,
-                        'externalreference' => $idTxn,
-                        'end_to_end' => $payoutE2e !== '' ? $payoutE2e : null,
-                        'status' => $statusForDb,
                         'debito_saldo_afiliado' => $dec['debito_saldo_afiliado'],
                         'debito_saldo_principal' => $dec['debito_saldo_principal'],
                     ]);
-                });
 
-                $withdrawal->refresh();
+                    return $w->fresh();
+                });
 
                 if (CashOutOutcomeApplier::isTerminalStatus($statusMapped)) {
                     if ($acquirerService->getReference() === 'fyhub') {

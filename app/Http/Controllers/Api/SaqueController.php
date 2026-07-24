@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api;
 
 use App\Helpers\Helper;
 use App\Helpers\TaxaSaqueHelper;
-use App\Helpers\WebhookClientMessages;
 use App\Http\Controllers\Controller;
 use App\Jobs\ClientWebhookDispatchJob;
 use App\Models\Adquirente;
@@ -181,12 +180,6 @@ class SaqueController extends Controller
      */
     private function processarSaque(Request $request, string $default, bool $isAutomatico, $setting, bool $isInterfaceWeb = false)
     {
-        /** @var SolicitacoesCashOut|null Saque automático criado em PENDING antes do Pix Out na adquirente (correlação webhook). */
-        $provisionedAutoWithdrawal = null;
-
-        /** @var bool True após a adquirente aceitar o Pix Out (evita marcar FAILED no catch se o webhook ainda precisa reconciliar). */
-        $pixOutApiAccepted = false;
-
         try {
             if (strtolower($default) === 'pagarme') {
                 return response()->json(['status' => 'error', 'message' => 'Adquirente não suportado para saques.'], 500);
@@ -334,29 +327,8 @@ class SaqueController extends Controller
                 $recipientDocument = null;
             }
 
-            // Persistir antes do Pix Out: se a adquirente aceitar e o PHP falhar depois, o webhook ainda encontra por externalId/correlationId.
-            $withdrawal = SolicitacoesCashOut::create([
-                'user_id' => $user->user_id ?? $user->username,
-                'externalreference' => $correlationID,
-                'amount' => $amount,
-                'beneficiaryname' => '',
-                'beneficiarydocument' => '',
-                'pix' => $keyValue,
-                'pixkey' => $keyType,
-                'idTransaction' => $correlationID,
-                'status' => 'PENDING',
-                'type' => 'PIX',
-                'date' => now(),
-                'taxa_cash_out' => $taxaCashOut,
-                'valor_total_descontado' => round($valorTotalDescontar, 4),
-                'cash_out_liquido' => $cashOutLiquido,
-                'descricao_transacao' => 'AUTOMATICO',
-                'executor_ordem' => $acquirerService->getReference(),
-                'descricao_externa' => $correlationID,
-                'callback' => $clientPostbackUrl,
-            ]);
-            $provisionedAutoWithdrawal = $withdrawal;
-
+            // Alinhado com PixKeyController: payout antes de persistir/debitar.
+            // Evita race webhook FAILED em PENDING sem débito → crédito indevido.
             $payoutResult = $acquirerService->createPayout(
                 $cashOutLiquido,
                 $keyValue,
@@ -368,9 +340,6 @@ class SaqueController extends Controller
             );
 
             if (! ($payoutResult['success'] ?? false)) {
-                $withdrawal->update(['status' => 'FAILED']);
-                $provisionedAutoWithdrawal = null;
-
                 Log::error('SaqueController::processarSaque — adquirente recusou payout', [
                     'acquirer' => $acquirerService->getReference(),
                     'message' => $payoutResult['message'] ?? 'N/A',
@@ -378,28 +347,11 @@ class SaqueController extends Controller
                     'amount' => $amount,
                 ]);
 
-                $failMsg = $payoutResult['message'] ?? null;
-                $payloadReason = is_string($failMsg) && $failMsg !== '' ? ['message' => $failMsg] : null;
-                if (! empty($withdrawal->callback) && $withdrawal->callback !== 'web') {
-                    $withdrawal->refresh();
-                    ClientWebhookDispatchJob::send(
-                        $withdrawal->callback,
-                        $withdrawal->idTransaction,
-                        'FAILED',
-                        (float) $withdrawal->amount,
-                        now()->toIso8601String(),
-                        ClientWebhookPayloadBuilder::extraForCashOut($withdrawal),
-                        WebhookClientMessages::getMessageForStatus('FAILED', 'PIX_OUT', $payloadReason)
-                    );
-                }
-
                 return response()->json([
                     'status' => 'error',
                     'message' => $payoutResult['message'] ?? 'Não foi possível processar o saque PIX.',
                 ], 400);
             }
-
-            $pixOutApiAccepted = true;
 
             $idTxnRaw = $payoutResult['referenceCode'] ?? $correlationID;
             $idTxn = is_string($idTxnRaw) ? trim($idTxnRaw) : (string) $idTxnRaw;
@@ -425,24 +377,52 @@ class SaqueController extends Controller
                 ? 'PROCESSING'
                 : $statusMapped;
 
-            DB::transaction(function () use ($withdrawal, $user, $balanceService, $idTxn, $statusForDb, $e2e, $valorTotalDescontar) {
-                $w = SolicitacoesCashOut::where('id', $withdrawal->id)->lockForUpdate()->first();
-                if ($w === null) {
-                    return;
-                }
+            $withdrawal = DB::transaction(function () use (
+                $user,
+                $correlationID,
+                $amount,
+                $keyValue,
+                $keyType,
+                $taxaCashOut,
+                $cashOutLiquido,
+                $valorTotalDescontar,
+                $clientPostbackUrl,
+                $acquirerService,
+                $balanceService,
+                $idTxn,
+                $statusForDb,
+                $e2e
+            ) {
+                $w = SolicitacoesCashOut::create([
+                    'user_id' => $user->user_id ?? $user->username,
+                    'externalreference' => $correlationID,
+                    'amount' => $amount,
+                    'beneficiaryname' => '',
+                    'beneficiarydocument' => '',
+                    'pix' => $keyValue,
+                    'pixkey' => $keyType,
+                    'idTransaction' => $idTxn,
+                    'status' => $statusForDb,
+                    'type' => 'PIX',
+                    'date' => now(),
+                    'taxa_cash_out' => $taxaCashOut,
+                    'valor_total_descontado' => round($valorTotalDescontar, 4),
+                    'cash_out_liquido' => $cashOutLiquido,
+                    'descricao_transacao' => 'AUTOMATICO',
+                    'executor_ordem' => $acquirerService->getReference(),
+                    'descricao_externa' => $correlationID,
+                    'callback' => $clientPostbackUrl,
+                    'end_to_end' => $e2e,
+                ]);
+
                 $dec = $balanceService->decrementCombinedBalanceWithSplit($user, $valorTotalDescontar);
                 $w->update([
-                    'idTransaction' => $idTxn,
-                    'externalreference' => $idTxn,
-                    'end_to_end' => $e2e,
-                    'status' => $statusForDb,
                     'debito_saldo_afiliado' => $dec['debito_saldo_afiliado'],
                     'debito_saldo_principal' => $dec['debito_saldo_principal'],
                 ]);
-            });
 
-            $withdrawal->refresh();
-            $provisionedAutoWithdrawal = null;
+                return $w->fresh();
+            });
 
             if (CashOutOutcomeApplier::isTerminalStatus($statusMapped)) {
                 if ($acquirerService->getReference() === 'fyhub') {
@@ -512,17 +492,6 @@ class SaqueController extends Controller
                 ],
             ], 200);
         } catch (\Exception $e) {
-            if ($provisionedAutoWithdrawal instanceof SolicitacoesCashOut && ! $pixOutApiAccepted) {
-                try {
-                    $provisionedAutoWithdrawal->refresh();
-                    if ($provisionedAutoWithdrawal->status === 'PENDING') {
-                        $provisionedAutoWithdrawal->update(['status' => 'FAILED']);
-                    }
-                } catch (\Throwable) {
-                    // evitar mascarar o erro original
-                }
-            }
-
             $tipo = $isAutomatico ? 'automático' : 'manual';
             Log::error("Erro no saque {$tipo}", [
                 'error' => $e->getMessage(),

@@ -4,17 +4,15 @@ namespace App\Console\Commands;
 
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
+use App\Services\WithdrawalFailureRefundService;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Estorna manualmente o saldo Coratri de um saque que ficou FAILED com débito registado
- * mas sem log de [WITHDRAWAL_REFUND] (ex.: webhook nunca chegou, poll falhou).
- *
- * Idempotente: cancela se o saque já não está em FAILED ou se não há débito.
- * SEMPRE use --dry-run primeiro para confirmar o que será feito.
+ * Estorna manualmente o saldo Coratri de um saque FAILED com débito ainda marcado.
+ * Idempotente: se debito_saldo_* já está 0/null, não credita de novo.
  */
 class PixOutManualRefundCommand extends Command
 {
@@ -48,11 +46,17 @@ class PixOutManualRefundCommand extends Command
             return self::FAILURE;
         }
 
-        // Validações de segurança
         if ($cashOut->status !== 'FAILED') {
             $this->error("Saque #{$id} tem status '{$cashOut->status}', não FAILED. Abortando.");
 
             return self::FAILURE;
+        }
+
+        if (\App\Services\WithdrawalFailureRefundService::debitAlreadyCleared($cashOut)
+            || ! \App\Services\WithdrawalFailureRefundService::hasRecordedDebit($cashOut)) {
+            $this->warn("Saque #{$id}: sem débito pendente (já estornado ou nunca debitou). Nada a fazer.");
+
+            return self::SUCCESS;
         }
 
         $debPr = (float) ($cashOut->debito_saldo_principal ?? 0);
@@ -60,13 +64,6 @@ class PixOutManualRefundCommand extends Command
         $valorDevolver = (float) ($cashOut->valor_total_descontado ?? 0) > 0
             ? (float) $cashOut->valor_total_descontado
             : (float) $cashOut->amount + (float) ($cashOut->taxa_cash_out ?? 0);
-
-        if ($debPr <= 0 && $debAf <= 0) {
-            $this->warn("Saque #{$id}: debito_saldo_principal e debito_saldo_afiliado são ambos 0 ou nulos.");
-            $this->warn('Falhou antes do débito — nada a estornar.');
-
-            return self::SUCCESS;
-        }
 
         if ($valorDevolver <= 0) {
             $this->error("valor_total_descontado = 0 e amount+taxa = 0 para saque #{$id}. Abortando.");
@@ -103,7 +100,6 @@ class PixOutManualRefundCommand extends Command
         }
 
         DB::transaction(function () use ($cashOut, $user, $debPr, $debAf, $valorDevolver) {
-            // Re-lock para garantir consistência
             $lockedCashOut = SolicitacoesCashOut::where('id', $cashOut->id)->lockForUpdate()->first();
             $lockedUser = User::where('id', $user->id)->lockForUpdate()->first();
 
@@ -111,7 +107,12 @@ class PixOutManualRefundCommand extends Command
                 throw new \RuntimeException("Status do saque mudou durante a operação: {$lockedCashOut?->status}");
             }
 
-            // Usar split gravado se disponível e coerente, senão só saldo principal
+            if (! WithdrawalFailureRefundService::hasRecordedDebit($lockedCashOut)) {
+                $this->warn('Débito já foi limpo por outra operação — abortando para evitar duplicar.');
+
+                return;
+            }
+
             $splitCoerente = ($debAf > 0 || $debPr > 0)
                 && abs(($debAf + $debPr) - round($valorDevolver, 4)) <= 0.02;
 
@@ -126,6 +127,8 @@ class PixOutManualRefundCommand extends Command
                 User::where('id', $lockedUser->id)->increment('saldo', round($valorDevolver, 4));
             }
 
+            WithdrawalFailureRefundService::clearDebitMarkers($lockedCashOut);
+
             Log::info('[MANUAL_PIXOUT_REFUND] Saldo manualmente restituído via artisan pixout:manual-refund', [
                 'cash_out_id' => $lockedCashOut->id,
                 'id_transaction' => $lockedCashOut->idTransaction,
@@ -139,7 +142,7 @@ class PixOutManualRefundCommand extends Command
         });
 
         $userFresh = $user->fresh();
-        $this->info("Estorno aplicado com sucesso.");
+        $this->info('Estorno aplicado com sucesso.');
         $this->line(sprintf(
             'Saldo após estorno: principal R$ %s | afiliado R$ %s | total R$ %s',
             number_format((float) ($userFresh->saldo ?? 0), 2, ',', '.'),

@@ -566,21 +566,30 @@ class WithdrawalController extends Controller
                     : (float) $locked->amount + (float) ($locked->taxa_cash_out ?? 0);
 
                 if ($valorDevolver > 0) {
-                    $balanceService = app(BalanceService::class);
-                    $debAf = $locked->debito_saldo_afiliado;
-                    $debPr = $locked->debito_saldo_principal;
+                    if (\App\Services\WithdrawalFailureRefundService::debitAlreadyCleared($locked)) {
+                        Log::info('WithdrawalController::reject - Débito já estornado, skip', [
+                            'saque_id' => $locked->id,
+                        ]);
+                    } elseif (\App\Services\WithdrawalFailureRefundService::hasRecordedDebit($locked)
+                        || ($locked->debito_saldo_principal === null && $locked->debito_saldo_afiliado === null)) {
+                        $balanceService = app(BalanceService::class);
+                        $debAf = $locked->debito_saldo_afiliado;
+                        $debPr = $locked->debito_saldo_principal;
 
-                    if ($debAf !== null && $debPr !== null
-                        && ((float) $debAf > 0 || (float) $debPr > 0)) {
-                        $a = round((float) $debAf, 4);
-                        $p = round((float) $debPr, 4);
-                        if (abs(($a + $p) - round($valorDevolver, 4)) > 0.02) {
-                            $balanceService->incrementBalance($userModel, $valorDevolver, 'saldo');
+                        if ($debAf !== null && $debPr !== null
+                            && ((float) $debAf > 0 || (float) $debPr > 0)) {
+                            $a = round((float) $debAf, 4);
+                            $p = round((float) $debPr, 4);
+                            if (abs(($a + $p) - round($valorDevolver, 4)) > 0.02) {
+                                $balanceService->incrementBalance($userModel, $valorDevolver, 'saldo');
+                            } else {
+                                $balanceService->incrementCombinedBalanceMirror($userModel, $a, $p);
+                            }
                         } else {
-                            $balanceService->incrementCombinedBalanceMirror($userModel, $a, $p);
+                            $balanceService->incrementBalance($userModel, $valorDevolver, 'saldo');
                         }
-                    } else {
-                        $balanceService->incrementBalance($userModel, $valorDevolver, 'saldo');
+
+                        \App\Services\WithdrawalFailureRefundService::clearDebitMarkers($locked);
                     }
                 }
 

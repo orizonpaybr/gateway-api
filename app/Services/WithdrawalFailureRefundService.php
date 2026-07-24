@@ -5,25 +5,19 @@ namespace App\Services;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
+use RuntimeException;
 
 /**
  * Restitui ao usuário o valor debitado do saldo quando um Pix Out não conclui
- * (CANCELLED / FAILED após PROCESSING ou PENDING com débito já aplicado).
+ * (CANCELLED / FAILED / REFUNDED após PROCESSING/PENDING com débito aplicado).
  *
- * O débito é feito em SaqueController via BalanceService::decrementCombinedBalance;
- * quando há split gravado (debito_saldo_*), restitui com incrementCombinedBalanceMirror.
- * Comissão de afiliado no cash-out (Marcos) só é paga ao concluir com sucesso; se já foi paga
- * e o saque falha depois, reverseCashOutCommissionForFailedWithdrawal reverte o pai.
+ * Regras: não estorna PENDING sem debito_*; após estornar zera debito_* (0);
+ * user ausente aborta a transação (não deixa FAILED sem estorno).
  */
 class WithdrawalFailureRefundService
 {
     /**
-     * Credita de volta o mesmo total debitado por BalanceService::decrementCombinedBalance.
-     * Preferimos `valor_total_descontado` gravado no débito; se ausente (registros antigos), amount + taxa_cash_out.
-     * Chamar dentro da mesma transação DB que atualiza o status do saque, com User lockado se possível.
-     *
-     * Estorno quando o saque foi marcado COMPLETED cedo demais (e2e na resposta síncrona)
-     * e o webhook CASHOUT REJECTED confirmou falha na validação DICT.
+     * Estorno quando o saque foi marcado COMPLETED cedo demais e o webhook confirmou falha DICT.
      */
     public static function creditBackAfterFalsePositiveCompletion(SolicitacoesCashOut $cashOut): void
     {
@@ -35,20 +29,49 @@ class WithdrawalFailureRefundService
         string $previousStatus,
         string $newStatus,
     ): void {
-        if (! in_array($newStatus, ['CANCELLED', 'FAILED'], true)) {
+        if (! in_array($newStatus, ['CANCELLED', 'FAILED', 'REFUNDED'], true)) {
             return;
         }
 
-        if (in_array($previousStatus, ['CANCELLED', 'FAILED', 'COMPLETED', 'REFUNDED'], true)) {
+        if (in_array($previousStatus, ['CANCELLED', 'FAILED', 'REFUNDED'], true)) {
             return;
         }
 
-        // Débito ocorre após sucesso da API de payout (PROCESSING/PENDING pós-API) ou no manual (outro fluxo).
-        if (! in_array($previousStatus, ['PROCESSING', 'PENDING'], true)) {
+        // COMPLETED→FAILED usa creditBackAfterFalsePositiveCompletion; COMPLETED→REFUNDED estorna aqui.
+        if ($previousStatus === 'COMPLETED') {
+            if ($newStatus !== 'REFUNDED') {
+                return;
+            }
+        } elseif (! in_array($previousStatus, ['PROCESSING', 'PENDING'], true)) {
             return;
         }
 
         self::creditBackAmount($cashOut, $previousStatus, $newStatus);
+    }
+
+    public static function hasRecordedDebit(SolicitacoesCashOut $cashOut): bool
+    {
+        return (float) ($cashOut->debito_saldo_principal ?? 0) > 0
+            || (float) ($cashOut->debito_saldo_afiliado ?? 0) > 0;
+    }
+
+    /** Débito já restituído (marcadores gravados como 0). */
+    public static function debitAlreadyCleared(SolicitacoesCashOut $cashOut): bool
+    {
+        return $cashOut->debito_saldo_principal !== null
+            && $cashOut->debito_saldo_afiliado !== null
+            && ! self::hasRecordedDebit($cashOut);
+    }
+
+    /**
+     * Marca débito como já restituído (0 = estornado; null = nunca debitou / legado).
+     */
+    public static function clearDebitMarkers(SolicitacoesCashOut $cashOut): void
+    {
+        $cashOut->update([
+            'debito_saldo_principal' => 0,
+            'debito_saldo_afiliado' => 0,
+        ]);
     }
 
     private static function creditBackAmount(
@@ -56,6 +79,34 @@ class WithdrawalFailureRefundService
         string $previousStatus,
         string $newStatus,
     ): void {
+        // Já estornado nesta linha — não creditar de novo.
+        if (self::debitAlreadyCleared($cashOut)) {
+            Log::info('[WITHDRAWAL_REFUND] Débito já limpo — skip', [
+                'cash_out_id' => $cashOut->id,
+                'previous_status' => $previousStatus,
+                'new_status' => $newStatus,
+            ]);
+
+            return;
+        }
+
+        // PENDING sem marcador de débito: linha criada antes do decremento (race) — não estornar.
+        $markersNull = $cashOut->debito_saldo_principal === null
+            && $cashOut->debito_saldo_afiliado === null;
+        if ($markersNull && $previousStatus === 'PENDING') {
+            Log::info('[WITHDRAWAL_REFUND] PENDING sem débito gravado — nada a estornar', [
+                'cash_out_id' => $cashOut->id,
+                'new_status' => $newStatus,
+            ]);
+
+            return;
+        }
+
+        // Sem débito positivo e não é legado PROCESSING (marcadores null): nada a fazer.
+        if (! self::hasRecordedDebit($cashOut) && ! $markersNull) {
+            return;
+        }
+
         $pelaLinha = (float) $cashOut->amount + (float) ($cashOut->taxa_cash_out ?? 0);
         $valorDevolver = $cashOut->valor_total_descontado !== null && (float) $cashOut->valor_total_descontado > 0
             ? (float) $cashOut->valor_total_descontado
@@ -67,12 +118,11 @@ class WithdrawalFailureRefundService
 
         $user = self::resolveUserForCashOut($cashOut);
         if (! $user) {
-            Log::warning('[WITHDRAWAL_REFUND] Usuário não encontrado para restituir Pix Out', [
-                'cash_out_id' => $cashOut->id,
-                'user_id' => $cashOut->user_id,
-            ]);
-
-            return;
+            // Abortar a transação do applier: status não pode ficar terminal sem estorno.
+            throw new RuntimeException(
+                '[WITHDRAWAL_REFUND] Usuário não encontrado para restituir Pix Out #'.$cashOut->id
+                .' (user_id='.$cashOut->user_id.')'
+            );
         }
 
         $balanceService = app(BalanceService::class);
@@ -98,6 +148,8 @@ class WithdrawalFailureRefundService
             User::where('id', $user->id)->increment('saldo', $valorDevolver);
         }
 
+        self::clearDebitMarkers($cashOut);
+
         CacheKeyService::forgetAffiliateUser((int) $user->id);
 
         Log::info('[WITHDRAWAL_REFUND] Saldo restituído após falha/cancelamento do Pix Out', [
@@ -113,7 +165,8 @@ class WithdrawalFailureRefundService
             'debito_saldo_principal' => $debPr,
         ]);
 
-        if ($previousStatus !== 'COMPLETED') {
+        // COMPLETED→FAILED (falso positivo) reverte comissão no applier; COMPLETED→REFUNDED reverte aqui.
+        if ($previousStatus !== 'COMPLETED' || $newStatus === 'REFUNDED') {
             try {
                 app(AffiliateCommissionService::class)->reverseCashOutCommissionForFailedWithdrawal($cashOut);
             } catch (\Throwable $e) {
