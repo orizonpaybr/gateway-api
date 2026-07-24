@@ -1512,8 +1512,18 @@ class FinancialService
                 return;
             }
 
-            // Incrementar saldo do usuário usando Helper (padrão do sistema)
-            Helper::incrementAmount($user, $deposit->deposito_liquido, 'saldo');
+            // Incrementar saldo do usuário (com trilha no balance_ledger_entries)
+            app(\App\Services\BalanceService::class)->incrementBalance(
+                $user,
+                (float) $deposit->deposito_liquido,
+                'saldo',
+                [
+                    'reason' => 'deposit_credit',
+                    'source' => 'FinancialService::aprovarDeposito',
+                    'ref_type' => 'solicitacoes',
+                    'ref_id' => $deposit->id,
+                ]
+            );
 
             // Calcular saldo líquido atualizado
             Helper::calculaSaldoLiquido($user->user_id);

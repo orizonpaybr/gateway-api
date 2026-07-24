@@ -321,8 +321,11 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
                 'correlation_id' => $correlationId,
             ]);
 
+            // Timeout/erro de rede: o Pix Out PODE ter sido executado. Não é recusa —
+            // quem chama não deve estornar, senão devolve saldo de um PIX que saiu.
             return [
                 'success' => false,
+                'indeterminate' => true,
                 'message' => 'Erro ao conectar com FluxPayments: '.$e->getMessage(),
             ];
         }

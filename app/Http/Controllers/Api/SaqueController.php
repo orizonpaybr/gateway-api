@@ -17,6 +17,7 @@ use App\Services\Fyhub\FyhubCashOutOutcomeService;
 use App\Services\Treeal\TreealCashOutOutcomeService;
 use App\Services\PixAcquirer\PixAcquirerManager;
 use App\Services\Simpay\SimpayCashOutOutcomeService;
+use App\Services\WithdrawalFailureRefundService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -333,8 +334,60 @@ class SaqueController extends Controller
                 $recipientDocument = null;
             }
 
-            // Alinhado com PixKeyController: payout antes de persistir/debitar.
-            // Evita race webhook FAILED em PENDING sem débito → crédito indevido.
+            // Reserva (linha + débito) ANTES do payout: nunca enviar PIX sem saldo já debitado.
+            // Debitar depois permitia o débito estourar "saldo insuficiente" com o PIX já pago
+            // (rollback desfazia o débito, a linha sobrevivia sem debito_* e o webhook virava COMPLETED).
+            // O lock do débito também serializa saques concorrentes, matando o race de duplicidade.
+            $withdrawal = DB::transaction(function () use (
+                $user,
+                $correlationID,
+                $amount,
+                $keyValue,
+                $keyType,
+                $taxaCashOut,
+                $cashOutLiquido,
+                $valorTotalDescontar,
+                $clientPostbackUrl,
+                $acquirerService,
+                $balanceService,
+                $default
+            ) {
+                $w = SolicitacoesCashOut::create([
+                    'user_id' => $user->user_id ?? $user->username,
+                    'externalreference' => $correlationID,
+                    'amount' => $amount,
+                    'beneficiaryname' => '',
+                    'beneficiarydocument' => '',
+                    'pix' => $keyValue,
+                    'pixkey' => $keyType,
+                    'idTransaction' => $correlationID,
+                    'status' => 'PENDING',
+                    'type' => 'PIX',
+                    'date' => now(),
+                    'taxa_cash_out' => $taxaCashOut,
+                    'valor_total_descontado' => round($valorTotalDescontar, 4),
+                    'cash_out_liquido' => $cashOutLiquido,
+                    'descricao_transacao' => 'AUTOMATICO',
+                    'executor_ordem' => $acquirerService->getReference(),
+                    'adquirente_ref' => $default,
+                    'descricao_externa' => $correlationID,
+                    'callback' => $clientPostbackUrl,
+                ]);
+
+                $dec = $balanceService->decrementCombinedBalanceWithSplit($user, $valorTotalDescontar, [
+                    'reason' => 'withdrawal_debit',
+                    'source' => 'SaqueController::automatico',
+                    'ref_type' => 'solicitacoes_cash_out',
+                    'ref_id' => $w->id,
+                ]);
+                $w->update([
+                    'debito_saldo_afiliado' => $dec['debito_saldo_afiliado'],
+                    'debito_saldo_principal' => $dec['debito_saldo_principal'],
+                ]);
+
+                return $w->fresh();
+            });
+
             $payoutResult = $acquirerService->createPayout(
                 $cashOutLiquido,
                 $keyValue,
@@ -346,12 +399,38 @@ class SaqueController extends Controller
             );
 
             if (! ($payoutResult['success'] ?? false)) {
+                $indeterminado = (bool) ($payoutResult['indeterminate'] ?? false);
+
                 Log::error('SaqueController::processarSaque — adquirente recusou payout', [
                     'acquirer' => $acquirerService->getReference(),
                     'message' => $payoutResult['message'] ?? 'N/A',
                     'user_id' => $user->username,
                     'amount' => $amount,
+                    'cash_out_id' => $withdrawal->id,
+                    'indeterminate' => $indeterminado,
                 ]);
+
+                if ($indeterminado) {
+                    // Timeout/rede: o PIX pode ter saído. Estornar aqui devolveria saldo de
+                    // um PIX pago. Fica debitado em PROCESSING para o webhook/poll resolver.
+                    Log::critical('[PIXOUT] Resultado INDETERMINADO — saldo mantido debitado, exige conciliação', [
+                        'cash_out_id' => $withdrawal->id,
+                        'correlation_id' => $correlationID,
+                        'acquirer' => $acquirerService->getReference(),
+                        'user_id' => $user->username,
+                        'valor_total_descontado' => $valorTotalDescontar,
+                    ]);
+                    $withdrawal->update(['status' => 'PROCESSING']);
+
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'Saque em processamento. Aguarde a confirmação.',
+                    ], 202);
+                }
+
+                // Recusa definitiva: nada saiu do banco, devolver o valor reservado.
+                $withdrawal->update(['status' => 'FAILED']);
+                WithdrawalFailureRefundService::creditBackIfApplicable($withdrawal->fresh(), 'PENDING', 'FAILED');
 
                 return response()->json([
                     'status' => 'error',
@@ -383,59 +462,13 @@ class SaqueController extends Controller
                 ? 'PROCESSING'
                 : $statusMapped;
 
-            $withdrawal = DB::transaction(function () use (
-                $user,
-                $correlationID,
-                $amount,
-                $keyValue,
-                $keyType,
-                $taxaCashOut,
-                $cashOutLiquido,
-                $valorTotalDescontar,
-                $clientPostbackUrl,
-                $acquirerService,
-                $balanceService,
-                $idTxn,
-                $statusForDb,
-                $e2e,
-                $default
-            ) {
-                $w = SolicitacoesCashOut::create([
-                    'user_id' => $user->user_id ?? $user->username,
-                    'externalreference' => $correlationID,
-                    'amount' => $amount,
-                    'beneficiaryname' => '',
-                    'beneficiarydocument' => '',
-                    'pix' => $keyValue,
-                    'pixkey' => $keyType,
-                    'idTransaction' => $idTxn,
-                    'status' => $statusForDb,
-                    'type' => 'PIX',
-                    'date' => now(),
-                    'taxa_cash_out' => $taxaCashOut,
-                    'valor_total_descontado' => round($valorTotalDescontar, 4),
-                    'cash_out_liquido' => $cashOutLiquido,
-                    'descricao_transacao' => 'AUTOMATICO',
-                    'executor_ordem' => $acquirerService->getReference(),
-                    'adquirente_ref' => $default,
-                    'descricao_externa' => $correlationID,
-                    'callback' => $clientPostbackUrl,
-                    'end_to_end' => $e2e,
-                ]);
-
-                $dec = $balanceService->decrementCombinedBalanceWithSplit($user, $valorTotalDescontar, [
-                    'reason' => 'withdrawal_debit',
-                    'source' => 'SaqueController::automatico',
-                    'ref_type' => 'solicitacoes_cash_out',
-                    'ref_id' => $w->id,
-                ]);
-                $w->update([
-                    'debito_saldo_afiliado' => $dec['debito_saldo_afiliado'],
-                    'debito_saldo_principal' => $dec['debito_saldo_principal'],
-                ]);
-
-                return $w->fresh();
-            });
+            // Linha e débito já existem (reserva acima): só correlacionar com a adquirente.
+            $withdrawal->update([
+                'idTransaction' => $idTxn,
+                'status' => $statusForDb,
+                'end_to_end' => $e2e,
+            ]);
+            $withdrawal->refresh();
 
             if (CashOutOutcomeApplier::isTerminalStatus($statusMapped)) {
                 if ($acquirerService->getReference() === 'fyhub') {
@@ -521,7 +554,8 @@ class SaqueController extends Controller
     }
 
     /**
-     * Persiste FAILED quando o saldo Coratri não cobre valor + taxa.
+     * Persiste FAILED quando o saldo DO CLIENTE não cobre valor + taxa.
+     * (Não tem relação com o saldo da Coratri na adquirente — nome legado.)
      * Sempre grava em solicitacoes_cash_out (comprovação operacional), mesmo sem callback.
      * Webhook só dispara se houver baasPostbackUrl válido.
      * Mensagem ao cliente permanece genérica (não expõe saldo).
@@ -586,7 +620,7 @@ class SaqueController extends Controller
                 );
             }
 
-            Log::warning('[PIXOUT] FAILED por saldo Coratri insuficiente', [
+            Log::warning('[PIXOUT] FAILED por saldo do CLIENTE insuficiente', [
                 'user_id' => $user->username,
                 'amount_solicitado' => $amountRequested,
                 'taxa_cash_out' => $taxaCashOut,

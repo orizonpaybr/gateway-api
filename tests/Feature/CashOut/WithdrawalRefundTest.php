@@ -201,6 +201,34 @@ class WithdrawalRefundTest extends TestCase
         $this->assertEquals(0.0, (float) $withdrawal->fresh()->debito_saldo_afiliado);
     }
 
+    /**
+     * Invariante da reserva-antes-do-payout: a linha nasce PENDING já debitada, e se a
+     * adquirente recusar o Pix Out o valor reservado volta integralmente. Sem isto, uma
+     * recusa deixaria o cliente debitado sem PIX (o inverso do vazamento de jul/2026).
+     */
+    public function test_pending_com_debito_estorna_quando_adquirente_recusa(): void
+    {
+        $user = AuthTestHelper::createTestUser([
+            'username' => 'reserva_'.uniqid(),
+            'email' => 'reserva_'.uniqid().'@example.com',
+            'saldo' => 20.00,
+            'saldo_afiliado' => 0.0,
+        ]);
+
+        $withdrawal = $this->createDebitedProcessingWithdrawal($user->user_id);
+        $withdrawal->update(['status' => 'PENDING']);
+
+        \App\Services\WithdrawalFailureRefundService::creditBackIfApplicable(
+            $withdrawal->fresh(),
+            'PENDING',
+            'FAILED'
+        );
+
+        $this->assertEquals(122.50, (float) $user->fresh()->saldo);
+        $this->assertEquals(0.0, (float) $withdrawal->fresh()->debito_saldo_principal);
+        $this->assertEquals(0.0, (float) $withdrawal->fresh()->debito_saldo_afiliado);
+    }
+
     public function test_idempotente_nao_estorna_em_dobro(): void
     {
         $user = AuthTestHelper::createTestUser([
