@@ -2,14 +2,40 @@
 
 namespace App\Services\FluxPayments;
 
+use App\Helpers\Helper;
 use App\Models\SolicitacoesCashOut;
 use App\Services\CashOut\CashOutOutcomeApplier;
+use App\Services\PixAcquirer\PixAcquirerInterface;
+use App\Services\PixAcquirer\PixAcquirerManager;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Aplica status terminal de cash-out FluxPayments (estorno + webhook) de forma idempotente.
  */
 final class FluxPaymentsCashOutOutcomeService
 {
+    /**
+     * Resolve a instância Flux da nominal do payout (não o singleton .env).
+     */
+    public static function resolveAcquirerForPayout(SolicitacoesCashOut $payout): PixAcquirerInterface
+    {
+        $nominal = strtolower(trim((string) ($payout->adquirente_ref ?? '')));
+
+        // Legado: manual gravava a nominal em executor_ordem antes do approve.
+        if ($nominal === '') {
+            $exec = strtolower(trim((string) ($payout->executor_ordem ?? '')));
+            if ($exec === 'fluxpayments') {
+                $nominal = 'fluxpayments';
+            } elseif ($exec !== '') {
+                $nominal = $exec;
+            } else {
+                $nominal = strtolower(trim((string) (Helper::adquirenteDefault($payout->user_id, 'pix') ?: 'fluxpayments')));
+            }
+        }
+
+        return app(PixAcquirerManager::class)->resolve($nominal !== '' ? $nominal : 'fluxpayments');
+    }
+
     /**
      * @param  array<string, mixed>|null  $rawForClientMessage
      */
@@ -38,8 +64,14 @@ final class FluxPaymentsCashOutOutcomeService
         int $maxAttempts = 3,
         int $sleepMicroseconds = 400_000,
     ): ?string {
-        $flux = app(FluxPaymentsPixAcquirerService::class);
+        $flux = self::resolveAcquirerForPayout($payout);
         if (! $flux->isActive()) {
+            Log::warning('[FLUXPAYMENTS][POLL] Adquirente inativa para payout', [
+                'payout_id' => $payout->id,
+                'adquirente_ref' => $payout->adquirente_ref,
+                'executor_ordem' => $payout->executor_ordem,
+            ]);
+
             return null;
         }
 

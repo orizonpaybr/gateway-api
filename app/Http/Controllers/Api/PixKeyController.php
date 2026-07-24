@@ -558,11 +558,17 @@ class PixKeyController extends Controller
                         'cash_out_liquido' => $cashOutLiquido,
                         'descricao_transacao' => 'MANUAL',
                         'executor_ordem' => $adquirenteDefault,
+                        'adquirente_ref' => $adquirenteDefault,
                         'callback' => 'web',
                     ]);
 
                     $balanceService = app(\App\Services\BalanceService::class);
-                    $dec = $balanceService->decrementCombinedBalanceWithSplit($user, $valorTotalDescontar);
+                    $dec = $balanceService->decrementCombinedBalanceWithSplit($user, $valorTotalDescontar, [
+                        'reason' => 'withdrawal_debit',
+                        'source' => 'PixKeyController::manual',
+                        'ref_type' => 'solicitacoes_cash_out',
+                        'ref_id' => $w->id,
+                    ]);
                     $w->update([
                         'debito_saldo_afiliado' => $dec['debito_saldo_afiliado'],
                         'debito_saldo_principal' => $dec['debito_saldo_principal'],
@@ -685,7 +691,8 @@ class PixKeyController extends Controller
                     $acquirerService,
                     $idTxn,
                     $statusForDb,
-                    $payoutE2e
+                    $payoutE2e,
+                    $adquirenteDefault
                 ) {
                     $balanceService = app(\App\Services\BalanceService::class);
                     $w = SolicitacoesCashOut::create([
@@ -705,12 +712,18 @@ class PixKeyController extends Controller
                         'cash_out_liquido' => $cashOutLiquido,
                         'descricao_transacao' => 'WEB',
                         'executor_ordem' => $acquirerService->getReference(),
+                        'adquirente_ref' => $adquirenteDefault,
                         'descricao_externa' => $correlationID,
                         'callback' => 'web',
                         'end_to_end' => $payoutE2e !== '' ? $payoutE2e : null,
                     ]);
 
-                    $dec = $balanceService->decrementCombinedBalanceWithSplit($user, $valorTotalDescontar);
+                    $dec = $balanceService->decrementCombinedBalanceWithSplit($user, $valorTotalDescontar, [
+                        'reason' => 'withdrawal_debit',
+                        'source' => 'PixKeyController::automatico',
+                        'ref_type' => 'solicitacoes_cash_out',
+                        'ref_id' => $w->id,
+                    ]);
                     $w->update([
                         'debito_saldo_afiliado' => $dec['debito_saldo_afiliado'],
                         'debito_saldo_principal' => $dec['debito_saldo_principal'],

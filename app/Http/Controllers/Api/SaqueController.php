@@ -271,11 +271,17 @@ class SaqueController extends Controller
                         'cash_out_liquido' => $cashOutLiquido,
                         'descricao_transacao' => 'MANUAL',
                         'executor_ordem' => $default,
+                        'adquirente_ref' => $default,
                         'callback' => $clientPostbackUrl,
                     ]);
 
                     $balanceService = app(\App\Services\BalanceService::class);
-                    $dec = $balanceService->decrementCombinedBalanceWithSplit($user, $valorTotalDescontar);
+                    $dec = $balanceService->decrementCombinedBalanceWithSplit($user, $valorTotalDescontar, [
+                        'reason' => 'withdrawal_debit',
+                        'source' => 'SaqueController::manual',
+                        'ref_type' => 'solicitacoes_cash_out',
+                        'ref_id' => $w->id,
+                    ]);
                     $w->update([
                         'debito_saldo_afiliado' => $dec['debito_saldo_afiliado'],
                         'debito_saldo_principal' => $dec['debito_saldo_principal'],
@@ -391,7 +397,8 @@ class SaqueController extends Controller
                 $balanceService,
                 $idTxn,
                 $statusForDb,
-                $e2e
+                $e2e,
+                $default
             ) {
                 $w = SolicitacoesCashOut::create([
                     'user_id' => $user->user_id ?? $user->username,
@@ -410,12 +417,18 @@ class SaqueController extends Controller
                     'cash_out_liquido' => $cashOutLiquido,
                     'descricao_transacao' => 'AUTOMATICO',
                     'executor_ordem' => $acquirerService->getReference(),
+                    'adquirente_ref' => $default,
                     'descricao_externa' => $correlationID,
                     'callback' => $clientPostbackUrl,
                     'end_to_end' => $e2e,
                 ]);
 
-                $dec = $balanceService->decrementCombinedBalanceWithSplit($user, $valorTotalDescontar);
+                $dec = $balanceService->decrementCombinedBalanceWithSplit($user, $valorTotalDescontar, [
+                    'reason' => 'withdrawal_debit',
+                    'source' => 'SaqueController::automatico',
+                    'ref_type' => 'solicitacoes_cash_out',
+                    'ref_id' => $w->id,
+                ]);
                 $w->update([
                     'debito_saldo_afiliado' => $dec['debito_saldo_afiliado'],
                     'debito_saldo_principal' => $dec['debito_saldo_principal'],
