@@ -4,7 +4,6 @@ namespace App\Jobs;
 
 use App\Models\SolicitacoesCashOut;
 use App\Services\FluxPayments\FluxPaymentsCashOutOutcomeService;
-use App\Services\FluxPayments\FluxPaymentsPixAcquirerService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -15,6 +14,7 @@ use Illuminate\Support\Facades\Log;
 
 /**
  * Reconcilia saques PIX FluxPayments em PROCESSING/PENDING via GET pix-out.
+ * Resolve a nominal por payout (adquirente_ref), não o singleton .env.
  */
 class ReconcileFluxPaymentsPayoutsJob implements ShouldQueue
 {
@@ -26,14 +26,11 @@ class ReconcileFluxPaymentsPayoutsJob implements ShouldQueue
 
     public function handle(): void
     {
-        $flux = app(FluxPaymentsPixAcquirerService::class);
-
-        if (! $flux->isActive()) {
-            return;
-        }
-
         $pendingPayouts = SolicitacoesCashOut::whereIn('status', ['PROCESSING', 'PENDING'])
-            ->where('executor_ordem', 'fluxpayments')
+            ->where(function ($q) {
+                $q->where('executor_ordem', 'fluxpayments')
+                    ->orWhere('adquirente_ref', 'like', 'fluxpayments%');
+            })
             ->whereNotNull('idTransaction')
             ->where('idTransaction', '!=', '')
             ->oldest('updated_at')
@@ -53,6 +50,11 @@ class ReconcileFluxPaymentsPayoutsJob implements ShouldQueue
 
         foreach ($pendingPayouts as $payout) {
             try {
+                $flux = FluxPaymentsCashOutOutcomeService::resolveAcquirerForPayout($payout);
+                if (! $flux->isActive()) {
+                    continue;
+                }
+
                 $e2e = trim((string) ($payout->end_to_end ?? ''));
                 $result = $flux->getPayoutStatus(
                     (string) $payout->idTransaction,
@@ -101,6 +103,7 @@ class ReconcileFluxPaymentsPayoutsJob implements ShouldQueue
                 Log::error('[FLUXPAYMENTS][RECONCILE] Erro ao reconciliar payout', [
                     'payout_id' => $payout->id,
                     'transaction_id' => $payout->idTransaction,
+                    'adquirente_ref' => $payout->adquirente_ref,
                     'error' => $e->getMessage(),
                 ]);
             }

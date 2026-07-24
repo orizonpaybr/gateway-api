@@ -101,7 +101,16 @@ class AffiliateCommissionService
 
             // Creditar comissão no saldo_afiliado do pai (separado do saldo principal)
             $balanceBeforeAffiliate = $affiliate->saldo_afiliado;
-            $this->balanceService->incrementBalance($affiliate, $commissionValue, 'saldo_afiliado');
+            $this->balanceService->incrementBalance($affiliate, $commissionValue, 'saldo_afiliado', [
+                'reason' => 'affiliate_cash_in',
+                'source' => 'AffiliateCommissionService::processCashInCommission',
+                'ref_type' => 'solicitacoes',
+                'ref_id' => $cashin->id,
+                'meta' => [
+                    'commission_id' => $commission->id,
+                    'child_user_id' => $user->user_id,
+                ],
+            ]);
             $balanceAfterAffiliate = $affiliate->fresh()->saldo_afiliado;
 
             // Atualizar status da comissão para paga
@@ -201,7 +210,16 @@ class AffiliateCommissionService
 
             // Creditar comissão no saldo_afiliado do pai (separado do saldo principal)
             $balanceBeforeAffiliate = $affiliate->saldo_afiliado;
-            $this->balanceService->incrementBalance($affiliate, $commissionValue, 'saldo_afiliado');
+            $this->balanceService->incrementBalance($affiliate, $commissionValue, 'saldo_afiliado', [
+                'reason' => 'affiliate_cash_out',
+                'source' => 'AffiliateCommissionService::processCashOutCommission',
+                'ref_type' => 'solicitacoes_cash_out',
+                'ref_id' => $cashout->id,
+                'meta' => [
+                    'commission_id' => $commission->id,
+                    'child_user_id' => $user->user_id,
+                ],
+            ]);
             $balanceAfterAffiliate = $affiliate->fresh()->saldo_afiliado;
 
             // Atualizar status da comissão para paga
@@ -255,7 +273,13 @@ class AffiliateCommissionService
 
             $amount = (float) $commission->commission_value;
             if ($amount > 0) {
-                User::where('id', $affiliate->id)->decrement('saldo_afiliado', $amount);
+                app(BalanceService::class)->decrementBalance($affiliate, $amount, 'saldo_afiliado', [
+                    'reason' => 'affiliate_cash_out_reverse',
+                    'source' => 'AffiliateCommissionService::reverseCashOutCommissionForFailedWithdrawal',
+                    'ref_type' => 'solicitacoes_cash_out',
+                    'ref_id' => $cashOut->id,
+                    'meta' => ['commission_id' => $commission->id],
+                ]);
             }
 
             $commission->update(['status' => 'reversed']);
@@ -305,7 +329,13 @@ class AffiliateCommissionService
 
             $amount = (float) $commission->commission_value;
             if ($amount > 0) {
-                User::where('id', $affiliate->id)->decrement('saldo_afiliado', $amount);
+                app(BalanceService::class)->decrementBalance($affiliate, $amount, 'saldo_afiliado', [
+                    'reason' => 'affiliate_cash_in_reverse',
+                    'source' => 'AffiliateCommissionService::reverseCashInCommissionForRefundedDeposit',
+                    'ref_type' => 'solicitacoes',
+                    'ref_id' => $cashin->id,
+                    'meta' => ['commission_id' => $commission->id],
+                ]);
             }
 
             $commission->update(['status' => 'reversed']);

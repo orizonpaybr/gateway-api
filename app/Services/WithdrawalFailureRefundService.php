@@ -142,10 +142,23 @@ class WithdrawalFailureRefundService
                 ]);
                 User::where('id', $user->id)->increment('saldo', $valorDevolver);
             } else {
-                $balanceService->incrementCombinedBalanceMirror($user, $a, $p);
+                $balanceService->incrementCombinedBalanceMirror($user, $a, $p, [
+                    'reason' => 'withdrawal_refund',
+                    'source' => 'WithdrawalFailureRefundService',
+                    'ref_type' => 'solicitacoes_cash_out',
+                    'ref_id' => $cashOut->id,
+                ]);
             }
         } else {
+            $before = (float) $user->saldo;
             User::where('id', $user->id)->increment('saldo', $valorDevolver);
+            $user = $user->fresh();
+            BalanceLedgerService::record($user, 'saldo', $valorDevolver, $before, (float) $user->saldo, [
+                'reason' => 'withdrawal_refund',
+                'source' => 'WithdrawalFailureRefundService',
+                'ref_type' => 'solicitacoes_cash_out',
+                'ref_id' => $cashOut->id,
+            ]);
         }
 
         self::clearDebitMarkers($cashOut);

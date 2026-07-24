@@ -116,15 +116,18 @@ class PixOutManualRefundCommand extends Command
             $splitCoerente = ($debAf > 0 || $debPr > 0)
                 && abs(($debAf + $debPr) - round($valorDevolver, 4)) <= 0.02;
 
+            $balanceService = app(\App\Services\BalanceService::class);
+            $audit = [
+                'reason' => 'manual_pixout_refund',
+                'source' => 'pixout:manual-refund',
+                'ref_type' => 'solicitacoes_cash_out',
+                'ref_id' => $lockedCashOut->id,
+            ];
+
             if ($splitCoerente && ($debAf > 0 || $debPr > 0)) {
-                if ($debAf > 0) {
-                    User::where('id', $lockedUser->id)->increment('saldo_afiliado', round($debAf, 4));
-                }
-                if ($debPr > 0) {
-                    User::where('id', $lockedUser->id)->increment('saldo', round($debPr, 4));
-                }
+                $balanceService->incrementCombinedBalanceMirror($lockedUser, $debAf, $debPr, $audit);
             } else {
-                User::where('id', $lockedUser->id)->increment('saldo', round($valorDevolver, 4));
+                $balanceService->incrementBalance($lockedUser, round($valorDevolver, 4), 'saldo', $audit);
             }
 
             WithdrawalFailureRefundService::clearDebitMarkers($lockedCashOut);

@@ -7,19 +7,17 @@ use App\Jobs\ClientWebhookDispatchJob;
 use App\Models\Solicitacoes;
 use App\Services\ClientWebhookPayloadBuilder;
 use App\Services\PaymentProcessingService;
+use App\Services\PixAcquirer\PixAcquirerManager;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
  * Quando o PIX foi pago na FluxPayments mas o postback não chegou,
  * consulta GET /api/v1/transactions/pix-in e liquida o depósito.
+ * Resolve a nominal via adquirente_ref (não o singleton .env).
  */
 class FluxPaymentsDepositReconciler
 {
-    public function __construct(
-        private readonly FluxPaymentsPixAcquirerService $fluxPayments,
-    ) {}
-
     public function reconcileIfPaid(Solicitacoes $deposit): bool
     {
         if ($deposit->executor_ordem !== 'fluxpayments') {
@@ -31,11 +29,23 @@ class FluxPaymentsDepositReconciler
         }
 
         $txid = trim((string) ($deposit->idTransaction ?? ''));
-        if ($txid === '' || ! $this->fluxPayments->isActive()) {
+        if ($txid === '') {
             return false;
         }
 
-        $result = $this->fluxPayments->getChargeStatus($txid);
+        $nominal = strtolower(trim((string) ($deposit->adquirente_ref ?? '')));
+        $flux = app(PixAcquirerManager::class)->resolve($nominal !== '' ? $nominal : 'fluxpayments');
+
+        if (! $flux instanceof FluxPaymentsPixAcquirerService || ! $flux->isActive()) {
+            Log::warning('[FLUXPAYMENTS][RECONCILE] Adquirente inativa para depósito', [
+                'deposit_id' => $deposit->id,
+                'adquirente_ref' => $deposit->adquirente_ref,
+            ]);
+
+            return false;
+        }
+
+        $result = $flux->getChargeStatus($txid);
         if (! ($result['success'] ?? false)) {
             return false;
         }
@@ -89,6 +99,7 @@ class FluxPaymentsDepositReconciler
             'deposit_id' => $deposit->id,
             'txid' => $txid,
             'user_id' => $deposit->user_id,
+            'adquirente_ref' => $deposit->adquirente_ref,
             'provider_status' => $raw['provider_status'] ?? null,
         ]);
 

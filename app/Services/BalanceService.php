@@ -5,125 +5,108 @@ namespace App\Services;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+
 /**
- * Service para operações de saldo thread-safe
- * 
- * Garante:
- * - Locks pessimistas para evitar race conditions
- * - Transações atômicas
- * - Operações seguras em ambiente concorrente
+ * Service para operações de saldo thread-safe.
+ * Quando $audit['reason'] é informado, grava em balance_ledger_entries.
  */
 class BalanceService
 {
     /**
-     * Incrementa saldo de forma thread-safe
-     * 
-     * @param User $user
-     * @param float $amount
-     * @param string $field Campo a incrementar (saldo, valor_saque_pendente, etc)
-     * @return User Usuário atualizado
-     * @throws \Exception Se operação falhar
+     * @param  array{reason?: string, source?: string, actor_id?: int|null, ref_type?: string|null, ref_id?: string|int|null, meta?: array|null}  $audit
      */
-    public function incrementBalance(User $user, float $amount, string $field = 'saldo'): User
+    public function incrementBalance(User $user, float $amount, string $field = 'saldo', array $audit = []): User
     {
-        return DB::transaction(function () use ($user, $amount, $field) {
-            // Lock pessimista - bloqueia outras threads até commit
-            $user = User::where('id', $user->id)
-                ->lockForUpdate()
-                ->first();
-            
-            if (!$user) {
+        return DB::transaction(function () use ($user, $amount, $field, $audit) {
+            $user = User::where('id', $user->id)->lockForUpdate()->first();
+            if (! $user) {
                 throw new \Exception("Usuário não encontrado: {$user->id}");
             }
-            
-            // Incremento atômico no banco (não depende de valor em memória)
-            User::where('id', $user->id)
-                ->increment($field, $amount);
-            
-            Log::info("Saldo incrementado com sucesso", [
+
+            $before = (float) $user->$field;
+            User::where('id', $user->id)->increment($field, $amount);
+            $user = $user->fresh();
+            $after = (float) $user->$field;
+
+            Log::info('Saldo incrementado com sucesso', [
                 'user_id' => $user->user_id,
                 'field' => $field,
                 'amount' => $amount,
-                'balance_before' => $user->$field,
-                'balance_after' => $user->fresh()->$field,
+                'balance_before' => $before,
+                'balance_after' => $after,
+                'reason' => $audit['reason'] ?? null,
             ]);
-            
-            // Retornar usuário atualizado
-            return $user->fresh();
+
+            $this->auditIfNeeded($user, $field, $amount, $before, $after, $audit);
+
+            return $user;
         });
     }
-    
+
     /**
-     * Decrementa saldo de forma thread-safe
-     * 
-     * @param User $user
-     * @param float $amount
-     * @param string $field Campo a decrementar (saldo, valor_saque_pendente, etc)
-     * @return User Usuário atualizado
-     * @throws \Exception Se saldo insuficiente ou operação falhar
+     * @param  array{reason?: string, source?: string, actor_id?: int|null, ref_type?: string|null, ref_id?: string|int|null, meta?: array|null}  $audit
      */
-    public function decrementBalance(User $user, float $amount, string $field = 'saldo'): User
+    public function decrementBalance(User $user, float $amount, string $field = 'saldo', array $audit = []): User
     {
-        return DB::transaction(function () use ($user, $amount, $field) {
-            // Lock pessimista
-            $user = User::where('id', $user->id)
-                ->lockForUpdate()
-                ->first();
-            
-            if (!$user) {
+        return DB::transaction(function () use ($user, $amount, $field, $audit) {
+            $user = User::where('id', $user->id)->lockForUpdate()->first();
+            if (! $user) {
                 throw new \Exception("Usuário não encontrado: {$user->id}");
             }
-            
-            // Verificar saldo suficiente (se for saldo)
+
             if ($field === 'saldo' && $user->saldo < $amount) {
                 throw new \Exception('Saldo insuficiente.');
             }
-            
-            // Decremento atômico no banco
-            User::where('id', $user->id)
-                ->decrement($field, $amount);
-            
-            Log::info("Saldo decrementado com sucesso", [
+
+            $before = (float) $user->$field;
+            User::where('id', $user->id)->decrement($field, $amount);
+            $user = $user->fresh();
+            $after = (float) $user->$field;
+
+            Log::info('Saldo decrementado com sucesso', [
                 'user_id' => $user->user_id,
                 'field' => $field,
                 'amount' => $amount,
-                'balance_before' => $user->$field,
-                'balance_after' => $user->fresh()->$field,
+                'balance_before' => $before,
+                'balance_after' => $after,
+                'reason' => $audit['reason'] ?? null,
             ]);
-            
-            return $user->fresh();
+
+            $this->auditIfNeeded($user, $field, -$amount, $before, $after, $audit);
+
+            return $user;
         });
     }
 
     /**
-     * Decrementa saldo para estorno (permite saldo negativo).
-     * Usado quando um depósito já creditado é estornado pela adquirente.
-     *
-     * @param User $user
-     * @param float $amount
-     * @param string $field Campo a decrementar (ex.: saldo)
-     * @return User Usuário atualizado
+     * @param  array{reason?: string, source?: string, actor_id?: int|null, ref_type?: string|null, ref_id?: string|int|null, meta?: array|null}  $audit
      */
-    public function decrementBalanceForRefund(User $user, float $amount, string $field = 'saldo'): User
+    public function decrementBalanceForRefund(User $user, float $amount, string $field = 'saldo', array $audit = []): User
     {
         $userId = $user->id;
-        return DB::transaction(function () use ($userId, $amount, $field) {
-            $user = User::where('id', $userId)
-                ->lockForUpdate()
-                ->first();
 
-            if (!$user) {
+        return DB::transaction(function () use ($userId, $amount, $field, $audit) {
+            $user = User::where('id', $userId)->lockForUpdate()->first();
+            if (! $user) {
                 throw new \Exception("Usuário não encontrado: {$userId}");
             }
 
+            $before = (float) $user->$field;
             User::where('id', $user->id)->decrement($field, $amount);
             $user = $user->fresh();
+            $after = (float) $user->$field;
 
             Log::info('Saldo debitado por estorno de depósito', [
-                'user_id'        => $user->user_id,
-                'field'          => $field,
-                'amount'         => $amount,
-                'balance_after'  => $user->$field,
+                'user_id' => $user->user_id,
+                'field' => $field,
+                'amount' => $amount,
+                'balance_after' => $after,
+                'reason' => $audit['reason'] ?? null,
+            ]);
+
+            $this->auditIfNeeded($user, $field, -$amount, $before, $after, $audit ?: [
+                'reason' => 'deposit_refund',
+                'source' => 'BalanceService::decrementBalanceForRefund',
             ]);
 
             return $user;
@@ -131,54 +114,42 @@ class BalanceService
     }
 
     /**
-     * Atualiza saldo de forma thread-safe (set absoluto)
-     * 
-     * @param User $user
-     * @param float $newValue
-     * @param string $field Campo a atualizar
-     * @return User Usuário atualizado
+     * @param  array{reason?: string, source?: string, actor_id?: int|null, ref_type?: string|null, ref_id?: string|int|null, meta?: array|null}  $audit
      */
-    public function setBalance(User $user, float $newValue, string $field = 'saldo'): User
+    public function setBalance(User $user, float $newValue, string $field = 'saldo', array $audit = []): User
     {
-        return DB::transaction(function () use ($user, $newValue, $field) {
-            $user = User::where('id', $user->id)
-                ->lockForUpdate()
-                ->first();
-            
-            if (!$user) {
+        return DB::transaction(function () use ($user, $newValue, $field, $audit) {
+            $user = User::where('id', $user->id)->lockForUpdate()->first();
+            if (! $user) {
                 throw new \Exception("Usuário não encontrado: {$user->id}");
             }
-            
-            $oldValue = $user->$field;
-            
-            User::where('id', $user->id)
-                ->update([$field => $newValue]);
-            
-            Log::info("Saldo atualizado", [
+
+            $before = (float) $user->$field;
+            User::where('id', $user->id)->update([$field => $newValue]);
+            $user = $user->fresh();
+            $after = (float) $user->$field;
+            $delta = $after - $before;
+
+            Log::info('Saldo atualizado', [
                 'user_id' => $user->user_id,
                 'field' => $field,
-                'old_value' => $oldValue,
-                'new_value' => $newValue,
+                'old_value' => $before,
+                'new_value' => $after,
+                'reason' => $audit['reason'] ?? null,
             ]);
-            
-            return $user->fresh();
+
+            $this->auditIfNeeded($user, $field, $delta, $before, $after, $audit);
+
+            return $user;
         });
     }
 
-    /**
-     * Obtém o saldo total disponível (saldo principal + saldo de afiliados)
-     * 
-     * @param User $user
-     * @return float Saldo total disponível
-     */
     public function getTotalAvailableBalance(User $user): float
     {
         return $this->getBalanceBreakdown($user)['saldo_disponivel'];
     }
 
     /**
-     * Saldo bruto, retido em mediação (MED) e disponível para saque.
-     *
      * @return array{
      *     saldo_bruto: float,
      *     saldo_em_mediacao: float,
@@ -210,91 +181,65 @@ class BalanceService
         ];
     }
 
-    /**
-     * Soma dos depósitos retidos em mediação (infração/MED) do usuário.
-     *
-     * Esses valores foram creditados no saldo no momento do depósito, mas estão
-     * bloqueados enquanto a MED está aberta (status MEDIATION). Por isso precisam
-     * ser descontados do saldo disponível para saque. Quando a MED é encerrada,
-     * o depósito sai de MEDIATION (REFUNDED debita o saldo; COMPLETED libera),
-     * então este hold deixa de contar — sem dupla contagem.
-     *
-     * Depósitos gravam user_id = username (vide DepositController).
-     */
     public function getMediationHoldAmount(User $user): float
     {
         return $this->getBalanceBreakdown($user)['saldo_em_mediacao'];
     }
 
-    /**
-     * Debita valor do saldo combinado (saldo_afiliado primeiro, depois saldo)
-     * Thread-safe, com lock pessimista
-     *
-     * @param  User  $user
-     * @param  float  $amount  Valor total a debitar
-     * @return User Usuário atualizado
-     *
-     * @throws \Exception Se saldo total insuficiente
-     */
     public function decrementCombinedBalance(User $user, float $amount): User
     {
         return $this->decrementCombinedBalanceWithSplit($user, $amount)['user'];
     }
 
     /**
-     * Igual a decrementCombinedBalance, mas retorna o split debitado para estorno fiel.
-     *
+     * @param  array{reason?: string, source?: string, actor_id?: int|null, ref_type?: string|null, ref_id?: string|int|null, meta?: array|null}  $audit
      * @return array{user: User, debito_saldo_afiliado: float, debito_saldo_principal: float}
-     *
-     * @throws \Exception Se saldo total insuficiente
      */
-    public function decrementCombinedBalanceWithSplit(User $user, float $amount): array
+    public function decrementCombinedBalanceWithSplit(User $user, float $amount, array $audit = []): array
     {
         if (DB::transactionLevel() > 0) {
-            return $this->decrementCombinedBalanceInner($user, $amount);
+            return $this->decrementCombinedBalanceInner($user, $amount, $audit);
         }
 
-        return DB::transaction(fn () => $this->decrementCombinedBalanceInner($user, $amount));
+        return DB::transaction(fn () => $this->decrementCombinedBalanceInner($user, $amount, $audit));
     }
 
     /**
-     * Devolve ao usuário o mesmo split debitado por decrementCombinedBalance (estorno de saque falho/cancelado).
-     *
-     * @param  float  $debitoSaldoAfiliado  Valor que saiu de saldo_afiliado
-     * @param  float  $debitoSaldoPrincipal  Valor que saiu de saldo
+     * @param  array{reason?: string, source?: string, actor_id?: int|null, ref_type?: string|null, ref_id?: string|int|null, meta?: array|null}  $audit
      */
-    public function incrementCombinedBalanceMirror(User $user, float $debitoSaldoAfiliado, float $debitoSaldoPrincipal): User
-    {
+    public function incrementCombinedBalanceMirror(
+        User $user,
+        float $debitoSaldoAfiliado,
+        float $debitoSaldoPrincipal,
+        array $audit = [],
+    ): User {
         if (DB::transactionLevel() > 0) {
-            return $this->incrementCombinedBalanceMirrorInner($user, $debitoSaldoAfiliado, $debitoSaldoPrincipal);
+            return $this->incrementCombinedBalanceMirrorInner($user, $debitoSaldoAfiliado, $debitoSaldoPrincipal, $audit);
         }
 
-        return DB::transaction(function () use ($user, $debitoSaldoAfiliado, $debitoSaldoPrincipal) {
-            return $this->incrementCombinedBalanceMirrorInner($user, $debitoSaldoAfiliado, $debitoSaldoPrincipal);
+        return DB::transaction(function () use ($user, $debitoSaldoAfiliado, $debitoSaldoPrincipal, $audit) {
+            return $this->incrementCombinedBalanceMirrorInner($user, $debitoSaldoAfiliado, $debitoSaldoPrincipal, $audit);
         });
     }
 
     /**
+     * @param  array{reason?: string, source?: string, actor_id?: int|null, ref_type?: string|null, ref_id?: string|int|null, meta?: array|null}  $audit
      * @return array{user: User, debito_saldo_afiliado: float, debito_saldo_principal: float}
      */
-    private function decrementCombinedBalanceInner(User $user, float $amount): array
+    private function decrementCombinedBalanceInner(User $user, float $amount, array $audit = []): array
     {
-        $user = User::where('id', $user->id)
-            ->lockForUpdate()
-            ->first();
-
+        $user = User::where('id', $user->id)->lockForUpdate()->first();
         if (! $user) {
             throw new \Exception("Usuário não encontrado: {$user->id}");
         }
 
         $totalDisponivel = $user->saldo + $user->saldo_afiliado;
-
         if ($totalDisponivel < $amount) {
             throw new \Exception('Saldo insuficiente.');
         }
 
-        $saldoAfiliadoAntes = $user->saldo_afiliado;
-        $saldoAntes = $user->saldo;
+        $saldoAfiliadoAntes = (float) $user->saldo_afiliado;
+        $saldoAntes = (float) $user->saldo;
         $restante = $amount;
 
         $debitoAfiliado = 0.0;
@@ -311,7 +256,6 @@ class BalanceService
         }
 
         $user = $user->fresh();
-
         $splitAfiliado = round((float) $debitoAfiliado, 4);
         $splitPrincipal = round((float) $debitoPrincipal, 4);
 
@@ -324,9 +268,20 @@ class BalanceService
             'saldo_afiliado_after' => $user->saldo_afiliado,
             'saldo_before' => $saldoAntes,
             'saldo_after' => $user->saldo,
-            'total_before' => $saldoAfiliadoAntes + $saldoAntes,
-            'total_after' => $user->saldo_afiliado + $user->saldo,
         ]);
+
+        if ($splitAfiliado > 0) {
+            $this->auditIfNeeded($user, 'saldo_afiliado', -$splitAfiliado, $saldoAfiliadoAntes, (float) $user->saldo_afiliado, $audit ?: [
+                'reason' => 'withdrawal_debit',
+                'source' => 'BalanceService::decrementCombinedBalance',
+            ]);
+        }
+        if ($splitPrincipal > 0) {
+            $this->auditIfNeeded($user, 'saldo', -$splitPrincipal, $saldoAntes, (float) $user->saldo, $audit ?: [
+                'reason' => 'withdrawal_debit',
+                'source' => 'BalanceService::decrementCombinedBalance',
+            ]);
+        }
 
         CacheKeyService::forgetAffiliateUser($user->id);
 
@@ -337,20 +292,26 @@ class BalanceService
         ];
     }
 
-    private function incrementCombinedBalanceMirrorInner(User $user, float $debitoSaldoAfiliado, float $debitoSaldoPrincipal): User
-    {
-        $user = User::where('id', $user->id)
-            ->lockForUpdate()
-            ->first();
-
+    /**
+     * @param  array{reason?: string, source?: string, actor_id?: int|null, ref_type?: string|null, ref_id?: string|int|null, meta?: array|null}  $audit
+     */
+    private function incrementCombinedBalanceMirrorInner(
+        User $user,
+        float $debitoSaldoAfiliado,
+        float $debitoSaldoPrincipal,
+        array $audit = [],
+    ): User {
+        $user = User::where('id', $user->id)->lockForUpdate()->first();
         if (! $user) {
             throw new \Exception("Usuário não encontrado: {$user->id}");
         }
 
+        $saldoAfiliadoAntes = (float) $user->saldo_afiliado;
+        $saldoAntes = (float) $user->saldo;
+
         if ($debitoSaldoAfiliado > 0) {
             User::where('id', $user->id)->increment('saldo_afiliado', $debitoSaldoAfiliado);
         }
-
         if ($debitoSaldoPrincipal > 0) {
             User::where('id', $user->id)->increment('saldo', $debitoSaldoPrincipal);
         }
@@ -365,8 +326,37 @@ class BalanceService
             'saldo_after' => $user->saldo,
         ]);
 
+        $ctx = $audit ?: [
+            'reason' => 'withdrawal_refund',
+            'source' => 'BalanceService::incrementCombinedBalanceMirror',
+        ];
+        if ($debitoSaldoAfiliado > 0) {
+            $this->auditIfNeeded($user, 'saldo_afiliado', $debitoSaldoAfiliado, $saldoAfiliadoAntes, (float) $user->saldo_afiliado, $ctx);
+        }
+        if ($debitoSaldoPrincipal > 0) {
+            $this->auditIfNeeded($user, 'saldo', $debitoSaldoPrincipal, $saldoAntes, (float) $user->saldo, $ctx);
+        }
+
         CacheKeyService::forgetAffiliateUser($user->id);
 
         return $user;
+    }
+
+    /**
+     * @param  array{reason?: string, source?: string, actor_id?: int|null, ref_type?: string|null, ref_id?: string|int|null, meta?: array|null}  $audit
+     */
+    private function auditIfNeeded(
+        User $user,
+        string $field,
+        float $delta,
+        float $before,
+        float $after,
+        array $audit,
+    ): void {
+        if (! isset($audit['reason']) || trim((string) $audit['reason']) === '') {
+            return;
+        }
+
+        BalanceLedgerService::record($user, $field, $delta, $before, $after, $audit);
     }
 }

@@ -431,7 +431,7 @@ class WithdrawalController extends Controller
             ? 'PROCESSING'
             : $statusMapped;
 
-        DB::transaction(function () use ($saque, $idTxn, $statusForDb, $taxaCashOut, $correlationID, $acquirerService, $e2e) {
+        DB::transaction(function () use ($saque, $idTxn, $statusForDb, $taxaCashOut, $correlationID, $acquirerService, $e2e, $adquirente) {
             $saqueAtualizado = SolicitacoesCashOut::where('id', $saque->id)
                 ->lockForUpdate()
                 ->first();
@@ -446,6 +446,7 @@ class WithdrawalController extends Controller
                 'idTransaction' => $idTxn,
                 'end_to_end' => $e2e,
                 'executor_ordem' => $acquirerService->getReference(),
+                'adquirente_ref' => $adquirente,
                 'taxa_cash_out' => $taxaCashOut,
                 'descricao_externa' => $correlationID,
             ]);

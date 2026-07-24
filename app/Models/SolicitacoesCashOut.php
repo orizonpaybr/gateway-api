@@ -32,6 +32,7 @@ class SolicitacoesCashOut extends Model
         "end_to_end",
         "descricao_transacao",
         "executor_ordem",
+        "adquirente_ref",
       	"descricao_externa",
         "blockchainNetwork",
         "cryptocurrency",

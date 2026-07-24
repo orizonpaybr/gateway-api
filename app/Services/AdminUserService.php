@@ -519,43 +519,54 @@ class AdminUserService
     public function adjustBalance(int $userId, float $amount, string $type = 'add'): User
     {
         DB::beginTransaction();
-        
+
         try {
-            $user = User::findOrFail($userId);
-            
-            // Salvar saldo antigo antes de atualizar
-            $oldBalance = $user->saldo;
-            
-            $newBalance = $type === 'add' 
-                ? $user->saldo + $amount 
-                : $user->saldo - $amount;
-            
+            $user = User::lockForUpdate()->findOrFail($userId);
+
+            $oldBalance = (float) $user->saldo;
+            $delta = $type === 'add' ? $amount : -$amount;
+            $newBalance = $oldBalance + $delta;
+
             if ($newBalance < 0) {
                 throw new \Exception('Saldo não pode ser negativo');
             }
-            
-            $user->update(['saldo' => $newBalance]);
-            
-            // Limpar cache
+
+            if ($type === 'add') {
+                app(BalanceService::class)->incrementBalance($user, $amount, 'saldo', [
+                    'reason' => 'admin_adjust',
+                    'source' => 'AdminUserService::adjustBalance',
+                    'actor_id' => Auth::id(),
+                    'meta' => ['type' => 'add'],
+                ]);
+            } else {
+                app(BalanceService::class)->decrementBalance($user, $amount, 'saldo', [
+                    'reason' => 'admin_adjust',
+                    'source' => 'AdminUserService::adjustBalance',
+                    'actor_id' => Auth::id(),
+                    'meta' => ['type' => 'subtract'],
+                ]);
+            }
+
             CacheKeyService::forgetUser($userId);
-            CacheKeyService::forgetDashboardStats(); // Atualiza saldo total
-            
+            CacheKeyService::forgetDashboardStats();
+
             DB::commit();
-            
+
+            $user = $user->fresh();
             Log::info('Saldo ajustado pelo admin', [
                 'user_id' => $userId,
                 'old_balance' => $oldBalance,
-                'new_balance' => $newBalance,
+                'new_balance' => (float) $user->saldo,
                 'amount' => $amount,
                 'type' => $type,
-                'adjusted_by' => Auth::id()
+                'adjusted_by' => Auth::id(),
             ]);
-            
-            return $user->fresh();
-            
+
+            return $user;
+
         } catch (\Exception $e) {
             DB::rollBack();
-            
+
             Log::error('Erro ao ajustar saldo', [
                 'user_id' => $userId,
                 'error' => $e->getMessage()
