@@ -12,8 +12,8 @@ use Tests\TestCase;
  * Garante o comportamento de saldo no status terminal de Pix Out (núcleo compartilhado
  * por API, dashboard e webhooks via CashOutOutcomeApplier):
  *  - COMPLETED: NÃO estorna (saque funcionou — saldo permanece debitado).
- *  - FAILED / CANCELLED após débito: ESTORNA (saldo volta).
- *  - Lookup do dono funciona quando user_id na linha é o username.
+ *  - FAILED / CANCELLED / REFUNDED após débito: ESTORNA (saldo volta) e zera debito_*.
+ *  - PENDING sem débito: NÃO estorna (evita race webhook antes do decremento).
  *  - Idempotência: aplicar status terminal duas vezes não estorna em dobro.
  */
 class WithdrawalRefundTest extends TestCase
@@ -76,11 +76,11 @@ class WithdrawalRefundTest extends TestCase
         $withdrawal->refresh();
         $this->assertEquals('COMPLETED', $withdrawal->status);
 
-        // Saldo NÃO deve ser alterado (saque concluído com sucesso).
         $this->assertEquals(50.00, (float) $user->fresh()->saldo);
+        $this->assertEquals(102.50, (float) $withdrawal->debito_saldo_principal);
     }
 
-    public function test_failed_apos_processing_estorna_saldo(): void
+    public function test_failed_apos_processing_estorna_saldo_e_zera_debito(): void
     {
         $user = AuthTestHelper::createTestUser([
             'username' => 'fail_'.uniqid(),
@@ -97,8 +97,9 @@ class WithdrawalRefundTest extends TestCase
         $withdrawal->refresh();
         $this->assertEquals('FAILED', $withdrawal->status);
 
-        // Saldo deve voltar: 50 + 102.50 debitado = 152.50
         $this->assertEquals(152.50, (float) $user->fresh()->saldo);
+        $this->assertEquals(0.0, (float) $withdrawal->debito_saldo_principal);
+        $this->assertEquals(0.0, (float) $withdrawal->debito_saldo_afiliado);
     }
 
     public function test_cancelled_apos_processing_estorna_saldo(): void
@@ -114,8 +115,66 @@ class WithdrawalRefundTest extends TestCase
 
         $this->applier()->applyTerminalStatusIfNeeded($withdrawal, 'CANCELLED');
 
-        $this->assertEquals('CANCELLED', $withdrawal->fresh()->status);
+        $fresh = $withdrawal->fresh();
+        $this->assertEquals('CANCELLED', $fresh->status);
         $this->assertEquals(112.50, (float) $user->fresh()->saldo);
+        $this->assertEquals(0.0, (float) $fresh->debito_saldo_principal);
+    }
+
+    public function test_refunded_apos_processing_estorna_saldo(): void
+    {
+        $user = AuthTestHelper::createTestUser([
+            'username' => 'ref_'.uniqid(),
+            'email' => 'ref_'.uniqid().'@example.com',
+            'saldo' => 0.0,
+            'saldo_afiliado' => 0.0,
+        ]);
+
+        $withdrawal = $this->createDebitedProcessingWithdrawal($user->user_id);
+
+        $this->applier()->applyTerminalStatusIfNeeded($withdrawal, 'REFUNDED');
+
+        $fresh = $withdrawal->fresh();
+        $this->assertEquals('REFUNDED', $fresh->status);
+        $this->assertEquals(102.50, (float) $user->fresh()->saldo);
+        $this->assertEquals(0.0, (float) $fresh->debito_saldo_principal);
+    }
+
+    public function test_pending_sem_debito_nao_estorna_ao_falhar(): void
+    {
+        $user = AuthTestHelper::createTestUser([
+            'username' => 'race_'.uniqid(),
+            'email' => 'race_'.uniqid().'@example.com',
+            'saldo' => 100.00,
+            'saldo_afiliado' => 0.0,
+        ]);
+
+        $withdrawal = SolicitacoesCashOut::create([
+            'user_id' => $user->user_id,
+            'idTransaction' => 'TXN_'.uniqid(),
+            'externalreference' => 'EXT_'.uniqid(),
+            'amount' => 100.00,
+            'cash_out_liquido' => 98.50,
+            'taxa_cash_out' => 1.50,
+            'valor_total_descontado' => 100.00,
+            'debito_saldo_principal' => null,
+            'debito_saldo_afiliado' => null,
+            'status' => 'PENDING',
+            'date' => now(),
+            'pix' => 'test@example.com',
+            'pixkey' => 'email',
+            'type' => 'PIX',
+            'beneficiaryname' => '',
+            'beneficiarydocument' => '',
+            'descricao_transacao' => 'AUTOMATICO',
+            'executor_ordem' => 'fluxpayments',
+            'callback' => null,
+        ]);
+
+        $this->applier()->applyTerminalStatusIfNeeded($withdrawal, 'FAILED');
+
+        $this->assertEquals('FAILED', $withdrawal->fresh()->status);
+        $this->assertEquals(100.00, (float) $user->fresh()->saldo);
     }
 
     public function test_estorna_split_afiliado_e_principal(): void
@@ -127,7 +186,6 @@ class WithdrawalRefundTest extends TestCase
             'saldo_afiliado' => 0.0,
         ]);
 
-        // Débito de 102.50 dividido: 40 afiliado + 62.50 principal
         $withdrawal = $this->createDebitedProcessingWithdrawal(
             $user->user_id,
             debitoPrincipal: 62.50,
@@ -139,6 +197,8 @@ class WithdrawalRefundTest extends TestCase
         $fresh = $user->fresh();
         $this->assertEquals(62.50, (float) $fresh->saldo);
         $this->assertEquals(40.00, (float) $fresh->saldo_afiliado);
+        $this->assertEquals(0.0, (float) $withdrawal->fresh()->debito_saldo_principal);
+        $this->assertEquals(0.0, (float) $withdrawal->fresh()->debito_saldo_afiliado);
     }
 
     public function test_idempotente_nao_estorna_em_dobro(): void
@@ -158,7 +218,7 @@ class WithdrawalRefundTest extends TestCase
         $this->assertTrue($first);
         $this->assertFalse($second);
 
-        // Estornado uma única vez: 0 + 102.50
         $this->assertEquals(102.50, (float) $user->fresh()->saldo);
+        $this->assertEquals(0.0, (float) $withdrawal->fresh()->debito_saldo_principal);
     }
 }
