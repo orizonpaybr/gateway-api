@@ -70,4 +70,55 @@ class BalanceLedgerAuditTest extends TestCase
         $this->assertEquals(1.5, (float) $entry->delta);
         $this->assertEquals(11.5, (float) $entry->balance_after);
     }
+
+    /**
+     * Aprovação manual (admin) + webhook no mesmo depósito NÃO pode creditar duas vezes.
+     * Antes o caminho admin creditava sem gravar PaymentEvent, então o webhook não via
+     * o crédito anterior e recreditava. Agora ambos compartilham a idempotência do evento.
+     */
+    public function test_aprovacao_admin_mais_webhook_nao_credita_em_dobro(): void
+    {
+        $user = AuthTestHelper::createTestUser([
+            'username' => 'dep_'.uniqid(),
+            'email' => 'dep_'.uniqid().'@example.com',
+            'saldo' => 0,
+        ]);
+
+        $deposit = \App\Models\Solicitacoes::create([
+            'user_id' => $user->user_id,
+            'externalreference' => 'DEP_'.uniqid(),
+            'idTransaction' => 'DEP_'.uniqid(),
+            'amount' => 100.00,
+            'deposito_liquido' => 90.00,
+            'taxa_cash_in' => 10.00,
+            'status' => 'WAITING_FOR_APPROVAL',
+            'date' => now(),
+            'client_name' => 'Cliente Teste',
+            'client_document' => '12345678900',
+            'client_email' => 'cliente@example.com',
+            'client_telefone' => '11999999999',
+            'adquirente_ref' => 'test',
+            'descricao_transacao' => 'AUTOMATICO',
+            'executor_ordem' => 'test',
+            'paymentcode' => 'PC_'.uniqid(),
+            'paymentCodeBase64' => 'base64',
+            'qrcode_pix' => 'qr',
+            'taxa_pix_cash_in_adquirente' => 0,
+            'taxa_pix_cash_in_valor_fixo' => 0,
+        ]);
+
+        // 1) Admin aprova manualmente → credita uma vez e grava o evento.
+        app(\App\Services\FinancialService::class)->updateDepositStatus($deposit->id, 'PAID_OUT');
+        $this->assertEquals(90.00, (float) $user->fresh()->saldo);
+
+        // 2) Webhook chega depois para o MESMO depósito → deve ver o evento e não recreditar.
+        app(\App\Services\PaymentProcessingService::class)->processPaymentReceived($deposit->fresh());
+
+        $this->assertEquals(90.00, (float) $user->fresh()->saldo, 'Saldo não pode dobrar entre admin e webhook');
+
+        $eventos = \App\Models\PaymentEvent::where('transaction_id', $deposit->id)
+            ->where('event_type', 'PAYMENT_RECEIVED')
+            ->count();
+        $this->assertEquals(1, $eventos, 'Deve haver exatamente um evento de crédito');
+    }
 }
