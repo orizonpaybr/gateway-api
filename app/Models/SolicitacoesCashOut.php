@@ -144,6 +144,42 @@ class SolicitacoesCashOut extends Model
     }
 
     /**
+     * Estados em que um Pix Out está reservado/em voo para a adquirente.
+     * Um novo saque do mesmo cliente enquanto há um destes é duplicidade.
+     */
+    public const IN_FLIGHT_STATUSES = ['PENDING', 'PROCESSING'];
+
+    /**
+     * Janela (minutos) em que um saque em voo bloqueia um novo do mesmo cliente.
+     * Tempo-limitada de propósito: uma linha travada além disso é problema do
+     * reaper (pixout:reconcile-stuck), nunca deve prender o cliente para sempre.
+     */
+    public const IN_FLIGHT_GUARD_MINUTES = 15;
+
+    /**
+     * Há um saque em voo (recente) para este cliente? Serializa saques: um por vez.
+     * Deve ser chamado DENTRO da transação que segura o lock do usuário, senão a
+     * checagem tem race (dois pedidos veem "nenhum em voo" e ambos disparam).
+     */
+    public static function userHasInFlightWithdrawal(User $user): bool
+    {
+        $identifiers = array_values(array_filter([
+            $user->user_id,
+            $user->username,
+        ], fn ($v) => $v !== null && $v !== ''));
+
+        if ($identifiers === []) {
+            return false;
+        }
+
+        return static::query()
+            ->whereIn('user_id', $identifiers)
+            ->whereIn('status', self::IN_FLIGHT_STATUSES)
+            ->where('created_at', '>', now()->subMinutes(self::IN_FLIGHT_GUARD_MINUTES))
+            ->exists();
+    }
+
+    /**
      * Verificar se está pendente
      */
     public function isPending(): bool
