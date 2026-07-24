@@ -7,6 +7,7 @@ use App\Http\Resources\PixKeyResource;
 use App\Models\App;
 use App\Models\PixKey;
 use App\Models\SolicitacoesCashOut;
+use App\Models\User;
 use App\Services\CashOut\CashOutOutcomeApplier;
 use App\Services\FluxPayments\FluxPaymentsCashOutOutcomeService;
 use App\Services\Fyhub\FyhubCashOutOutcomeService;
@@ -637,7 +638,8 @@ class PixKeyController extends Controller
                 }
 
                 // Reserva (linha + débito) ANTES do payout: nunca enviar PIX sem saldo já debitado.
-                // Ver SaqueController::processarSaque — mesma ordem, mesmo motivo.
+                // Lock do usuário serializa saques: um por vez. Ver SaqueController::processarSaque.
+                // Retorna null quando já há um saque em voo → duplicidade, respondida com 409.
                 $withdrawal = DB::transaction(function () use (
                     $user,
                     $correlationID,
@@ -651,8 +653,17 @@ class PixKeyController extends Controller
                     $adquirenteDefault
                 ) {
                     $balanceService = app(\App\Services\BalanceService::class);
+
+                    // Lock do usuário PRIMEIRO: serializa dois pedidos simultâneos do mesmo cliente.
+                    $locked = User::where('id', $user->id)->lockForUpdate()->first();
+
+                    // Um saque por vez: se já houver um em voo, não dispara outro Pix Out.
+                    if (SolicitacoesCashOut::userHasInFlightWithdrawal($locked)) {
+                        return null;
+                    }
+
                     $w = SolicitacoesCashOut::create([
-                        'user_id' => $user->user_id ?? $user->username,
+                        'user_id' => $locked->user_id ?? $locked->username,
                         'externalreference' => $correlationID,
                         'amount' => $amount,
                         'beneficiaryname' => '',
@@ -673,7 +684,7 @@ class PixKeyController extends Controller
                         'callback' => 'web',
                     ]);
 
-                    $dec = $balanceService->decrementCombinedBalanceWithSplit($user, $valorTotalDescontar, [
+                    $dec = $balanceService->decrementCombinedBalanceWithSplit($locked, $valorTotalDescontar, [
                         'reason' => 'withdrawal_debit',
                         'source' => 'PixKeyController::automatico',
                         'ref_type' => 'solicitacoes_cash_out',
@@ -686,6 +697,18 @@ class PixKeyController extends Controller
 
                     return $w->fresh();
                 });
+
+                if ($withdrawal === null) {
+                    Log::warning('[PIXOUT] Saque bloqueado: já há um em andamento para o cliente', [
+                        'user_id' => $user->username,
+                        'amount' => $amount,
+                    ]);
+
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Você já tem um saque em andamento. Aguarde a conclusão antes de solicitar outro.',
+                    ], 409)->header('Access-Control-Allow-Origin', '*');
+                }
 
                 $payoutResult = $acquirerService->createPayout(
                     (float) $cashOutLiquido,

@@ -59,6 +59,59 @@ class WithdrawalRefundTest extends TestCase
         ]);
     }
 
+    // ===== Trava "um saque por vez" (anti-duplicidade) =====
+
+    public function test_guard_bloqueia_quando_ha_saque_em_voo(): void
+    {
+        $user = AuthTestHelper::createTestUser([
+            'username' => 'flight_'.uniqid(),
+            'email' => 'flight_'.uniqid().'@example.com',
+            'saldo' => 500.00,
+        ]);
+
+        $w = $this->createDebitedProcessingWithdrawal($user->user_id);
+        $w->update(['status' => 'PENDING']);
+
+        $this->assertTrue(SolicitacoesCashOut::userHasInFlightWithdrawal($user->fresh()));
+
+        $w->update(['status' => 'PROCESSING']);
+        $this->assertTrue(SolicitacoesCashOut::userHasInFlightWithdrawal($user->fresh()));
+    }
+
+    public function test_guard_libera_quando_saque_terminou(): void
+    {
+        $user = AuthTestHelper::createTestUser([
+            'username' => 'done_'.uniqid(),
+            'email' => 'done_'.uniqid().'@example.com',
+            'saldo' => 500.00,
+        ]);
+
+        $w = $this->createDebitedProcessingWithdrawal($user->user_id);
+        $w->update(['status' => 'COMPLETED']);
+
+        $this->assertFalse(SolicitacoesCashOut::userHasInFlightWithdrawal($user->fresh()));
+    }
+
+    public function test_guard_nao_prende_para_sempre_saque_travado_antigo(): void
+    {
+        // Uma linha presa em PROCESSING há mais que a janela NÃO pode bloquear novos
+        // saques — senão um travado antigo deixaria o cliente sem sacar para sempre.
+        $user = AuthTestHelper::createTestUser([
+            'username' => 'old_'.uniqid(),
+            'email' => 'old_'.uniqid().'@example.com',
+            'saldo' => 500.00,
+        ]);
+
+        $w = $this->createDebitedProcessingWithdrawal($user->user_id);
+        // Query builder: created_at não é fillable, o update do model o ignoraria.
+        SolicitacoesCashOut::where('id', $w->id)->update([
+            'status' => 'PROCESSING',
+            'created_at' => now()->subMinutes(SolicitacoesCashOut::IN_FLIGHT_GUARD_MINUTES + 5),
+        ]);
+
+        $this->assertFalse(SolicitacoesCashOut::userHasInFlightWithdrawal($user->fresh()));
+    }
+
     public function test_completed_nao_estorna_saldo_saque_funcionou_normal(): void
     {
         $user = AuthTestHelper::createTestUser([
