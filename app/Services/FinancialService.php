@@ -1502,42 +1502,71 @@ class FinancialService
     private function processDepositApproval(Solicitacoes $deposit): void
     {
         try {
-            $user = User::where('user_id', $deposit->user_id)->first();
+            DB::transaction(function () use ($deposit) {
+                // Lock da linha: serializa contra o webhook (PaymentProcessingService) rodando ao mesmo tempo.
+                $locked = Solicitacoes::where('id', $deposit->id)->lockForUpdate()->first();
+                if (! $locked) {
+                    return;
+                }
 
-            if (!$user) {
-                Log::warning('Usuário não encontrado ao processar aprovação de depósito', [
-                    'user_id' => $deposit->user_id,
-                    'deposit_id' => $deposit->id,
+                // Idempotência COMPARTILHADA com o webhook: se já existe evento de crédito, não credita de novo.
+                // Antes este caminho creditava sem gravar evento — o webhook não via e recreditava (duplo-crédito).
+                $jaCreditado = \App\Models\PaymentEvent::where('transaction_id', $locked->id)
+                    ->where('event_type', 'PAYMENT_RECEIVED')
+                    ->where('transaction_type', 'deposit')
+                    ->exists();
+                if ($jaCreditado) {
+                    Log::info('Depósito já creditado (evento existente) — aprovação admin não recredita', [
+                        'deposit_id' => $locked->id,
+                        'user_id' => $locked->user_id,
+                    ]);
+                    return;
+                }
+
+                $user = User::where('user_id', $locked->user_id)->lockForUpdate()->first();
+                if (! $user) {
+                    Log::warning('Usuário não encontrado ao processar aprovação de depósito', [
+                        'user_id' => $locked->user_id,
+                        'deposit_id' => $locked->id,
+                    ]);
+                    return;
+                }
+
+                $balanceBefore = (float) $user->saldo;
+
+                // Incrementar saldo do usuário (com trilha no balance_ledger_entries)
+                app(\App\Services\BalanceService::class)->incrementBalance(
+                    $user,
+                    (float) $locked->deposito_liquido,
+                    'saldo',
+                    [
+                        'reason' => 'deposit_credit',
+                        'source' => 'FinancialService::aprovarDeposito',
+                        'ref_type' => 'solicitacoes',
+                        'ref_id' => $locked->id,
+                    ]
+                );
+
+                $balanceAfter = (float) $user->fresh()->saldo;
+
+                // Grava o evento: é ele que impede o webhook de recreditar depois desta aprovação manual.
+                app(\App\Services\PaymentEventService::class)
+                    ->recordPaymentReceived($locked, $user, $balanceBefore, $balanceAfter);
+
+                // Calcular saldo líquido atualizado
+                Helper::calculaSaldoLiquido($user->user_id);
+
+                // Atualizar total de transações (evita acesso a método protegido em alguns contextos)
+                $user->total_transacoes = ($user->total_transacoes ?? 0) + 1;
+                $user->save();
+
+                Log::info('Depósito aprovado e saldo atualizado', [
+                    'user_id' => $user->user_id,
+                    'deposit_id' => $locked->id,
+                    'amount' => $locked->deposito_liquido,
+                    'new_balance' => $balanceAfter,
                 ]);
-                return;
-            }
-
-            // Incrementar saldo do usuário (com trilha no balance_ledger_entries)
-            app(\App\Services\BalanceService::class)->incrementBalance(
-                $user,
-                (float) $deposit->deposito_liquido,
-                'saldo',
-                [
-                    'reason' => 'deposit_credit',
-                    'source' => 'FinancialService::aprovarDeposito',
-                    'ref_type' => 'solicitacoes',
-                    'ref_id' => $deposit->id,
-                ]
-            );
-
-            // Calcular saldo líquido atualizado
-            Helper::calculaSaldoLiquido($user->user_id);
-
-            // Atualizar total de transações (evita acesso a método protegido em alguns contextos)
-            $user->total_transacoes = ($user->total_transacoes ?? 0) + 1;
-            $user->save();
-
-            Log::info('Depósito aprovado e saldo atualizado', [
-                'user_id' => $user->user_id,
-                'deposit_id' => $deposit->id,
-                'amount' => $deposit->deposito_liquido,
-                'new_balance' => $user->fresh()->saldo,
-            ]);
+            });
         } catch (\Exception $e) {
             Log::error('Erro ao processar aprovação de depósito', [
                 'error' => $e->getMessage(),
