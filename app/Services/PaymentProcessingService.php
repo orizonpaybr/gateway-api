@@ -77,7 +77,13 @@ class PaymentProcessingService
             $this->balanceService->incrementBalance(
                 $user,
                 $cashin->deposito_liquido,
-                'saldo'
+                'saldo',
+                [
+                    'reason' => 'deposit_credit',
+                    'source' => 'PaymentProcessingService',
+                    'ref_type' => 'solicitacoes',
+                    'ref_id' => $cashin->id,
+                ]
             );
             $balanceAfter = $user->fresh()->saldo;
             

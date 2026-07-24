@@ -636,6 +636,57 @@ class PixKeyController extends Controller
                     $recipientDocument = null;
                 }
 
+                // Reserva (linha + débito) ANTES do payout: nunca enviar PIX sem saldo já debitado.
+                // Ver SaqueController::processarSaque — mesma ordem, mesmo motivo.
+                $withdrawal = DB::transaction(function () use (
+                    $user,
+                    $correlationID,
+                    $amount,
+                    $keyValue,
+                    $keyType,
+                    $taxaCashOut,
+                    $cashOutLiquido,
+                    $valorTotalDescontar,
+                    $acquirerService,
+                    $adquirenteDefault
+                ) {
+                    $balanceService = app(\App\Services\BalanceService::class);
+                    $w = SolicitacoesCashOut::create([
+                        'user_id' => $user->user_id ?? $user->username,
+                        'externalreference' => $correlationID,
+                        'amount' => $amount,
+                        'beneficiaryname' => '',
+                        'beneficiarydocument' => '',
+                        'pix' => $keyValue,
+                        'pixkey' => $keyType,
+                        'idTransaction' => $correlationID,
+                        'status' => 'PENDING',
+                        'type' => 'PIX',
+                        'date' => now(),
+                        'taxa_cash_out' => $taxaCashOut,
+                        'valor_total_descontado' => round($valorTotalDescontar, 4),
+                        'cash_out_liquido' => $cashOutLiquido,
+                        'descricao_transacao' => 'WEB',
+                        'executor_ordem' => $acquirerService->getReference(),
+                        'adquirente_ref' => $adquirenteDefault,
+                        'descricao_externa' => $correlationID,
+                        'callback' => 'web',
+                    ]);
+
+                    $dec = $balanceService->decrementCombinedBalanceWithSplit($user, $valorTotalDescontar, [
+                        'reason' => 'withdrawal_debit',
+                        'source' => 'PixKeyController::automatico',
+                        'ref_type' => 'solicitacoes_cash_out',
+                        'ref_id' => $w->id,
+                    ]);
+                    $w->update([
+                        'debito_saldo_afiliado' => $dec['debito_saldo_afiliado'],
+                        'debito_saldo_principal' => $dec['debito_saldo_principal'],
+                    ]);
+
+                    return $w->fresh();
+                });
+
                 $payoutResult = $acquirerService->createPayout(
                     (float) $cashOutLiquido,
                     $keyValue,
@@ -647,12 +698,41 @@ class PixKeyController extends Controller
                 );
 
                 if (! ($payoutResult['success'] ?? false)) {
+                    $indeterminado = (bool) ($payoutResult['indeterminate'] ?? false);
+
                     Log::error('PixKeyController::withdraw - adquirente recusou payout', [
                         'acquirer' => $acquirerService->getReference(),
                         'message' => $payoutResult['message'] ?? 'N/A',
                         'user_id' => $user->username,
                         'amount' => $amount,
+                        'cash_out_id' => $withdrawal->id,
+                        'indeterminate' => $indeterminado,
                     ]);
+
+                    if ($indeterminado) {
+                        // Timeout/rede: o PIX pode ter saído — ver SaqueController::processarSaque.
+                        Log::critical('[PIXOUT] Resultado INDETERMINADO — saldo mantido debitado, exige conciliação', [
+                            'cash_out_id' => $withdrawal->id,
+                            'correlation_id' => $correlationID,
+                            'acquirer' => $acquirerService->getReference(),
+                            'user_id' => $user->username,
+                            'valor_total_descontado' => $valorTotalDescontar,
+                        ]);
+                        $withdrawal->update(['status' => 'PROCESSING']);
+
+                        return response()->json([
+                            'success' => false,
+                            'message' => 'Saque em processamento. Aguarde a confirmação.',
+                        ], 202)->header('Access-Control-Allow-Origin', '*');
+                    }
+
+                    // Recusa definitiva: nada saiu do banco, devolver o valor reservado.
+                    $withdrawal->update(['status' => 'FAILED']);
+                    \App\Services\WithdrawalFailureRefundService::creditBackIfApplicable(
+                        $withdrawal->fresh(),
+                        'PENDING',
+                        'FAILED'
+                    );
 
                     return response()->json([
                         'success' => false,
@@ -674,63 +754,17 @@ class PixKeyController extends Controller
                     ? $acquirerService->resolveInitialPayoutStatus($providerStatus, $payoutE2e !== '' ? $payoutE2e : null)
                     : $acquirerService->mapPayoutStatus($providerStatus);
 
-                // Alinhado com SaqueController: create+debit atômicos (sem PENDING intermediário sem débito).
                 $statusForDb = CashOutOutcomeApplier::isTerminalStatus($statusMapped)
                     ? 'PROCESSING'
                     : $statusMapped;
 
-                $withdrawal = DB::transaction(function () use (
-                    $user,
-                    $correlationID,
-                    $amount,
-                    $keyValue,
-                    $keyType,
-                    $taxaCashOut,
-                    $cashOutLiquido,
-                    $valorTotalDescontar,
-                    $acquirerService,
-                    $idTxn,
-                    $statusForDb,
-                    $payoutE2e,
-                    $adquirenteDefault
-                ) {
-                    $balanceService = app(\App\Services\BalanceService::class);
-                    $w = SolicitacoesCashOut::create([
-                        'user_id' => $user->user_id ?? $user->username,
-                        'externalreference' => $correlationID,
-                        'amount' => $amount,
-                        'beneficiaryname' => '',
-                        'beneficiarydocument' => '',
-                        'pix' => $keyValue,
-                        'pixkey' => $keyType,
-                        'idTransaction' => $idTxn,
-                        'status' => $statusForDb,
-                        'type' => 'PIX',
-                        'date' => now(),
-                        'taxa_cash_out' => $taxaCashOut,
-                        'valor_total_descontado' => round($valorTotalDescontar, 4),
-                        'cash_out_liquido' => $cashOutLiquido,
-                        'descricao_transacao' => 'WEB',
-                        'executor_ordem' => $acquirerService->getReference(),
-                        'adquirente_ref' => $adquirenteDefault,
-                        'descricao_externa' => $correlationID,
-                        'callback' => 'web',
-                        'end_to_end' => $payoutE2e !== '' ? $payoutE2e : null,
-                    ]);
-
-                    $dec = $balanceService->decrementCombinedBalanceWithSplit($user, $valorTotalDescontar, [
-                        'reason' => 'withdrawal_debit',
-                        'source' => 'PixKeyController::automatico',
-                        'ref_type' => 'solicitacoes_cash_out',
-                        'ref_id' => $w->id,
-                    ]);
-                    $w->update([
-                        'debito_saldo_afiliado' => $dec['debito_saldo_afiliado'],
-                        'debito_saldo_principal' => $dec['debito_saldo_principal'],
-                    ]);
-
-                    return $w->fresh();
-                });
+                // Linha e débito já existem (reserva acima): só correlacionar com a adquirente.
+                $withdrawal->update([
+                    'idTransaction' => $idTxn,
+                    'status' => $statusForDb,
+                    'end_to_end' => $payoutE2e !== '' ? $payoutE2e : null,
+                ]);
+                $withdrawal->refresh();
 
                 if (CashOutOutcomeApplier::isTerminalStatus($statusMapped)) {
                     if ($acquirerService->getReference() === 'fyhub') {

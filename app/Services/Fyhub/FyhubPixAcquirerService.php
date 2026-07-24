@@ -228,8 +228,10 @@ class FyhubPixAcquirerService implements PixAcquirerInterface
                 'error' => $e->getMessage(),
             ]);
 
+            // Timeout/erro de rede: o Pix Out PODE ter sido executado — não estornar.
             return [
                 'success' => false,
+                'indeterminate' => true,
                 'message' => 'Erro ao conectar com FYHUB Contas: '.$e->getMessage(),
             ];
         }
