@@ -150,11 +150,17 @@ class SolicitacoesCashOut extends Model
     public const IN_FLIGHT_STATUSES = ['PENDING', 'PROCESSING'];
 
     /**
-     * Janela (minutos) em que um saque em voo bloqueia um novo do mesmo cliente.
-     * Tempo-limitada de propósito: uma linha travada além disso é problema do
-     * reaper (pixout:reconcile-stuck), nunca deve prender o cliente para sempre.
+     * Janela (segundos) em que um saque em voo bloqueia um novo do mesmo cliente.
+     *
+     * Curta de propósito: o risco real (duplo-clique / requisições concorrentes) é de
+     * SEGUNDOS, e a Flux liquida em 3-5s no caso normal (p90=5s). Mas ~4% arrastam até
+     * ~10min esperando o webhook de confirmação — e nesses casos o saque fica PROCESSING
+     * (já aceito pela adquirente, e2e emitido, saldo debitado): um novo saque aí não é
+     * duplicidade, é um pagamento legítimo separado. Por isso a janela cobre só o risco
+     * real (90s) em vez de prender o cliente pela liquidação lenta da adquirente.
+     * Ceiling: linha travada além disso é problema do reaper, nunca prende o cliente.
      */
-    public const IN_FLIGHT_GUARD_MINUTES = 15;
+    public const IN_FLIGHT_GUARD_SECONDS = 90;
 
     /**
      * Há um saque em voo (recente) para este cliente? Serializa saques: um por vez.
@@ -175,7 +181,7 @@ class SolicitacoesCashOut extends Model
         return static::query()
             ->whereIn('user_id', $identifiers)
             ->whereIn('status', self::IN_FLIGHT_STATUSES)
-            ->where('created_at', '>', now()->subMinutes(self::IN_FLIGHT_GUARD_MINUTES))
+            ->where('created_at', '>', now()->subSeconds(self::IN_FLIGHT_GUARD_SECONDS))
             ->exists();
     }
 
