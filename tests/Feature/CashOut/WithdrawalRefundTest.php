@@ -106,7 +106,7 @@ class WithdrawalRefundTest extends TestCase
         // Query builder: created_at não é fillable, o update do model o ignoraria.
         SolicitacoesCashOut::where('id', $w->id)->update([
             'status' => 'PROCESSING',
-            'created_at' => now()->subMinutes(SolicitacoesCashOut::IN_FLIGHT_GUARD_MINUTES + 5),
+            'created_at' => now()->subSeconds(SolicitacoesCashOut::IN_FLIGHT_GUARD_SECONDS + 30),
         ]);
 
         $this->assertFalse(SolicitacoesCashOut::userHasInFlightWithdrawal($user->fresh()));
