@@ -745,7 +745,28 @@ class Helper
         if (preg_match('/^[a-zA-Z0-9]{36}$/', $pixkey)) {
             return 'random';
         }
-    
+
         return 'invalid';
+    }
+
+    /** Telefone válido usado quando o informado não bate o formato exigido pela adquirente. */
+    public const FALLBACK_PHONE = '11999999999';
+
+    /**
+     * Normaliza telefone para DDD+número (10-11 dígitos), formato exigido pela adquirente
+     * (FluxPayments recusa o PIX com "Validation failed" se customer.phone não tiver 10-11 dígitos).
+     * Remove código do país (55) e, se o número for incompleto/ausente (cadastro antigo,
+     * formulário sem telefone), usa um fallback válido para o depósito nunca travar por isso.
+     */
+    public static function normalizePhoneForAcquirer(?string $phone): string
+    {
+        $digits = preg_replace('/\D/', '', (string) $phone);
+
+        // Remove o código do país quando vem com 12-13 dígitos (ex: 55 11 99999-9999)
+        if (strlen($digits) >= 12 && str_starts_with($digits, '55')) {
+            $digits = substr($digits, 2);
+        }
+
+        return (strlen($digits) === 10 || strlen($digits) === 11) ? $digits : self::FALLBACK_PHONE;
     }
 }

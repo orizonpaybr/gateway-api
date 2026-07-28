@@ -723,6 +723,9 @@ class DepositController extends Controller
         if ($phone === '') {
             $phone = preg_replace('/\D/', '', (string) ($user->telefone ?? ''));
         }
+        // Garante DDD+número (10-11 dígitos): telefone incompleto no cadastro ou ausente no
+        // formulário faria a adquirente recusar o PIX ("Validation failed"). Fallback válido.
+        $phone = Helper::normalizePhoneForAcquirer($phone);
 
         return [
             'name' => $name,
