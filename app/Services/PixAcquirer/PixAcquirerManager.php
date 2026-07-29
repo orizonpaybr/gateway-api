@@ -5,6 +5,8 @@ namespace App\Services\PixAcquirer;
 use App\Models\Adquirente;
 use App\Services\FluxPayments\FluxPaymentsAuthService;
 use App\Services\FluxPayments\FluxPaymentsPixAcquirerService;
+use App\Services\Paya55\Paya55AuthService;
+use App\Services\Paya55\Paya55PixAcquirerService;
 
 class PixAcquirerManager
 {
@@ -20,7 +22,7 @@ class PixAcquirerManager
      * Várias linhas de `adquirentes` (nominais) podem apontar para a mesma
      * família com `referencia` própria e credenciais próprias.
      *
-     * @param class-string<PixAcquirerInterface> $serviceClass
+     * @param  class-string<PixAcquirerInterface>  $serviceClass
      */
     public function register(string $reference, string $serviceClass): void
     {
@@ -63,6 +65,10 @@ class PixAcquirerManager
     {
         if ($serviceClass === FluxPaymentsPixAcquirerService::class) {
             return new FluxPaymentsPixAcquirerService(new FluxPaymentsAuthService($credentials));
+        }
+
+        if ($serviceClass === Paya55PixAcquirerService::class) {
+            return new Paya55PixAcquirerService(new Paya55AuthService($credentials));
         }
 
         return null;

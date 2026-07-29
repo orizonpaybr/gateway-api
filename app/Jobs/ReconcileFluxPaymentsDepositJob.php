@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Solicitacoes;
 use App\Services\FluxPayments\FluxPaymentsDepositReconciler;
+use App\Services\FluxPayments\FluxPaymentsPixAcquirerService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -12,7 +13,7 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Reconcilia um depósito FluxPayments (fallback se o postback atrasar/falhar).
+ * Reconcilia um depósito FluxPayments/Paya55 (fallback se o postback atrasar/falhar).
  */
 class ReconcileFluxPaymentsDepositJob implements ShouldQueue
 {
@@ -33,19 +34,22 @@ class ReconcileFluxPaymentsDepositJob implements ShouldQueue
             return;
         }
 
-        if ($deposit->executor_ordem !== 'fluxpayments' || $deposit->status !== 'WAITING_FOR_APPROVAL') {
+        $provider = strtolower(trim((string) ($deposit->executor_ordem ?? '')));
+        if (! in_array($provider, FluxPaymentsPixAcquirerService::FAMILY, true) || $deposit->status !== 'WAITING_FOR_APPROVAL') {
             return;
         }
 
+        $tag = '['.strtoupper($provider).'][RECONCILE]';
+
         try {
             if ($reconciler->reconcileIfPaid($deposit)) {
-                Log::info('[FLUXPAYMENTS][RECONCILE] Depósito liquidado (job unitário)', [
+                Log::info($tag.' Depósito liquidado (job unitário)', [
                     'deposit_id' => $deposit->id,
                     'txid' => $deposit->idTransaction,
                 ]);
             }
         } catch (\Throwable $e) {
-            Log::error('[FLUXPAYMENTS][RECONCILE] Erro no job unitário', [
+            Log::error('[A55][RECONCILE] Erro no job unitário', [
                 'deposit_id' => $this->depositId,
                 'error' => $e->getMessage(),
             ]);

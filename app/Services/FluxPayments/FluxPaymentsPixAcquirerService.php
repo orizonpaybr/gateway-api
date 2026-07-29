@@ -8,7 +8,22 @@ use Illuminate\Support\Facades\Log;
 
 class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
 {
-    private FluxPaymentsAuthService $auth;
+    /**
+     * Providers que compartilham esta implementação (mesma API A55: FluxPayments
+     * e Paya55). Usado onde só existe a string do provider (queries por
+     * executor_ordem); onde há a instância, prefira `instanceof`.
+     *
+     * @var list<string>
+     */
+    public const FAMILY = ['fluxpayments', 'paya55'];
+
+    /** Slug do provider — define config/<provider>.php, executor_ordem e rota de webhook. */
+    protected string $provider = 'fluxpayments';
+
+    /** Nome exibido em mensagens de erro para o merchant. */
+    protected string $label = 'FluxPayments';
+
+    protected FluxPaymentsAuthService $auth;
 
     private string $baseUrl;
 
@@ -17,13 +32,19 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
     public function __construct(FluxPaymentsAuthService $auth)
     {
         $this->auth = $auth;
-        $this->baseUrl = rtrim((string) config('fluxpayments.base_url'), '/');
-        $this->timeout = (int) config('fluxpayments.timeout', 30);
+        $this->baseUrl = rtrim((string) config($this->provider.'.base_url'), '/');
+        $this->timeout = (int) config($this->provider.'.timeout', 30);
     }
 
     public function getReference(): string
     {
-        return 'fluxpayments';
+        return $this->provider;
+    }
+
+    /** Prefixo de log por provider: [FLUXPAYMENTS][CHARGE], [PAYA55][CHARGE], ... */
+    private function tag(string $suffix): string
+    {
+        return '['.strtoupper($this->provider).']['.$suffix.']';
     }
 
     public function isActive(): bool
@@ -42,7 +63,7 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
         if ($amountCents < 100) {
             return [
                 'success' => false,
-                'message' => 'Valor mínimo para PIX FluxPayments é R$ 1,00.',
+                'message' => "Valor mínimo para PIX {$this->label} é R$ 1,00.",
             ];
         }
 
@@ -54,16 +75,16 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
         if ($name === '' || $document === '') {
             return [
                 'success' => false,
-                'message' => 'Nome e documento do cliente são obrigatórios para FluxPayments.',
+                'message' => "Nome e documento do cliente são obrigatórios para {$this->label}.",
             ];
         }
 
         if ($email === '' || ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            $email = (string) config('fluxpayments.fallback_email', 'noreply@coratri.com.br');
+            $email = (string) config($this->provider.'.fallback_email', 'noreply@coratri.com.br');
         }
 
         if ($phone === '') {
-            $phone = preg_replace('/\D/', '', (string) config('fluxpayments.fallback_phone', '11999999999'));
+            $phone = preg_replace('/\D/', '', (string) config($this->provider.'.fallback_phone', '11999999999'));
         }
 
         $itemTitle = trim((string) ($comment ?? ''));
@@ -111,9 +132,9 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
             $body = is_array($response->json()) ? $response->json() : [];
 
             if (! $response->successful()) {
-                $errorMsg = $this->extractErrorMessage($body, 'Erro ao gerar cobrança PIX na FluxPayments');
+                $errorMsg = $this->extractErrorMessage($body, "Erro ao gerar cobrança PIX na {$this->label}");
 
-                Log::error('[FLUXPAYMENTS][CHARGE] Falha ao gerar cash in', [
+                Log::error($this->tag('CHARGE').' Falha ao gerar cash in', [
                     'status' => $response->status(),
                     'error' => $errorMsg,
                     'amount' => $amountReais,
@@ -132,18 +153,18 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
             $brCode = $body['pix']['qrcode'] ?? null;
 
             if ($transactionId === '' || empty($brCode)) {
-                Log::error('[FLUXPAYMENTS][CHARGE] Resposta sem id/qrcode', [
+                Log::error($this->tag('CHARGE').' Resposta sem id/qrcode', [
                     'body_keys' => array_keys($body),
                 ]);
 
                 return [
                     'success' => false,
-                    'message' => 'Resposta inválida da FluxPayments (sem id ou QR Code).',
+                    'message' => "Resposta inválida da {$this->label} (sem id ou QR Code).",
                     'raw' => $body,
                 ];
             }
 
-            Log::info('[FLUXPAYMENTS][CHARGE] Cash in gerado', [
+            Log::info($this->tag('CHARGE').' Cash in gerado', [
                 'transaction_id' => $transactionId,
                 'amount' => $amountReais,
                 'correlation_id' => $correlationId,
@@ -165,7 +186,7 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
                 ],
             ];
         } catch (\Throwable $e) {
-            Log::error('[FLUXPAYMENTS][CHARGE] Exceção ao gerar cash in', [
+            Log::error($this->tag('CHARGE').' Exceção ao gerar cash in', [
                 'error' => $e->getMessage(),
                 'amount' => $amountReais,
                 'correlation_id' => $correlationId,
@@ -173,7 +194,7 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
 
             return [
                 'success' => false,
-                'message' => 'Erro ao conectar com FluxPayments: '.$e->getMessage(),
+                'message' => "Erro ao conectar com {$this->label}: ".$e->getMessage(),
             ];
         }
     }
@@ -191,7 +212,7 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
         if ($amountCents < 1) {
             return [
                 'success' => false,
-                'message' => 'Valor inválido para PIX OUT FluxPayments.',
+                'message' => "Valor inválido para PIX OUT {$this->label}.",
             ];
         }
 
@@ -207,14 +228,14 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
         if ($destinationName === '' || $destinationDocument === '') {
             return [
                 'success' => false,
-                'message' => 'Nome e CPF/CNPJ do destinatário são obrigatórios para PIX OUT FluxPayments.',
+                'message' => "Nome e CPF/CNPJ do destinatário são obrigatórios para PIX OUT {$this->label}.",
             ];
         }
 
         if ($formattedKey === '') {
             return [
                 'success' => false,
-                'message' => 'Chave PIX inválida para FluxPayments.',
+                'message' => "Chave PIX inválida para {$this->label}.",
             ];
         }
 
@@ -257,9 +278,9 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
             $body = is_array($response->json()) ? $response->json() : [];
 
             if (! $response->successful() || empty($body['success'])) {
-                $errorMsg = $this->extractErrorMessage($body, 'Erro ao processar PIX OUT na FluxPayments');
+                $errorMsg = $this->extractErrorMessage($body, "Erro ao processar PIX OUT na {$this->label}");
 
-                Log::error('[FLUXPAYMENTS][PAYOUT] Falha no cash out', [
+                Log::error($this->tag('PAYOUT').' Falha no cash out', [
                     'status' => $response->status(),
                     'error' => $errorMsg,
                     'code' => $body['code'] ?? null,
@@ -282,12 +303,12 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
             if ($transactionId === '') {
                 return [
                     'success' => false,
-                    'message' => 'Resposta inválida da FluxPayments (sem id da transferência).',
+                    'message' => "Resposta inválida da {$this->label} (sem id da transferência).",
                     'raw' => $body,
                 ];
             }
 
-            Log::info('[FLUXPAYMENTS][PAYOUT] Cash out aceito', [
+            Log::info($this->tag('PAYOUT').' Cash out aceito', [
                 'transaction_id' => $transactionId,
                 'status' => $providerStatus,
                 'amount' => $amountReais,
@@ -314,7 +335,7 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
                 ],
             ];
         } catch (\Throwable $e) {
-            Log::error('[FLUXPAYMENTS][PAYOUT] Exceção ao processar cash out', [
+            Log::error($this->tag('PAYOUT').' Exceção ao processar cash out', [
                 'error' => $e->getMessage(),
                 'amount' => $amountReais,
                 'pix_key_type' => $mappedKeyType,
@@ -326,7 +347,7 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
             return [
                 'success' => false,
                 'indeterminate' => true,
-                'message' => 'Erro ao conectar com FluxPayments: '.$e->getMessage(),
+                'message' => "Erro ao conectar com {$this->label}: ".$e->getMessage(),
             ];
         }
     }
@@ -351,7 +372,7 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
         if ($tid === '' && $e2e === '') {
             return [
                 'success' => false,
-                'message' => 'Informe id ou e2e da transferência FluxPayments.',
+                'message' => "Informe id ou e2e da transferência {$this->label}.",
             ];
         }
 
@@ -372,7 +393,7 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
             if (! $response->successful()) {
                 $errorMsg = $this->extractErrorMessage($body, 'Transferência não encontrada');
 
-                Log::warning('[FLUXPAYMENTS][PAYOUT_STATUS] Falha ao consultar status', [
+                Log::warning($this->tag('PAYOUT_STATUS').' Falha ao consultar status', [
                     'transaction_id' => $tid !== '' ? $tid : null,
                     'e2e' => $e2e !== '' ? $e2e : null,
                     'http_status' => $response->status(),
@@ -421,7 +442,7 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
                 ],
             ];
         } catch (\Throwable $e) {
-            Log::error('[FLUXPAYMENTS][PAYOUT_STATUS] Exceção ao consultar status', [
+            Log::error($this->tag('PAYOUT_STATUS').' Exceção ao consultar status', [
                 'transaction_id' => $tid !== '' ? $tid : null,
                 'e2e' => $e2e !== '' ? $e2e : null,
                 'error' => $e->getMessage(),
@@ -429,13 +450,13 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
 
             return [
                 'success' => false,
-                'message' => 'Erro ao conectar com FluxPayments: '.$e->getMessage(),
+                'message' => "Erro ao conectar com {$this->label}: ".$e->getMessage(),
             ];
         }
     }
 
     /**
-     * Consulta saldos das carteiras FluxPayments (GET /api/v1/balance).
+     * Consulta saldos das carteiras da adquirente (GET /api/v1/balance).
      * Não é usado no fluxo de saque — o gateway valida apenas o saldo interno Coratri.
      *
      * @return array{success: bool, message?: string, data?: array, raw?: array}
@@ -451,7 +472,7 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
             if (! $response->successful() || empty($body['success'])) {
                 return [
                     'success' => false,
-                    'message' => $this->extractErrorMessage($body, 'Falha ao consultar saldo FluxPayments'),
+                    'message' => $this->extractErrorMessage($body, "Falha ao consultar saldo {$this->label}"),
                     'raw' => $body,
                 ];
             }
@@ -464,7 +485,7 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
         } catch (\Throwable $e) {
             return [
                 'success' => false,
-                'message' => 'Erro ao conectar com FluxPayments: '.$e->getMessage(),
+                'message' => "Erro ao conectar com {$this->label}: ".$e->getMessage(),
             ];
         }
     }
@@ -499,7 +520,7 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
         if ($tid === '') {
             return [
                 'success' => false,
-                'message' => 'Informe o id da transação FluxPayments.',
+                'message' => "Informe o id da transação {$this->label}.",
             ];
         }
 
@@ -517,7 +538,7 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
             if (! $response->successful()) {
                 $errorMsg = $this->extractErrorMessage($body, 'Cobrança não encontrada');
 
-                Log::warning('[FLUXPAYMENTS][CHARGE_STATUS] Falha ao consultar status', [
+                Log::warning($this->tag('CHARGE_STATUS').' Falha ao consultar status', [
                     'transaction_id' => $tid,
                     'http_status' => $response->status(),
                     'error' => $errorMsg,
@@ -557,14 +578,14 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
                 ],
             ];
         } catch (\Throwable $e) {
-            Log::error('[FLUXPAYMENTS][CHARGE_STATUS] Exceção ao consultar status', [
+            Log::error($this->tag('CHARGE_STATUS').' Exceção ao consultar status', [
                 'transaction_id' => $tid,
                 'error' => $e->getMessage(),
             ]);
 
             return [
                 'success' => false,
-                'message' => 'Erro ao conectar com FluxPayments: '.$e->getMessage(),
+                'message' => "Erro ao conectar com {$this->label}: ".$e->getMessage(),
             ];
         }
     }
@@ -575,7 +596,7 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
         if ($tid === '') {
             return [
                 'success' => false,
-                'message' => 'Informe o id da transação FluxPayments para estorno.',
+                'message' => "Informe o id da transação {$this->label} para estorno.",
             ];
         }
 
@@ -596,9 +617,9 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
             $body = is_array($response->json()) ? $response->json() : [];
 
             if (! $response->successful() || empty($body['success'])) {
-                $errorMsg = $this->extractErrorMessage($body, 'Erro ao processar estorno na FluxPayments');
+                $errorMsg = $this->extractErrorMessage($body, "Erro ao processar estorno na {$this->label}");
 
-                Log::error('[FLUXPAYMENTS][REFUND] Falha ao solicitar estorno', [
+                Log::error($this->tag('REFUND').' Falha ao solicitar estorno', [
                     'status' => $response->status(),
                     'error' => $errorMsg,
                     'transaction_id' => $tid,
@@ -616,7 +637,7 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
             $refundAmount = $body['refundAmount'] ?? $amountCents;
             $providerStatus = strtoupper((string) ($body['status'] ?? 'REFUNDED'));
 
-            Log::info('[FLUXPAYMENTS][REFUND] Estorno solicitado', [
+            Log::info($this->tag('REFUND').' Estorno solicitado', [
                 'transaction_id' => $tid,
                 'refund_amount' => $refundAmount,
                 'status' => $providerStatus,
@@ -637,7 +658,7 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
                 ],
             ];
         } catch (\Throwable $e) {
-            Log::error('[FLUXPAYMENTS][REFUND] Exceção ao solicitar estorno', [
+            Log::error($this->tag('REFUND').' Exceção ao solicitar estorno', [
                 'transaction_id' => $tid,
                 'amount' => $amount,
                 'error' => $e->getMessage(),
@@ -645,7 +666,7 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
 
             return [
                 'success' => false,
-                'message' => 'Erro ao conectar com FluxPayments: '.$e->getMessage(),
+                'message' => "Erro ao conectar com {$this->label}: ".$e->getMessage(),
             ];
         }
     }
@@ -676,12 +697,12 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
      */
     private function buildPixExpiration(): array
     {
-        $seconds = config('fluxpayments.expires_in_seconds');
+        $seconds = config($this->provider.'.expires_in_seconds');
         if ($seconds !== null && (int) $seconds > 0) {
             return ['expiresInSeconds' => (int) $seconds];
         }
 
-        $days = (int) config('fluxpayments.expires_in_days', 1);
+        $days = (int) config($this->provider.'.expires_in_days', 1);
 
         return ['expiresInDays' => max(1, $days)];
     }
@@ -693,7 +714,7 @@ class FluxPaymentsPixAcquirerService implements PixAcquirerInterface
             return $configured;
         }
 
-        return rtrim((string) config('app.url'), '/').'/fluxpayments/webhook';
+        return rtrim((string) config('app.url'), '/').'/'.$this->provider.'/webhook';
     }
 
     private function toCents(float $amountReais): int

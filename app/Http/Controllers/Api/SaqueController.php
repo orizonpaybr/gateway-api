@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Services\CashOut\CashOutOutcomeApplier;
 use App\Services\ClientWebhookPayloadBuilder;
 use App\Services\FluxPayments\FluxPaymentsCashOutOutcomeService;
+use App\Services\FluxPayments\FluxPaymentsPixAcquirerService;
 use App\Services\Fyhub\FyhubCashOutOutcomeService;
 use App\Services\Treeal\TreealCashOutOutcomeService;
 use App\Services\PixAcquirer\PixAcquirerManager;
@@ -530,7 +531,7 @@ class SaqueController extends Controller
                 $withdrawal->refresh();
             }
 
-            if ($acquirerService->getReference() === 'fluxpayments') {
+            if ($acquirerService instanceof FluxPaymentsPixAcquirerService) {
                 app(FluxPaymentsCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($withdrawal);
                 $withdrawal->refresh();
             }

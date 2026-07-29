@@ -48,7 +48,7 @@ Route::middleware(['verify.jwt', 'throttle:120,1'])->group(function () {
     Route::get('transactions', [UserController::class, 'getTransactions']);
     Route::get('transactions/{id}', [UserController::class, 'getTransactionById']);
     Route::get('user/profile', [UserController::class, 'getProfile']);
-    Route::post('pix/generate-qr', [UserController::class, 'generatePixQR'])->middleware(['throttle.fyhub.pix', 'throttle.treeal.pix', 'throttle.fluxpayments.pix']);
+    Route::post('pix/generate-qr', [UserController::class, 'generatePixQR'])->middleware(['throttle.fyhub.pix', 'throttle.treeal.pix', 'throttle.fluxpayments.pix', 'throttle.paya55.pix']);
     Route::get('extrato', [UserController::class, 'getExtrato']);
     Route::get('user/real-data', [UserController::class, 'getRealData']);
     Route::get('dashboard/stats', [UserController::class, 'getDashboardStats']);
@@ -69,7 +69,7 @@ Route::middleware(['verify.jwt', 'throttle:120,1'])->group(function () {
     Route::put('pix/keys/{id}', [PixKeyController::class, 'update']);
     Route::delete('pix/keys/{id}', [PixKeyController::class, 'destroy']);
     Route::post('pix/keys/{id}/set-default', [PixKeyController::class, 'setDefault']);
-    Route::post('pix/withdraw-with-key', [PixKeyController::class, 'withdraw'])->middleware(['throttle.fyhub.pix', 'throttle.treeal.pix', 'throttle.fluxpayments.pix']);
+    Route::post('pix/withdraw-with-key', [PixKeyController::class, 'withdraw'])->middleware(['throttle.fyhub.pix', 'throttle.treeal.pix', 'throttle.fluxpayments.pix', 'throttle.paya55.pix']);
     
     // QR Codes (Otimizado)
     Route::get('qrcodes', [App\Http\Controllers\Api\QRCodeController::class, 'index']);
@@ -231,8 +231,8 @@ Route::get('/link-storage', function (Request $request) {
 Route::middleware(['throttle.balance.failures', 'check.token.secret', 'throttle:balance-check'])->get('wallet/balance', [\App\Http\Controllers\Api\Client\BalanceController::class, 'show']);
 
 /* PIX */
-Route::middleware(['check.token.secret', 'throttle.fyhub.pix', 'throttle.treeal.pix', 'throttle.fluxpayments.pix', 'throttle:pix-in'])->post('wallet/deposit/payment', [DepositController::class, 'makeDeposit']);
-Route::middleware(['check.token.secret', 'check.allowed.ip', 'throttle.fyhub.pix', 'throttle.treeal.pix', 'throttle.fluxpayments.pix', 'throttle:pix-out'])->post('pixout', [SaqueController::class, 'makePayment']);
+Route::middleware(['check.token.secret', 'throttle.fyhub.pix', 'throttle.treeal.pix', 'throttle.fluxpayments.pix', 'throttle.paya55.pix', 'throttle:pix-in'])->post('wallet/deposit/payment', [DepositController::class, 'makeDeposit']);
+Route::middleware(['check.token.secret', 'check.allowed.ip', 'throttle.fyhub.pix', 'throttle.treeal.pix', 'throttle.fluxpayments.pix', 'throttle.paya55.pix', 'throttle:pix-out'])->post('pixout', [SaqueController::class, 'makePayment']);
 Route::middleware('throttle:status-check')->post('status', [DepositController::class, 'statusDeposito']);
 
 /* CARTÃO */

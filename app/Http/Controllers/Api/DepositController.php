@@ -10,6 +10,7 @@ use App\Http\Controllers\Controller;
 use App\Jobs\ReconcileFluxPaymentsDepositJob;
 use App\Jobs\ReconcileFyhubDepositJob;
 use App\Jobs\ReconcileTreealDepositJob;
+use App\Services\FluxPayments\FluxPaymentsPixAcquirerService;
 use App\Models\App;
 use App\Models\Pagarme;
 use App\Models\Solicitacoes;
@@ -678,7 +679,7 @@ class DepositController extends Controller
             ReconcileTreealDepositJob::dispatch($deposit->id)->delay(now()->addSeconds(120));
         }
 
-        if ($acquirerService->getReference() === 'fluxpayments') {
+        if ($acquirerService instanceof FluxPaymentsPixAcquirerService) {
             ReconcileFluxPaymentsDepositJob::dispatch($deposit->id)->delay(now()->addSeconds(45));
             ReconcileFluxPaymentsDepositJob::dispatch($deposit->id)->delay(now()->addSeconds(120));
         }

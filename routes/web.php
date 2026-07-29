@@ -28,3 +28,4 @@ require __DIR__.'/groups/adquirentes/simpay.php';
 require __DIR__.'/groups/adquirentes/fyhub.php';
 require __DIR__.'/groups/adquirentes/treeal.php';
 require __DIR__.'/groups/adquirentes/fluxpayments.php';
+require __DIR__.'/groups/adquirentes/paya55.php';

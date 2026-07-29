@@ -5,7 +5,7 @@ namespace App\Helpers;
 /**
  * Custo da rede/adquirente por transação PIX (split interno: taxa cliente − custo − afiliado).
  *
- * Treeal / Fyhub / Simpay / FluxPayments: custo fixo em R$ por transação.
+ * Treeal / Fyhub / Simpay / FluxPayments / Paya55: custo fixo em R$ por transação.
  */
 class CustoAdquirentePixHelper
 {
@@ -24,6 +24,7 @@ class CustoAdquirentePixHelper
      * @see config('simpay.custo_fixo_transacao')
      * @see config('fyhub.custo_fixo_transacao')
      * @see config('fluxpayments.custo_fixo_transacao')
+     * @see config('paya55.custo_fixo_transacao')
      */
     public static function custoFixoTransacao(?string $adquirenteReferencia = null): float
     {
@@ -32,6 +33,7 @@ class CustoAdquirentePixHelper
             'fyhub' => (float) config('fyhub.custo_fixo_transacao', 0.04),
             'simpay' => (float) config('simpay.custo_fixo_transacao', 0.035),
             'fluxpayments' => (float) config('fluxpayments.custo_fixo_transacao', 0.09),
+            'paya55' => (float) config('paya55.custo_fixo_transacao', 0.03),
             default => 0.0,
         };
     }
@@ -83,6 +85,7 @@ class CustoAdquirentePixHelper
         $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.035);
         $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
         $custoFluxpayments = (float) config('fluxpayments.custo_fixo_transacao', 0.09);
+        $custoPaya55 = (float) config('paya55.custo_fixo_transacao', 0.03);
 
         $simpayMatch = $cashOutTable
             ? "executor_ordem = 'simpay' OR executor_ordem = 'Adquirente PIX'"
@@ -92,6 +95,7 @@ class CustoAdquirentePixHelper
             WHEN executor_ordem = 'treeal' THEN {$custoTreeal}
             WHEN executor_ordem = 'fyhub' THEN {$custoFyhub}
             WHEN executor_ordem = 'fluxpayments' THEN {$custoFluxpayments}
+            WHEN executor_ordem = 'paya55' THEN {$custoPaya55}
             WHEN {$simpayMatch} THEN {$custoSimpay}
             ELSE {$custoSimpay}
         END)";

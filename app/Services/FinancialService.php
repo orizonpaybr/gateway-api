@@ -755,6 +755,7 @@ class FinancialService
         $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.035);
         $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
         $custoFluxpayments = (float) config('fluxpayments.custo_fixo_transacao', 0.09);
+        $custoPaya55 = (float) config('paya55.custo_fixo_transacao', 0.03);
 
         $stats = Solicitacoes::whereBetween('date', [$dateRange['inicio'], $dateRange['fim']])
             ->selectRaw('
@@ -767,6 +768,7 @@ class FinancialService
                         WHEN executor_ordem = \'treeal\' THEN ' . $custoTreeal . '
                         WHEN executor_ordem = \'fyhub\' THEN ' . $custoFyhub . '
                         WHEN executor_ordem = \'fluxpayments\' THEN ' . $custoFluxpayments . '
+                        WHEN executor_ordem = \'paya55\' THEN ' . $custoPaya55 . '
                         WHEN executor_ordem = \'simpay\' OR executor_ordem = \'Adquirente PIX\' OR adquirente_ref = \'Adquirente PIX\'
                         THEN ' . $custoSimpay . '
                         ELSE 0
@@ -823,6 +825,7 @@ class FinancialService
         $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.035);
         $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
         $custoFluxpayments = (float) config('fluxpayments.custo_fixo_transacao', 0.09);
+        $custoPaya55 = (float) config('paya55.custo_fixo_transacao', 0.03);
         $custoSaqueExpr = \App\Helpers\CustoAdquirentePixHelper::sqlCustoPorTransacaoExpr('amount', true);
 
         // Lucro líquido de depósitos: taxa_cash_in − custo por adquirente quando não há taxa explícita na linha
@@ -835,6 +838,7 @@ class FinancialService
                     WHEN executor_ordem = 'treeal' THEN {$custoTreeal}
                     WHEN executor_ordem = 'fyhub' THEN {$custoFyhub}
                     WHEN executor_ordem = 'fluxpayments' THEN {$custoFluxpayments}
+                    WHEN executor_ordem = 'paya55' THEN {$custoPaya55}
                     WHEN executor_ordem = 'simpay' OR executor_ordem = 'Adquirente PIX' OR adquirente_ref = 'Adquirente PIX'
                     THEN {$custoSimpay}
                     ELSE 0
@@ -989,7 +993,7 @@ class FinancialService
         // pode variar por nominal (várias contas FluxPayments), então o gate de
         // "provider suportado" precisa usar executor_ordem, não adquirente_ref.
         $provider = strtolower(trim((string) ($item->executor_ordem ?? '')));
-        if (! in_array($provider, ['simpay', 'fyhub', 'treeal', 'fluxpayments'], true)) {
+        if (! in_array($provider, ['simpay', 'fyhub', 'treeal', 'fluxpayments', 'paya55'], true)) {
             return false;
         }
 
@@ -1002,12 +1006,12 @@ class FinancialService
             return trim((string) ($item->end_to_end ?? '')) !== '';
         }
 
-        // Simpay / Fyhub / FluxPayments: idTransaction
+        // Simpay / Fyhub / FluxPayments / Paya55: idTransaction
         return trim((string) ($item->idTransaction ?? '')) !== '';
     }
 
     /**
-     * Solicita estorno na adquirente (Simpay/Fyhub/Treeal/FluxPayments) e atualiza depósito/saldo localmente.
+     * Solicita estorno na adquirente (Simpay/Fyhub/Treeal/FluxPayments/Paya55) e atualiza depósito/saldo localmente.
      *
      * @throws \Exception com código HTTP em $e->getCode() quando aplicável
      */
@@ -1027,8 +1031,8 @@ class FinancialService
         // executor_ordem = família do provider (fixo por serviço); adquirente_ref
         // pode variar por nominal (várias contas FluxPayments).
         $provider = strtolower(trim((string) ($deposit->executor_ordem ?? '')));
-        if (! in_array($provider, ['simpay', 'fyhub', 'treeal', 'fluxpayments'], true)) {
-            throw new \Exception('Estorno disponível apenas para depósitos Simpay/Fyhub/Treeal/FluxPayments.', 422);
+        if (! in_array($provider, ['simpay', 'fyhub', 'treeal', 'fluxpayments', 'paya55'], true)) {
+            throw new \Exception('Estorno disponível apenas para depósitos Simpay/Fyhub/Treeal/FluxPayments/Paya55.', 422);
         }
 
         $st = strtoupper((string) $deposit->status);

@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\SolicitacoesCashOut;
 use App\Services\FluxPayments\FluxPaymentsCashOutOutcomeService;
+use App\Services\FluxPayments\FluxPaymentsPixAcquirerService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -13,7 +14,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Reconcilia saques PIX FluxPayments em PROCESSING/PENDING via GET pix-out.
+ * Reconcilia saques PIX FluxPayments/Paya55 em PROCESSING/PENDING via GET pix-out.
  * Resolve a nominal por payout (adquirente_ref), não o singleton .env.
  */
 class ReconcileFluxPaymentsPayoutsJob implements ShouldQueue
@@ -28,8 +29,10 @@ class ReconcileFluxPaymentsPayoutsJob implements ShouldQueue
     {
         $pendingPayouts = SolicitacoesCashOut::whereIn('status', ['PROCESSING', 'PENDING'])
             ->where(function ($q) {
-                $q->where('executor_ordem', 'fluxpayments')
-                    ->orWhere('adquirente_ref', 'like', 'fluxpayments%');
+                $q->whereIn('executor_ordem', FluxPaymentsPixAcquirerService::FAMILY);
+                foreach (FluxPaymentsPixAcquirerService::FAMILY as $family) {
+                    $q->orWhere('adquirente_ref', 'like', $family.'%');
+                }
             })
             ->whereNotNull('idTransaction')
             ->where('idTransaction', '!=', '')
@@ -41,7 +44,7 @@ class ReconcileFluxPaymentsPayoutsJob implements ShouldQueue
             return;
         }
 
-        Log::info('[FLUXPAYMENTS][RECONCILE] Iniciando reconciliação de payouts', [
+        Log::info('[A55][RECONCILE] Iniciando reconciliação de payouts', [
             'total' => $pendingPayouts->count(),
         ]);
 
@@ -100,7 +103,7 @@ class ReconcileFluxPaymentsPayoutsJob implements ShouldQueue
                     $updated++;
                 }
             } catch (\Throwable $e) {
-                Log::error('[FLUXPAYMENTS][RECONCILE] Erro ao reconciliar payout', [
+                Log::error('[A55][RECONCILE] Erro ao reconciliar payout', [
                     'payout_id' => $payout->id,
                     'transaction_id' => $payout->idTransaction,
                     'adquirente_ref' => $payout->adquirente_ref,
@@ -109,7 +112,7 @@ class ReconcileFluxPaymentsPayoutsJob implements ShouldQueue
             }
         }
 
-        Log::info('[FLUXPAYMENTS][RECONCILE] Reconciliação finalizada', [
+        Log::info('[A55][RECONCILE] Reconciliação finalizada', [
             'total' => $pendingPayouts->count(),
             'updated' => $updated,
         ]);

@@ -10,30 +10,37 @@ use App\Services\PixAcquirer\PixAcquirerManager;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Aplica status terminal de cash-out FluxPayments (estorno + webhook) de forma idempotente.
+ * Aplica status terminal de cash-out da família A55 (FluxPayments / Paya55)
+ * — estorno + webhook — de forma idempotente. O provider vem sempre do próprio
+ * payout (adquirente_ref / executor_ordem), nunca de constante.
  */
-final class FluxPaymentsCashOutOutcomeService
+class FluxPaymentsCashOutOutcomeService
 {
+    /** Prefixo de log derivado do provider do próprio payout: [FLUXPAYMENTS], [PAYA55], ... */
+    private function tagFor(SolicitacoesCashOut $payout): string
+    {
+        $provider = strtolower(trim((string) ($payout->executor_ordem ?? ''))) ?: 'fluxpayments';
+
+        return '['.strtoupper($provider).']';
+    }
+
     /**
-     * Resolve a instância Flux da nominal do payout (não o singleton .env).
+     * Resolve a instância da nominal do payout (não o singleton .env).
      */
     public static function resolveAcquirerForPayout(SolicitacoesCashOut $payout): PixAcquirerInterface
     {
         $nominal = strtolower(trim((string) ($payout->adquirente_ref ?? '')));
 
+        $exec = strtolower(trim((string) ($payout->executor_ordem ?? '')));
+
         // Legado: manual gravava a nominal em executor_ordem antes do approve.
         if ($nominal === '') {
-            $exec = strtolower(trim((string) ($payout->executor_ordem ?? '')));
-            if ($exec === 'fluxpayments') {
-                $nominal = 'fluxpayments';
-            } elseif ($exec !== '') {
-                $nominal = $exec;
-            } else {
-                $nominal = strtolower(trim((string) (Helper::adquirenteDefault($payout->user_id, 'pix') ?: 'fluxpayments')));
-            }
+            $nominal = $exec !== ''
+                ? $exec
+                : strtolower(trim((string) (Helper::adquirenteDefault($payout->user_id, 'pix') ?: 'fluxpayments')));
         }
 
-        return app(PixAcquirerManager::class)->resolve($nominal !== '' ? $nominal : 'fluxpayments');
+        return app(PixAcquirerManager::class)->resolve($nominal !== '' ? $nominal : ($exec ?: 'fluxpayments'));
     }
 
     /**
@@ -52,7 +59,7 @@ final class FluxPaymentsCashOutOutcomeService
             $rawForClientMessage,
             $e2eToSet,
             $paidAtIso,
-            '[FLUXPAYMENTS][OUTCOME]',
+            $this->tagFor($payout).'[OUTCOME]',
         );
     }
 
@@ -66,7 +73,7 @@ final class FluxPaymentsCashOutOutcomeService
     ): ?string {
         $flux = self::resolveAcquirerForPayout($payout);
         if (! $flux->isActive()) {
-            Log::warning('[FLUXPAYMENTS][POLL] Adquirente inativa para payout', [
+            Log::warning($this->tagFor($payout).'[POLL] Adquirente inativa para payout', [
                 'payout_id' => $payout->id,
                 'adquirente_ref' => $payout->adquirente_ref,
                 'executor_ordem' => $payout->executor_ordem,
