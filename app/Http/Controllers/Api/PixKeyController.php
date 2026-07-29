@@ -10,6 +10,7 @@ use App\Models\SolicitacoesCashOut;
 use App\Models\User;
 use App\Services\CashOut\CashOutOutcomeApplier;
 use App\Services\FluxPayments\FluxPaymentsCashOutOutcomeService;
+use App\Services\FluxPayments\FluxPaymentsPixAcquirerService;
 use App\Services\Fyhub\FyhubCashOutOutcomeService;
 use App\Services\PixAcquirer\PixAcquirerManager;
 use App\Services\Simpay\SimpayCashOutOutcomeService;
@@ -830,7 +831,7 @@ class PixKeyController extends Controller
                     $withdrawal->refresh();
                 }
 
-                if ($acquirerService->getReference() === 'fluxpayments') {
+                if ($acquirerService instanceof FluxPaymentsPixAcquirerService) {
                     app(FluxPaymentsCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($withdrawal);
                     $withdrawal->refresh();
                 }

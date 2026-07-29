@@ -6,20 +6,23 @@ class FluxPaymentsAuthService
 {
     /**
      * @param  array<string, mixed>|null  $credentials  Credenciais de uma conta/nominal
-     *         específica (linha `adquirentes.credentials`). Quando nulo, cai no
-     *         comportamento global de sempre: lê do .env via config('fluxpayments.*').
+     *                                                  específica (linha `adquirentes.credentials`). Quando nulo, cai no
+     *                                                  comportamento global de sempre: lê do .env via config('<configKey>.*').
+     * @param  string  $configKey  Arquivo de config do provider desta família de API
+     *                             (fluxpayments | paya55) — a API é a mesma, só mudam host e credenciais.
      */
-    public function __construct(private readonly ?array $credentials = null)
-    {
-    }
+    public function __construct(
+        private readonly ?array $credentials = null,
+        protected readonly string $configKey = 'fluxpayments',
+    ) {}
 
     private function value(string $key, mixed $default = null): mixed
     {
-        return $this->credentials[$key] ?? config("fluxpayments.$key", $default);
+        return $this->credentials[$key] ?? config("{$this->configKey}.$key", $default);
     }
 
     /**
-     * Headers de autenticação Basic + User-Agent obrigatório da FluxPayments.
+     * Headers de autenticação Basic + User-Agent obrigatório da adquirente.
      *
      * @return array{Authorization: string, User-Agent: string, Accept: string, Content-Type: string}
      */
@@ -29,7 +32,9 @@ class FluxPaymentsAuthService
         $publicKey = (string) $this->value('public_key', '');
 
         if ($apiKey === '' || $publicKey === '') {
-            throw new \RuntimeException('FluxPayments: FLUXPAYMENTS_API_KEY / FLUXPAYMENTS_PUBLIC_KEY não configuradas.');
+            $env = strtoupper($this->configKey);
+
+            throw new \RuntimeException("{$this->configKey}: {$env}_API_KEY / {$env}_PUBLIC_KEY não configuradas.");
         }
 
         return [

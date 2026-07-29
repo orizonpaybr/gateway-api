@@ -4,7 +4,7 @@
  * Infrações Pix (MED — Mecanismo Especial de Devolução).
  *
  * Listagem/detalhe leem a tabela local `pix_infracoes` (alimentada pelos webhooks
- * Treeal Contas INFRACTION e FluxPayments transaction.infraction).
+ * Treeal Contas INFRACTION e FluxPayments/Paya55 transaction.infraction).
  * A defesa é encaminhada conforme o provider do registro.
  */
 
@@ -314,8 +314,8 @@ class PixInfracoesController extends Controller
                 $files = [$files];
             }
 
-            if ($provider === 'fluxpayments') {
-                $result = $this->submitFluxPaymentsDefenseLocally($row, (string) $validated['defense'], $files);
+            if (in_array($provider, ['fluxpayments', 'paya55'], true)) {
+                $result = $this->submitFluxPaymentsDefenseLocally($row, (string) $validated['defense'], $files, $provider);
             } else {
                 $service = app(TreealContasInfractionService::class);
                 $result = $service->submitDefense($providerId, (string) $validated['defense'], $files);
@@ -531,13 +531,13 @@ class PixInfracoesController extends Controller
     }
 
     /**
-     * FluxPayments ainda não documenta API de defesa MED — registra localmente
+     * FluxPayments/Paya55 ainda não documentam API de defesa MED — registra localmente
      * (mesmo efeito visual da Treeal: status EM_ANALISE) até haver endpoint.
      *
      * @param  array<int, \Illuminate\Http\UploadedFile>  $files
      * @return array{success: bool, message?: string, raw?: array}
      */
-    private function submitFluxPaymentsDefenseLocally(object $row, string $defense, array $files): array
+    private function submitFluxPaymentsDefenseLocally(object $row, string $defense, array $files, string $provider = 'fluxpayments'): array
     {
         $detalhes = [];
         $rawDetalhes = trim((string) ($row->detalhes ?? ''));
@@ -558,7 +558,7 @@ class PixInfracoesController extends Controller
             'updated_at' => Carbon::now(),
         ]);
 
-        Log::info('[FLUXPAYMENTS][INFRACTION] Defesa registrada localmente', [
+        Log::info('['.strtoupper($provider).'][INFRACTION] Defesa registrada localmente', [
             'infraction_id' => $row->id,
             'provider_infraction_id' => $row->provider_infraction_id ?? null,
             'files' => count($files),
@@ -566,9 +566,9 @@ class PixInfracoesController extends Controller
 
         return [
             'success' => true,
-            'message' => 'Defesa registrada. A FluxPayments será notificada quando a API de defesa MED estiver disponível; o status foi atualizado para Em Análise.',
+            'message' => 'Defesa registrada. A '.$this->providerDisplayName($provider).' será notificada quando a API de defesa MED estiver disponível; o status foi atualizado para Em Análise.',
             'raw' => [
-                'provider' => 'fluxpayments',
+                'provider' => $provider,
                 'mode' => 'local_pending_api',
             ],
         ];
@@ -598,6 +598,7 @@ class PixInfracoesController extends Controller
     {
         return match ($this->resolveProvider($row)) {
             'fluxpayments' => 'FluxPayments (adquirente Pix / MED)',
+            'paya55' => 'Paya55 (adquirente Pix / MED)',
             default => 'Treeal (adquirente Pix / MED)',
         };
     }
@@ -606,6 +607,7 @@ class PixInfracoesController extends Controller
     {
         return match (strtolower(trim($provider))) {
             'fluxpayments' => 'FluxPayments',
+            'paya55' => 'Paya55',
             'fyhub' => 'Fyhub',
             'simpay' => 'Simpay',
             default => 'Treeal',

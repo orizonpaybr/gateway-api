@@ -10,6 +10,8 @@ use App\Observers\SolicitacoesObserver;
 use App\Observers\UserObserver;
 use App\Services\FluxPayments\FluxPaymentsAuthService;
 use App\Services\FluxPayments\FluxPaymentsPixAcquirerService;
+use App\Services\Paya55\Paya55AuthService;
+use App\Services\Paya55\Paya55PixAcquirerService;
 use App\Services\Fyhub\FyhubAuthService;
 use App\Services\Fyhub\FyhubPixAcquirerService;
 use App\Services\FyhubContas\FyhubContasAccountService;
@@ -120,6 +122,12 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(FluxPaymentsPixAcquirerService::class, function ($app) {
             return new FluxPaymentsPixAcquirerService($app->make(FluxPaymentsAuthService::class));
         });
+
+        $this->app->singleton(Paya55AuthService::class);
+
+        $this->app->singleton(Paya55PixAcquirerService::class, function ($app) {
+            return new Paya55PixAcquirerService($app->make(Paya55AuthService::class));
+        });
     }
 
     /**
@@ -138,6 +146,9 @@ class AppServiceProvider extends ServiceProvider
 
         $this->app->make(PixAcquirerManager::class)
             ->register('fluxpayments', FluxPaymentsPixAcquirerService::class);
+
+        $this->app->make(PixAcquirerManager::class)
+            ->register('paya55', Paya55PixAcquirerService::class);
 
         // Registrar Observers para monitorar mudanças de status
         Solicitacoes::observe(SolicitacoesObserver::class);

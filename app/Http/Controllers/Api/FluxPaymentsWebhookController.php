@@ -20,7 +20,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Webhooks FluxPayments (envelope oficial: id, type, event, objectId, data).
+ * Webhooks da família A55 (FluxPayments / Paya55) — envelope oficial:
+ * id, type, event, objectId, data. A subclasse só troca o slug do provider.
  *
  * Processados (paridade Simpay/Fyhub/Treeal):
  * - PIX IN: paid, failed, cancelled, expired, refunded, partially_refunded, chargeback
@@ -65,10 +66,31 @@ class FluxPaymentsWebhookController extends Controller
         'transaction.blocked',
     ];
 
+    /**
+     * Slug do provider desta rota de webhook — casa com `executor_ordem`,
+     * `adquirentes.provider` e o arquivo config/<provider>.php.
+     */
+    protected function provider(): string
+    {
+        return 'fluxpayments';
+    }
+
+    /** Prefixo de log: [FLUXPAYMENTS][WEBHOOK], [PAYA55][WEBHOOK], ... */
+    protected function tag(): string
+    {
+        return '['.strtoupper($this->provider()).'][WEBHOOK]';
+    }
+
+    /** Instância usada só para os mapeamentos de status (funções puras). */
+    protected function acquirer(): FluxPaymentsPixAcquirerService
+    {
+        return app(FluxPaymentsPixAcquirerService::class);
+    }
+
     public function handle(Request $request): JsonResponse
     {
         if (! $this->passesOptionalSignature($request)) {
-            Log::warning('[FLUXPAYMENTS][WEBHOOK] Assinatura inválida');
+            Log::warning($this->tag().' Assinatura inválida');
 
             return response()->json(['received' => false, 'processed' => false, 'reason' => 'invalid_signature'], 401);
         }
@@ -97,7 +119,7 @@ class FluxPaymentsWebhookController extends Controller
             $data['id'] = $objectId;
         }
 
-        Log::info('[FLUXPAYMENTS][WEBHOOK] Evento recebido', [
+        Log::info($this->tag().' Evento recebido', [
             'event_id' => $envelope['id'] ?? null,
             'event' => $event,
             'type' => $objectType,
@@ -111,7 +133,7 @@ class FluxPaymentsWebhookController extends Controller
         }
 
         if (in_array($event, self::ACK_ONLY_EVENTS, true)) {
-            Log::info('[FLUXPAYMENTS][WEBHOOK] Evento informativo (ACK)', [
+            Log::info($this->tag().' Evento informativo (ACK)', [
                 'event' => $event,
                 'objectId' => $objectId !== '' ? $objectId : ($data['id'] ?? null),
             ]);
@@ -120,7 +142,7 @@ class FluxPaymentsWebhookController extends Controller
         }
 
         if ($event === 'transaction.infraction') {
-            $result = app(FluxPaymentsInfractionService::class)->handleFromWebhook($data, $objectId);
+            $result = app(FluxPaymentsInfractionService::class)->handleFromWebhook($data, $objectId, $this->provider());
 
             return response()->json([
                 'received' => true,
@@ -139,7 +161,7 @@ class FluxPaymentsWebhookController extends Controller
             return $this->handleCashIn($event, $data, $objectId);
         }
 
-        Log::info('[FLUXPAYMENTS][WEBHOOK] Evento não mapeado', ['event' => $event]);
+        Log::info($this->tag().' Evento não mapeado', ['event' => $event]);
 
         return response()->json(['received' => true, 'processed' => false, 'reason' => 'unhandled_event']);
     }
@@ -158,7 +180,7 @@ class FluxPaymentsWebhookController extends Controller
 
         $deposit = $this->findDeposit($transactionId, $externalRef);
         if (! $deposit) {
-            Log::warning('[FLUXPAYMENTS][WEBHOOK] Depósito não encontrado', [
+            Log::warning($this->tag().' Depósito não encontrado', [
                 'event' => $event,
                 'id' => $transactionId !== '' ? $transactionId : null,
                 'externalRef' => $externalRef !== '' ? $externalRef : null,
@@ -201,7 +223,7 @@ class FluxPaymentsWebhookController extends Controller
 
         $payout = $this->findCashOut($transactionId, $externalRef);
         if (! $payout) {
-            Log::warning('[FLUXPAYMENTS][WEBHOOK] Saque não encontrado', [
+            Log::warning($this->tag().' Saque não encontrado', [
                 'event' => $event,
                 'id' => $transactionId !== '' ? $transactionId : null,
                 'externalRef' => $externalRef !== '' ? $externalRef : null,
@@ -239,7 +261,7 @@ class FluxPaymentsWebhookController extends Controller
             $paidAt
         );
 
-        Log::info('[FLUXPAYMENTS][WEBHOOK] Status do saque processado', [
+        Log::info($this->tag().' Status do saque processado', [
             'payout_id' => $payout->id,
             'event' => $event,
             'new_status' => $mapped,
@@ -259,7 +281,7 @@ class FluxPaymentsWebhookController extends Controller
             'transaction.refunded', 'transaction.partially_refunded', 'transaction.chargeback' => 'REFUNDED',
             'transaction.cancelled', 'transaction.expired' => 'CANCELED',
             'transaction.failed' => 'FAILED',
-            default => app(FluxPaymentsPixAcquirerService::class)->mapChargeStatus(
+            default => $this->acquirer()->mapChargeStatus(
                 (string) ($data['status'] ?? ''),
                 $data
             ),
@@ -276,7 +298,7 @@ class FluxPaymentsWebhookController extends Controller
             'transfer.failed' => 'FAILED',
             'transfer.cancelled', 'transfer.rejected' => 'CANCELLED',
             'transfer.refunded', 'transfer.partially_refunded' => 'REFUNDED',
-            default => app(FluxPaymentsPixAcquirerService::class)->mapPayoutStatus(
+            default => $this->acquirer()->mapPayoutStatus(
                 (string) ($data['status'] ?? 'PROCESSING')
             ),
         };
@@ -327,12 +349,12 @@ class FluxPaymentsWebhookController extends Controller
     }
 
     /**
-     * Cada nominal FluxPayments tem seu próprio webhook_secret — o evento
+     * Cada nominal tem seu próprio webhook_secret — o evento
      * pode ter vindo de qualquer uma delas, então valida contra todas as
      * conhecidas (secret global do .env + credentials de cada nominal) e
      * aceita se alguma bater.
      */
-    private function passesOptionalSignature(Request $request): bool
+    protected function passesOptionalSignature(Request $request): bool
     {
         $secrets = $this->knownWebhookSecrets();
         if ($secrets === []) {
@@ -358,16 +380,16 @@ class FluxPaymentsWebhookController extends Controller
     /**
      * @return list<string>
      */
-    private function knownWebhookSecrets(): array
+    protected function knownWebhookSecrets(): array
     {
         $secrets = [];
 
-        $global = trim((string) config('fluxpayments.webhook_secret', ''));
+        $global = trim((string) config($this->provider().'.webhook_secret', ''));
         if ($global !== '') {
             $secrets[] = $global;
         }
 
-        $nominais = Adquirente::where('provider', 'fluxpayments')->whereNotNull('credentials')->get();
+        $nominais = Adquirente::where('provider', $this->provider())->whereNotNull('credentials')->get();
         foreach ($nominais as $nominal) {
             $secret = trim((string) ($nominal->credentials['webhook_secret'] ?? ''));
             if ($secret !== '') {
@@ -380,7 +402,7 @@ class FluxPaymentsWebhookController extends Controller
 
     private function findDeposit(string $transactionId, string $externalRef): ?Solicitacoes
     {
-        $base = Solicitacoes::query()->where('executor_ordem', 'fluxpayments');
+        $base = Solicitacoes::query()->where('executor_ordem', $this->provider());
 
         if ($transactionId !== '') {
             $found = (clone $base)->where('idTransaction', $transactionId)->first();
@@ -401,7 +423,7 @@ class FluxPaymentsWebhookController extends Controller
 
     private function findCashOut(string $transactionId, string $externalRef): ?SolicitacoesCashOut
     {
-        $base = SolicitacoesCashOut::query()->where('executor_ordem', 'fluxpayments');
+        $base = SolicitacoesCashOut::query()->where('executor_ordem', $this->provider());
 
         if ($transactionId !== '') {
             $found = (clone $base)->where('idTransaction', $transactionId)->first();
@@ -457,7 +479,7 @@ class FluxPaymentsWebhookController extends Controller
             return response()->json(['received' => true, 'processed' => false]);
         }
 
-        Log::info('[FLUXPAYMENTS][WEBHOOK] Depósito confirmado', [
+        Log::info($this->tag().' Depósito confirmado', [
             'deposit_id' => $deposit->id,
             'transaction_id' => $deposit->idTransaction,
             'end_to_end' => $e2e,
@@ -513,7 +535,7 @@ class FluxPaymentsWebhookController extends Controller
             return response()->json(['received' => true, 'processed' => false]);
         }
 
-        Log::info('[FLUXPAYMENTS][WEBHOOK] Depósito reembolsado', [
+        Log::info($this->tag().' Depósito reembolsado', [
             'deposit_id' => $deposit->id,
             'transaction_id' => $deposit->idTransaction,
             'refundedAmount' => $data['refundedAmount'] ?? null,
@@ -555,7 +577,7 @@ class FluxPaymentsWebhookController extends Controller
             return response()->json(['received' => true, 'processed' => false]);
         }
 
-        Log::info('[FLUXPAYMENTS][WEBHOOK] Cobrança encerrada sem pagamento', [
+        Log::info($this->tag().' Cobrança encerrada sem pagamento', [
             'deposit_id' => $deposit->id,
             'transaction_id' => $deposit->idTransaction,
             'status' => $statusToSet,
@@ -577,7 +599,7 @@ class FluxPaymentsWebhookController extends Controller
         try {
             app(PaymentProcessingService::class)->processPaymentReceived($deposit);
         } catch (\Throwable $e) {
-            Log::error('[FLUXPAYMENTS][WEBHOOK] Falha ao creditar depósito PIX', [
+            Log::error($this->tag().' Falha ao creditar depósito PIX', [
                 'deposit_id' => $deposit->id,
                 'transaction_id' => $deposit->idTransaction,
                 'error' => $e->getMessage(),

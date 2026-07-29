@@ -81,6 +81,11 @@ return Application::configure(basePath: dirname(__DIR__))
             return Limit::perMinute((int) config('fluxpayments.webhook_rate_limit_per_minute', 18000))
                 ->by('fluxpayments-webhook|'.$request->ip());
         });
+
+        RateLimiter::for('paya55-webhook', function (Request $request) {
+            return Limit::perMinute((int) config('paya55.webhook_rate_limit_per_minute', 18000))
+                ->by('paya55-webhook|'.$request->ip());
+        });
     })
     ->withMiddleware(function (Middleware $middleware) {
         // Nginx + Cloudflare: confiar nos headers de proxy para request()->ip() e allowlist de saque.
@@ -101,6 +106,7 @@ return Application::configure(basePath: dirname(__DIR__))
             '/fyhub/*',
             '/treeal/*',
             '/fluxpayments/*',
+            '/paya55/*',
             '/callback',
             '/callback/*',
             '/checkout/webhook/*',
@@ -123,6 +129,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'throttle.fyhub.pix' => \App\Http\Middleware\ThrottleFyhubPixThroughput::class,
             'throttle.treeal.pix' => \App\Http\Middleware\ThrottleTreealPixThroughput::class,
             'throttle.fluxpayments.pix' => \App\Http\Middleware\ThrottleFluxPaymentsPixThroughput::class,
+            'throttle.paya55.pix' => \App\Http\Middleware\ThrottlePaya55PixThroughput::class,
             'throttle.balance.failures' => \App\Http\Middleware\ThrottleBalanceCheckFailures::class,
             'throttle.login.failures' => \App\Http\Middleware\ThrottleLoginFailures::class,
             'check.ip.reputation' => \App\Http\Middleware\CheckIpReputation::class,

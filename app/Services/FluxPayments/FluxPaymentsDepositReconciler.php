@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Quando o PIX foi pago na FluxPayments mas o postback não chegou,
+ * Quando o PIX foi pago na adquirente (FluxPayments / Paya55) mas o postback não chegou,
  * consulta GET /api/v1/transactions/pix-in e liquida o depósito.
  * Resolve a nominal via adquirente_ref (não o singleton .env).
  */
@@ -20,9 +20,12 @@ class FluxPaymentsDepositReconciler
 {
     public function reconcileIfPaid(Solicitacoes $deposit): bool
     {
-        if ($deposit->executor_ordem !== 'fluxpayments') {
+        $provider = strtolower(trim((string) ($deposit->executor_ordem ?? '')));
+        if (! in_array($provider, FluxPaymentsPixAcquirerService::FAMILY, true)) {
             return false;
         }
+
+        $tag = '['.strtoupper($provider).'][RECONCILE]';
 
         if (! in_array($deposit->status, ['WAITING_FOR_APPROVAL'], true)) {
             return false;
@@ -34,10 +37,10 @@ class FluxPaymentsDepositReconciler
         }
 
         $nominal = strtolower(trim((string) ($deposit->adquirente_ref ?? '')));
-        $flux = app(PixAcquirerManager::class)->resolve($nominal !== '' ? $nominal : 'fluxpayments');
+        $flux = app(PixAcquirerManager::class)->resolve($nominal !== '' ? $nominal : $provider);
 
         if (! $flux instanceof FluxPaymentsPixAcquirerService || ! $flux->isActive()) {
-            Log::warning('[FLUXPAYMENTS][RECONCILE] Adquirente inativa para depósito', [
+            Log::warning($tag.' Adquirente inativa para depósito', [
                 'deposit_id' => $deposit->id,
                 'adquirente_ref' => $deposit->adquirente_ref,
             ]);
@@ -83,7 +86,7 @@ class FluxPaymentsDepositReconciler
         try {
             app(PaymentProcessingService::class)->processPaymentReceived(Solicitacoes::findOrFail($deposit->id));
         } catch (\Throwable $e) {
-            Log::error('[FLUXPAYMENTS][RECONCILE] Falha ao creditar depósito', [
+            Log::error($tag.' Falha ao creditar depósito', [
                 'deposit_id' => $deposit->id,
                 'txid' => $txid,
                 'error' => $e->getMessage(),
@@ -95,7 +98,7 @@ class FluxPaymentsDepositReconciler
         $fresh = $deposit->fresh();
         $this->dispatchClientWebhook($fresh, is_string($paidAt) ? $paidAt : null);
 
-        Log::info('[FLUXPAYMENTS][RECONCILE] Depósito liquidado via consulta pix-in', [
+        Log::info($tag.' Depósito liquidado via consulta pix-in', [
             'deposit_id' => $deposit->id,
             'txid' => $txid,
             'user_id' => $deposit->user_id,

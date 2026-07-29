@@ -19,6 +19,16 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class ThrottleFluxPaymentsPixThroughput
 {
+    protected function provider(): string
+    {
+        return 'fluxpayments';
+    }
+
+    protected function label(): string
+    {
+        return 'FluxPayments';
+    }
+
     public function handle(Request $request, Closure $next): Response
     {
         $user = $request->user();
@@ -28,12 +38,12 @@ class ThrottleFluxPaymentsPixThroughput
 
         $ref = Helper::adquirenteDefault($user->username, 'pix');
         $provider = app(PixAcquirerManager::class)->resolve($ref)->getReference();
-        if ($provider !== 'fluxpayments') {
+        if ($provider !== $this->provider()) {
             return $next($request);
         }
 
-        $perSecond = max(1, (int) config('fluxpayments.rate_limit_per_second', 300));
-        $key = 'fluxpayments-pix-throughput:'.$user->username;
+        $perSecond = max(1, (int) config($this->provider().'.rate_limit_per_second', 300));
+        $key = $this->provider().'-pix-throughput:'.$user->username;
 
         $response = RateLimiter::attempt($key, $perSecond, function () use ($next, $request) {
             return $next($request);
@@ -42,7 +52,7 @@ class ThrottleFluxPaymentsPixThroughput
         if ($response === false) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Limite de requisições PIX (FluxPayments) excedido. Aguarde um instante e tente novamente.',
+                'message' => 'Limite de requisições PIX ('.$this->label().') excedido. Aguarde um instante e tente novamente.',
             ], 429);
         }
 

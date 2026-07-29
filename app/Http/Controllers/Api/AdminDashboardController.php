@@ -1006,7 +1006,7 @@ class AdminDashboardController extends Controller
      * adicionar aqui exige antes implementar o build por credencial em
      * PixAcquirerManager::buildWithCredentials().
      */
-    private const MULTI_ACCOUNT_PROVIDERS = ['fluxpayments'];
+    private const MULTI_ACCOUNT_PROVIDERS = ['fluxpayments', 'paya55'];
 
     /**
      * Criar uma nova nominal (conta com credenciais próprias) para um provider

@@ -15,7 +15,8 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Fluxo MED (infração) FluxPayments — espelha TreealContasWebhookController.
+ * Fluxo MED (infração) da família A55 (FluxPayments / Paya55) — espelha
+ * TreealContasWebhookController. O provider vem do webhook (ou do depósito).
  *
  * Abertura: transaction.infraction → depósito MEDIATION + pix_infracoes.
  * Encerramento favorável ao pagador: transaction.refunded/chargeback com depósito em MEDIATION
@@ -35,12 +36,30 @@ class FluxPaymentsInfractionService
         'ANSWERED',
     ];
 
+    private function providerLabel(string $provider): string
+    {
+        return match (strtolower(trim($provider))) {
+            'paya55' => 'Paya55',
+            default => 'FluxPayments',
+        };
+    }
+
+    /** Prefixo de log derivado do provider do próprio depósito. */
+    private function tagFor(Solicitacoes $deposit): string
+    {
+        $provider = strtolower(trim((string) ($deposit->executor_ordem ?? ''))) ?: 'fluxpayments';
+
+        return '['.strtoupper($provider).'][INFRACTION]';
+    }
+
     /**
      * @param  array<string, mixed>  $data  Payload data do webhook (objeto da transação)
      * @return array{processed: bool, reason?: string, deposit_id?: int}
      */
-    public function handleFromWebhook(array $data, string $objectId = ''): array
+    public function handleFromWebhook(array $data, string $objectId = '', string $provider = 'fluxpayments'): array
     {
+        $provider = strtolower(trim($provider)) ?: 'fluxpayments';
+        $tag = '['.strtoupper($provider).'][INFRACTION]';
         $txnId = trim((string) ($data['id'] ?? $objectId));
         $externalRef = trim((string) ($data['externalRef'] ?? ''));
 
@@ -61,9 +80,9 @@ class FluxPaymentsInfractionService
             ?? ''
         )));
 
-        $deposit = $this->findDeposit($txnId, $externalRef);
+        $deposit = $this->findDeposit($txnId, $externalRef, $provider);
         if (! $deposit) {
-            Log::warning('[FLUXPAYMENTS][INFRACTION] Depósito não localizado', [
+            Log::warning($tag.' Depósito não localizado', [
                 'infraction_id' => $infractionId,
                 'txn_id' => $txnId !== '' ? $txnId : null,
                 'externalRef' => $externalRef !== '' ? $externalRef : null,
@@ -83,7 +102,8 @@ class FluxPaymentsInfractionService
             $amount,
             $data,
             $infractionMeta,
-            $endToEndId
+            $endToEndId,
+            $provider
         );
 
         $depositStatusChanged = $this->applyInfractionToDeposit($deposit, $status, $analysisResult);
@@ -93,7 +113,7 @@ class FluxPaymentsInfractionService
 
         $this->dispatchInfractionClientWebhook($deposit->fresh(), $status, $amount);
 
-        Log::info('[FLUXPAYMENTS][INFRACTION] Processada', [
+        Log::info($tag.' Processada', [
             'infraction_id' => $infractionId,
             'status' => $status,
             'analysis_result' => $analysisResult !== '' ? $analysisResult : null,
@@ -127,7 +147,7 @@ class FluxPaymentsInfractionService
         app(PaymentProcessingService::class)->invalidateInfractionCaches((string) $deposit->user_id);
         $this->dispatchInfractionClientWebhook($deposit->fresh(), 'CLOSED', (float) $deposit->amount);
 
-        Log::info('[FLUXPAYMENTS][INFRACTION] MED encerrada com estorno (AGREED)', [
+        Log::info($this->tagFor($deposit).' MED encerrada com estorno (AGREED)', [
             'deposit_id' => $deposit->id,
             'transaction_id' => $deposit->idTransaction,
         ]);
@@ -175,9 +195,9 @@ class FluxPaymentsInfractionService
         };
     }
 
-    private function findDeposit(string $transactionId, string $externalRef): ?Solicitacoes
+    private function findDeposit(string $transactionId, string $externalRef, string $provider = 'fluxpayments'): ?Solicitacoes
     {
-        $base = Solicitacoes::query()->where('executor_ordem', 'fluxpayments');
+        $base = Solicitacoes::query()->where('executor_ordem', $provider);
 
         if ($transactionId !== '') {
             $found = (clone $base)->where('idTransaction', $transactionId)->first();
@@ -245,13 +265,13 @@ class FluxPaymentsInfractionService
     }
 
     /**
-     * FluxPayments envia valores monetários em centavos nos webhooks de transação.
+     * A API envia valores monetários em centavos nos webhooks de transação.
      * Se o número for grande (>= 100 e inteiro típico de centavos), converte.
      * Fallback: se já parece reais (ex.: 100.00 com depósito 100), usa direto quando próximo do fallback.
      */
     private function normalizeAmountToReais(float $value): float
     {
-        // FluxPayments documenta valores monetários em centavos nos webhooks.
+        // A documentação define valores monetários em centavos nos webhooks.
         return round($value / 100, 2);
     }
 
@@ -268,6 +288,7 @@ class FluxPaymentsInfractionService
         array $data,
         array $infractionMeta,
         string $endToEndId,
+        string $provider = 'fluxpayments',
     ): void {
         $hasProviderColumn = Schema::hasColumn('pix_infracoes', 'provider_infraction_id');
 
@@ -283,7 +304,7 @@ class FluxPaymentsInfractionService
 
         $descricao = trim((string) ($infractionMeta['reason'] ?? $infractionMeta['reportDetails'] ?? ''));
         if ($descricao === '') {
-            $descricao = 'Infração Pix (MED) registrada via FluxPayments.';
+            $descricao = 'Infração Pix (MED) registrada via '.$this->providerLabel($provider).'.';
         }
 
         $attributes = [
@@ -300,7 +321,7 @@ class FluxPaymentsInfractionService
                 'infractionId' => $infractionId,
                 'status' => $status,
                 'analysisResult' => $analysisResult !== '' ? $analysisResult : null,
-                'provider' => 'fluxpayments',
+                'provider' => $provider,
                 'reason' => $infractionMeta['reason'] ?? null,
                 'blockedAmount' => $infractionMeta['blockedAmount'] ?? null,
                 'transactionId' => $data['id'] ?? null,
@@ -309,7 +330,7 @@ class FluxPaymentsInfractionService
         ];
 
         if ($hasProviderColumn) {
-            $attributes['provider'] = 'fluxpayments';
+            $attributes['provider'] = $provider;
             if (Schema::hasColumn('pix_infracoes', 'analysis_result')) {
                 $attributes['analysis_result'] = $analysisResult !== '' ? $analysisResult : null;
             }
@@ -398,7 +419,7 @@ class FluxPaymentsInfractionService
                         app(\App\Services\AffiliateCommissionService::class)
                             ->reverseCashInCommissionForRefundedDeposit($locked);
                     } catch (\Throwable $e) {
-                        Log::warning('[FLUXPAYMENTS][INFRACTION] Falha ao estornar comissão de afiliado', [
+                        Log::warning($this->tagFor($locked).' Falha ao estornar comissão de afiliado', [
                             'deposit_id' => $locked->id,
                             'error' => $e->getMessage(),
                         ]);
@@ -435,7 +456,7 @@ class FluxPaymentsInfractionService
 
         $txnId = (string) ($deposit->idTransaction ?? '');
         $query = DB::table('pix_infracoes')
-            ->where('provider', 'fluxpayments')
+            ->where('provider', strtolower(trim((string) ($deposit->executor_ordem ?? ''))) ?: 'fluxpayments')
             ->where(function ($q) use ($txnId, $deposit) {
                 $q->where('transaction_id', $txnId);
                 if ($txnId !== '') {
