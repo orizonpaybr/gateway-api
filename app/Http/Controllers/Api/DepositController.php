@@ -68,6 +68,8 @@ class DepositController extends Controller
                 'email' => ['required', 'string', 'email'],
                 'debtor_document_number' => ['nullable', 'string'],
                 'phone' => ['nullable', 'string'],
+                // Número de pedido do integrador: opcional, alfanumérico + . _ - (evita injeção/enumeração).
+                'external_reference' => ['nullable', 'string', 'max:80', 'regex:/^[A-Za-z0-9._-]+$/'],
                 'method_pay' => ['nullable', 'string'],
                 'postback' => ['nullable', 'string'],
                 'description' => ['nullable', 'string', 'max:140'],
@@ -125,6 +127,26 @@ class DepositController extends Controller
 
     public function statusDeposito(Request $request)
     {
+        // Consulta pelo número de pedido do integrador (external_reference).
+        // A rota é pública, então referências previsíveis vazariam transações de outros
+        // clientes: exigimos token+secret válidos e restringimos o resultado ao dono.
+        $clientReference = trim((string) $request->input('external_reference', ''));
+        if ($clientReference !== '') {
+            $ownerUsername = $this->resolveIntegratorUsername($request);
+            if ($ownerUsername === null) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Autenticação (token/secret) necessária para consultar por external_reference.',
+                ], 401);
+            }
+
+            $deposit = Solicitacoes::where('user_id', $ownerUsername)
+                ->where('client_reference', $clientReference)
+                ->first();
+
+            return response()->json($deposit ? $this->buildStatusResponse($deposit) : ['status' => 'NOT_FOUND']);
+        }
+
         $transactionId = trim((string) $request->input('idTransaction', ''));
         if ($transactionId === '') {
             return response()->json(['status' => 'NOT_FOUND']);
@@ -153,6 +175,48 @@ class DepositController extends Controller
     {
         return SolicitacoesCashOut::where('idTransaction', $transactionId)->first()
             ?? SolicitacoesCashOut::where('externalreference', $transactionId)->first();
+    }
+
+    /** Resposta de criação a partir de um depósito já existente (replay idempotente). */
+    private function buildIdempotentDepositResponse(Solicitacoes $deposit): array
+    {
+        return [
+            'status' => 200,
+            'data' => [
+                'status' => 'success',
+                'message' => 'QR Code gerado com sucesso',
+                'idTransaction' => $deposit->idTransaction,
+                'qr_code' => $deposit->qrcode_pix,
+                'qr_code_image_url' => null,
+                'idempotent' => true,
+            ],
+        ];
+    }
+
+    /**
+     * Resolve o username do integrador a partir de token+secret (body ou headers),
+     * sem depender do middleware — a rota de status é pública. Usado só para escopar
+     * a consulta por external_reference ao dono. Retorna null se não autenticado.
+     */
+    private function resolveIntegratorUsername(Request $request): ?string
+    {
+        $token = $request->input('token') ?: $request->header('api-token') ?: $request->header('api_token');
+        $secret = $request->input('secret') ?: $request->header('api-secret') ?: $request->header('api_secret');
+        if (! $token || ! $secret) {
+            return null;
+        }
+
+        $key = \App\Models\UsersKey::findByCredentials((string) $token, (string) $secret);
+        if (! $key) {
+            return null;
+        }
+
+        $owner = \App\Models\User::query()
+            ->where('user_id', $key->user_id)
+            ->orWhere('username', $key->user_id)
+            ->first();
+
+        return $owner?->username;
     }
 
     private function buildStatusResponse($transaction): array
@@ -573,6 +637,19 @@ class DepositController extends Controller
             ];
         }
 
+        // Idempotência por referência do integrador: um retry (ex.: erro de rede em que o
+        // cliente não recebeu nosso ID) com a mesma external_reference devolve o depósito
+        // já criado — não gera cobrança duplicada nem cobra o cliente duas vezes.
+        $clientReference = trim((string) $request->input('external_reference', ''));
+        if ($clientReference !== '') {
+            $existing = Solicitacoes::where('user_id', $user->username)
+                ->where('client_reference', $clientReference)
+                ->first();
+            if ($existing) {
+                return $this->buildIdempotentDepositResponse($existing);
+            }
+        }
+
         $correlationId = preg_replace('/[^a-zA-Z0-9]/', '', Str::uuid()->toString());
         $debtor = $this->resolvePixDebtorFromRequest($request, $user);
 
@@ -636,6 +713,7 @@ class DepositController extends Controller
         $cashin = [
             'user_id' => $user->username,
             'externalreference' => $idTxn,
+            'client_reference' => $clientReference !== '' ? $clientReference : null,
             'amount' => $request->amount,
             'client_name' => $debtor['name'],
             'client_document' => $debtor['document'],
@@ -659,7 +737,23 @@ class DepositController extends Controller
             'split_percentage' => $request->input('split_percentage'),
         ];
 
-        $deposit = Solicitacoes::create($cashin);
+        try {
+            $deposit = Solicitacoes::create($cashin);
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Corrida rara: outro request simultâneo com a mesma external_reference criou
+            // primeiro (violou a constraint única). Devolve o existente — idempotente.
+            // ponytail: a cobrança já criada na adquirente aqui vira órfã (QR nunca exibido,
+            // expira sem pagamento). Custo aceito; reservar antes do charge seria o upgrade.
+            if ($clientReference !== '') {
+                $existing = Solicitacoes::where('user_id', $user->username)
+                    ->where('client_reference', $clientReference)
+                    ->first();
+                if ($existing) {
+                    return $this->buildIdempotentDepositResponse($existing);
+                }
+            }
+            throw $e;
+        }
 
         Log::info('DepositController - Cob PIX criada', [
             'deposit_id' => $deposit->id,

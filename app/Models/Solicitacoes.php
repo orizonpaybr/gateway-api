@@ -14,6 +14,7 @@ class Solicitacoes extends Model
     protected $fillable = [
         "user_id",
         "externalreference",
+        "client_reference",
         "amount",
         "client_name",
         "client_document",
