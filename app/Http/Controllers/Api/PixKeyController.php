@@ -11,12 +11,9 @@ use App\Models\User;
 use App\Services\CashOut\CashOutOutcomeApplier;
 use App\Services\FluxPayments\FluxPaymentsCashOutOutcomeService;
 use App\Services\FluxPayments\FluxPaymentsPixAcquirerService;
-use App\Services\Fyhub\FyhubCashOutOutcomeService;
 use App\Services\PixAcquirer\PixAcquirerManager;
-use App\Services\Simpay\SimpayCashOutOutcomeService;
 use App\Services\Treeal\TreealCashOutOutcomeService;
 use App\Services\Treeal\TreealPixAcquirerService;
-use App\Services\Fyhub\FyhubPixAcquirerService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -773,8 +770,7 @@ class PixKeyController extends Controller
                 $raw = is_array($payoutResult['raw'] ?? null) ? $payoutResult['raw'] : [];
                 $payoutE2e = trim((string) ($raw['endToEndId'] ?? ''));
                 $providerStatus = (string) ($payoutResult['status'] ?? 'pending');
-                $statusMapped = $acquirerService instanceof FyhubPixAcquirerService
-                    || $acquirerService instanceof TreealPixAcquirerService
+                $statusMapped = $acquirerService instanceof TreealPixAcquirerService
                     ? $acquirerService->resolveInitialPayoutStatus($providerStatus, $payoutE2e !== '' ? $payoutE2e : null)
                     : $acquirerService->mapPayoutStatus($providerStatus);
 
@@ -791,15 +787,7 @@ class PixKeyController extends Controller
                 $withdrawal->refresh();
 
                 if (CashOutOutcomeApplier::isTerminalStatus($statusMapped)) {
-                    if ($acquirerService->getReference() === 'fyhub') {
-                        app(FyhubCashOutOutcomeService::class)->applySyncTerminalOutcome(
-                            $withdrawal,
-                            $statusMapped,
-                            $raw,
-                            $payoutE2e !== '' ? $payoutE2e : null,
-                            '[WEB_PAYOUT][OUTCOME]',
-                        );
-                    } elseif ($acquirerService->getReference() === 'treeal') {
+                    if ($acquirerService->getReference() === 'treeal') {
                         app(TreealCashOutOutcomeService::class)->applySyncTerminalOutcome(
                             $withdrawal,
                             $statusMapped,
@@ -818,16 +806,8 @@ class PixKeyController extends Controller
                         );
                     }
                     $withdrawal->refresh();
-                } elseif ($acquirerService->getReference() === 'fyhub') {
-                    app(FyhubCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($withdrawal);
-                    $withdrawal->refresh();
                 } elseif ($acquirerService->getReference() === 'treeal') {
                     app(TreealCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($withdrawal);
-                    $withdrawal->refresh();
-                }
-
-                if ($acquirerService->getReference() === 'simpay') {
-                    app(SimpayCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($withdrawal);
                     $withdrawal->refresh();
                 }
 

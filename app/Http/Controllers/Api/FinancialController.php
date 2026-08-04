@@ -274,7 +274,7 @@ class FinancialController extends Controller
     }
 
     /**
-     * Estorno de depósito PIX (Simpay) — admin
+     * Estorno de depósito PIX — admin
      */
     public function refundDeposit(RefundDepositRequest $request, int $id): JsonResponse
     {

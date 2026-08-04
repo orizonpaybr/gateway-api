@@ -16,10 +16,9 @@ class CustoAdquirentePixHelperTest extends TestCase
     public function custo_fixo_transacao_retorna_valor_por_adquirente(): void
     {
         config()->set('treeal.custo_fixo_transacao', 0.05);
-        config()->set('fyhub.custo_fixo_transacao', 0.04);
-        config()->set('simpay.custo_fixo_transacao', 0.035);
 
         $this->assertSame(0.05, CustoAdquirentePixHelper::custoFixoTransacao('treeal'));
+        // Descontinuadas: custo congelado no helper (sem config), só para relatório histórico.
         $this->assertSame(0.04, CustoAdquirentePixHelper::custoFixoTransacao('fyhub'));
         $this->assertSame(0.035, CustoAdquirentePixHelper::custoFixoTransacao('simpay'));
         $this->assertSame(0.0, CustoAdquirentePixHelper::custoFixoTransacao(null));

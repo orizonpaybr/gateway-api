@@ -54,7 +54,7 @@ class WithdrawalRefundTest extends TestCase
             'beneficiaryname' => '',
             'beneficiarydocument' => '',
             'descricao_transacao' => 'AUTOMATICO',
-            'executor_ordem' => 'simpay',
+            'executor_ordem' => 'treeal',
             'callback' => null,
         ]);
     }

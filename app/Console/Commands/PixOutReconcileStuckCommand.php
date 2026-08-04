@@ -3,7 +3,6 @@
 namespace App\Console\Commands;
 
 use App\Models\SolicitacoesCashOut;
-use App\Services\Fyhub\FyhubCashOutOutcomeService;
 use App\Services\Treeal\TreealCashOutOutcomeService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -14,10 +13,9 @@ use Illuminate\Support\Facades\Log;
  * em voo (processo morreu, webhook nunca chegou), esta rotina resolve pela verdade
  * do provedor — COMPLETED confirma, FAILED estorna via caminho auditado.
  *
- * Cobre só treeal e fyhub: flux e simpay já têm job próprio
- * (ReconcileFluxPaymentsPayoutsJob / ReconcileSimpayPayoutsJob). Treeal e fyhub
- * tinham reconciliador de DEPÓSITO mas nenhum de PAYOUT — era esse o buraco que
- * deixou os saques treed de mai/jun presos.
+ * Cobre só treeal: flux já tem job próprio (ReconcileFluxPaymentsPayoutsJob).
+ * Treeal tinha reconciliador de DEPÓSITO mas nenhum de PAYOUT — era esse o buraco
+ * que deixou os saques treed de mai/jun presos.
  *
  * NUNCA credita saldo por conta própria: só chama pollApiAndApplyIfTerminal, que
  * aplica o estorno apenas quando o provedor CONFIRMA falha. Assim não há risco de
@@ -32,9 +30,8 @@ class PixOutReconcileStuckCommand extends Command
 
     protected $description = 'Resolve saques presos em PENDING/PROCESSING consultando a adquirente';
 
-    /** Adquirentes SEM job de reconciliação de payout próprio (flux/simpay já têm). */
+    /** Adquirentes SEM job de reconciliação de payout próprio (flux já tem). */
     private const POLL_SERVICES = [
-        'fyhub' => FyhubCashOutOutcomeService::class,
         'treeal' => TreealCashOutOutcomeService::class,
     ];
 

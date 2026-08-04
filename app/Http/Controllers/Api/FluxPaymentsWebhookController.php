@@ -23,7 +23,7 @@ use Illuminate\Support\Facades\Log;
  * Webhooks da família A55 (FluxPayments / Paya55) — envelope oficial:
  * id, type, event, objectId, data. A subclasse só troca o slug do provider.
  *
- * Processados (paridade Simpay/Fyhub/Treeal):
+ * Processados (paridade Treeal):
  * - PIX IN: paid, failed, cancelled, expired, refunded, partially_refunded, chargeback
  * - PIX OUT: paid, failed, cancelled, refunded, rejected
  * - MED: transaction.infraction (bloqueio) + refund/chargeback em mediação (estorno)

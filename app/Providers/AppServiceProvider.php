@@ -12,16 +12,7 @@ use App\Services\FluxPayments\FluxPaymentsAuthService;
 use App\Services\FluxPayments\FluxPaymentsPixAcquirerService;
 use App\Services\Paya55\Paya55AuthService;
 use App\Services\Paya55\Paya55PixAcquirerService;
-use App\Services\Fyhub\FyhubAuthService;
-use App\Services\Fyhub\FyhubPixAcquirerService;
-use App\Services\FyhubContas\FyhubContasAccountService;
-use App\Services\FyhubContas\FyhubContasApiClient;
-use App\Services\FyhubContas\FyhubContasAuthService;
-use App\Services\FyhubContas\FyhubContasPixOutService;
 use App\Services\PixAcquirer\PixAcquirerManager;
-use App\Services\Simpay\SimpayAuthService;
-use App\Services\Simpay\SimpayCpfService;
-use App\Services\Simpay\SimpayPixAcquirerService;
 use App\Services\Treeal\TreealAuthService;
 use App\Services\Treeal\TreealCashOutOutcomeService;
 use App\Services\Treeal\TreealPixAcquirerService;
@@ -42,39 +33,6 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->singleton(PixAcquirerManager::class, function () {
             return new PixAcquirerManager;
-        });
-
-        $this->app->singleton(SimpayAuthService::class);
-
-        $this->app->singleton(SimpayCpfService::class, function ($app) {
-            return new SimpayCpfService($app->make(SimpayAuthService::class));
-        });
-
-        $this->app->singleton(SimpayPixAcquirerService::class, function ($app) {
-            return new SimpayPixAcquirerService($app->make(SimpayAuthService::class));
-        });
-
-        $this->app->singleton(FyhubAuthService::class);
-
-        $this->app->singleton(FyhubContasAuthService::class);
-
-        $this->app->singleton(FyhubContasApiClient::class, function ($app) {
-            return new FyhubContasApiClient($app->make(FyhubContasAuthService::class));
-        });
-
-        $this->app->singleton(FyhubContasPixOutService::class, function ($app) {
-            return new FyhubContasPixOutService($app->make(FyhubContasApiClient::class));
-        });
-
-        $this->app->singleton(FyhubContasAccountService::class, function ($app) {
-            return new FyhubContasAccountService($app->make(FyhubContasApiClient::class));
-        });
-
-        $this->app->singleton(FyhubPixAcquirerService::class, function ($app) {
-            return new FyhubPixAcquirerService(
-                $app->make(FyhubAuthService::class),
-                $app->make(FyhubContasPixOutService::class),
-            );
         });
 
         $this->app->singleton(TreealAuthService::class);
@@ -135,12 +93,6 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        $this->app->make(PixAcquirerManager::class)
-            ->register('simpay', SimpayPixAcquirerService::class);
-
-        $this->app->make(PixAcquirerManager::class)
-            ->register('fyhub', FyhubPixAcquirerService::class);
-
         $this->app->make(PixAcquirerManager::class)
             ->register('treeal', TreealPixAcquirerService::class);
 

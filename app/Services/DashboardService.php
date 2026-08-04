@@ -33,8 +33,8 @@ class DashboardService
         
         return Cache::remember($cacheKey, self::CACHE_TTL_STATS, function () use ($username, $startOfMonth, $endOfMonth) {
             $custoTreeal = (float) config('treeal.custo_fixo_transacao', 0.05);
-            $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.035);
-            $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
+            $custoSimpay = \App\Helpers\CustoAdquirentePixHelper::CUSTO_HISTORICO_SIMPAY;
+            $custoFyhub = \App\Helpers\CustoAdquirentePixHelper::CUSTO_HISTORICO_FYHUB;
 
             $custoSaqueExpr = \App\Helpers\CustoAdquirentePixHelper::sqlCustoPorTransacaoExpr('amount', true);
 
