@@ -7,7 +7,7 @@ use PHPUnit\Framework\TestCase;
 
 class CashOutBeneficiaryResolverTest extends TestCase
 {
-    public function test_resolves_creditor_account_from_fyhub_webhook_data(): void
+    public function test_resolves_creditor_account_from_webhook_data(): void
     {
         $raw = [
             'status' => 'LIQUIDATED',

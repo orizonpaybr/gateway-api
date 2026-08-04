@@ -608,6 +608,7 @@ class PixInfracoesController extends Controller
         return match (strtolower(trim($provider))) {
             'fluxpayments' => 'FluxPayments',
             'paya55' => 'Paya55',
+            // Descontinuadas: só para exibir infrações históricas já gravadas.
             'fyhub' => 'Fyhub',
             'simpay' => 'Simpay',
             default => 'Treeal',

@@ -37,8 +37,8 @@ interface PixAcquirerInterface
     /**
      * Consulta o status atual de um payout na adquirente.
      *
-     * @param  string  $transactionId  id numérico Simpay (transaction_id do cash out)
-     * @param  string|null  $e2eId  End-to-end / operationUuid (Simpay: e2e_id) quando disponível
+     * @param  string  $transactionId  id da transação na adquirente (transaction_id do cash out)
+     * @param  string|null  $e2eId  End-to-end / operationUuid quando disponível
      * @return array{success:bool,status?:string,message?:string,raw?:array}
      */
     public function getPayoutStatus(string $transactionId, ?string $e2eId = null): array;

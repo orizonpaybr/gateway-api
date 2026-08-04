@@ -10,8 +10,6 @@ use App\Http\Controllers\Api\DepositController;
 use Illuminate\Support\Facades\Artisan;
 use App\Http\Controllers\Api\PixInfracoesController;
 use App\Http\Controllers\Api\PixKeyController;
-use App\Http\Controllers\Api\SimpayCpfController;
-use App\Http\Controllers\Api\SimpayDebugController;
 
 /*
 |--------------------------------------------------------------------------
@@ -48,7 +46,7 @@ Route::middleware(['verify.jwt', 'throttle:120,1'])->group(function () {
     Route::get('transactions', [UserController::class, 'getTransactions']);
     Route::get('transactions/{id}', [UserController::class, 'getTransactionById']);
     Route::get('user/profile', [UserController::class, 'getProfile']);
-    Route::post('pix/generate-qr', [UserController::class, 'generatePixQR'])->middleware(['throttle.fyhub.pix', 'throttle.treeal.pix', 'throttle.fluxpayments.pix', 'throttle.paya55.pix']);
+    Route::post('pix/generate-qr', [UserController::class, 'generatePixQR'])->middleware(['throttle.treeal.pix', 'throttle.fluxpayments.pix', 'throttle.paya55.pix']);
     Route::get('extrato', [UserController::class, 'getExtrato']);
     Route::get('user/real-data', [UserController::class, 'getRealData']);
     Route::get('dashboard/stats', [UserController::class, 'getDashboardStats']);
@@ -69,7 +67,7 @@ Route::middleware(['verify.jwt', 'throttle:120,1'])->group(function () {
     Route::put('pix/keys/{id}', [PixKeyController::class, 'update']);
     Route::delete('pix/keys/{id}', [PixKeyController::class, 'destroy']);
     Route::post('pix/keys/{id}/set-default', [PixKeyController::class, 'setDefault']);
-    Route::post('pix/withdraw-with-key', [PixKeyController::class, 'withdraw'])->middleware(['throttle.fyhub.pix', 'throttle.treeal.pix', 'throttle.fluxpayments.pix', 'throttle.paya55.pix']);
+    Route::post('pix/withdraw-with-key', [PixKeyController::class, 'withdraw'])->middleware(['throttle.treeal.pix', 'throttle.fluxpayments.pix', 'throttle.paya55.pix']);
     
     // QR Codes (Otimizado)
     Route::get('qrcodes', [App\Http\Controllers\Api\QRCodeController::class, 'index']);
@@ -124,8 +122,6 @@ Route::middleware(['verify.jwt', 'throttle:120,1'])->group(function () {
         Route::put('admin/levels/{id}', [App\Http\Controllers\Api\AdminLevelsController::class, 'update'])->where('id', '[0-9]+');
         Route::post('admin/levels/toggle-active', [App\Http\Controllers\Api\AdminLevelsController::class, 'toggleActive']);
 
-        Route::get('admin/simpay/receipt-transaction', [SimpayDebugController::class, 'receiptTransaction']);
-
         // Auditoria de autenticação e IPs bloqueados
         Route::get('admin/auth-events', [App\Http\Controllers\Api\AdminAuthEventsController::class, 'index']);
         Route::get('admin/blocked-ips', [App\Http\Controllers\Api\AdminAuthEventsController::class, 'listBlockedIps']);
@@ -179,9 +175,6 @@ Route::middleware(['verify.jwt', 'throttle:120,1'])->group(function () {
         Route::post('2fa/disable', [App\Http\Controllers\TwoFactorAuthController::class, 'disable']);
     });
     
-    // SIMPAY - Validação de CPF
-    Route::middleware(['throttle:30,1'])->post('simpay/validate-cpf', [SimpayCpfController::class, 'validateCpf']);
-
     // Rotas de segurança e conta
     Route::post('auth/change-password', [UserController::class, 'changePassword']);
     
@@ -231,8 +224,8 @@ Route::get('/link-storage', function (Request $request) {
 Route::middleware(['throttle.balance.failures', 'check.token.secret', 'throttle:balance-check'])->get('wallet/balance', [\App\Http\Controllers\Api\Client\BalanceController::class, 'show']);
 
 /* PIX */
-Route::middleware(['check.token.secret', 'throttle.fyhub.pix', 'throttle.treeal.pix', 'throttle.fluxpayments.pix', 'throttle.paya55.pix', 'throttle:pix-in'])->post('wallet/deposit/payment', [DepositController::class, 'makeDeposit']);
-Route::middleware(['check.token.secret', 'check.allowed.ip', 'throttle.fyhub.pix', 'throttle.treeal.pix', 'throttle.fluxpayments.pix', 'throttle.paya55.pix', 'throttle:pix-out'])->post('pixout', [SaqueController::class, 'makePayment']);
+Route::middleware(['check.token.secret', 'throttle.treeal.pix', 'throttle.fluxpayments.pix', 'throttle.paya55.pix', 'throttle:pix-in'])->post('wallet/deposit/payment', [DepositController::class, 'makeDeposit']);
+Route::middleware(['check.token.secret', 'check.allowed.ip', 'throttle.treeal.pix', 'throttle.fluxpayments.pix', 'throttle.paya55.pix', 'throttle:pix-out'])->post('pixout', [SaqueController::class, 'makePayment']);
 Route::middleware('throttle:status-check')->post('status', [DepositController::class, 'statusDeposito']);
 
 /* CARTÃO */

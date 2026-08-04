@@ -2,11 +2,9 @@
 
 namespace App\Services\CashOut;
 
-use App\Services\Fyhub\FyhubPaymentBeneficiaryReader;
 
 /**
  * Extrai nome e documento do recebedor real (credor Pix) a partir do payload do provedor.
- * FyHub Contas: data.creditorAccount (GET /pix/payments, webhook TRANSFER).
  */
 final class CashOutBeneficiaryResolver
 {
@@ -16,11 +14,6 @@ final class CashOutBeneficiaryResolver
      */
     public static function resolve(?array $providerRaw): array
     {
-        $fromFyhub = FyhubPaymentBeneficiaryReader::creditorFromPayload($providerRaw);
-        if ($fromFyhub !== []) {
-            return $fromFyhub;
-        }
-
         $raw = self::flattenProviderPayload($providerRaw);
         if ($raw === []) {
             return [];
@@ -70,7 +63,7 @@ final class CashOutBeneficiaryResolver
             'payer',
         ]));
 
-        // Doc FyHub cash-out: recebedor = creditorAccount (cash-out DEBIT na conta Coratri).
+        // Cash-out: recebedor = creditorAccount (o débito sai da conta Coratri).
         $receiverCandidates = [
             self::pickAccount($raw, ['creditorAccount', 'creditor']),
             self::pickAccount(self::nestedData($raw), ['creditorAccount', 'creditor']),
@@ -213,7 +206,7 @@ final class CashOutBeneficiaryResolver
     }
 
     /**
-     * API Contas FyHub costuma aninhar em data.data e usar taxId / legalName em creditParty.
+     * Provedores costumam aninhar em data.data e usar taxId / legalName em creditParty.
      *
      * @param  array<string, mixed>|null  $raw
      * @return array<string, mixed>

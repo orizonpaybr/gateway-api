@@ -645,8 +645,8 @@ class AdminDashboardController extends Controller
     private function calculateAcquirerFees($solicitacoes, $saques): array
     {
         $custoTreeal = (float) config('treeal.custo_fixo_transacao', 0.05);
-        $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.035);
-        $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
+        $custoSimpay = \App\Helpers\CustoAdquirentePixHelper::CUSTO_HISTORICO_SIMPAY;
+        $custoFyhub = \App\Helpers\CustoAdquirentePixHelper::CUSTO_HISTORICO_FYHUB;
 
         $custosEntradasRow = (clone $solicitacoes)->selectRaw(
             'SUM(CASE
@@ -1002,7 +1002,7 @@ class AdminDashboardController extends Controller
 
     /**
      * Providers que suportam múltiplas nominais (contas com credenciais próprias).
-     * Para os demais (simpay/fyhub/treeal) só existe a conta única do .env —
+     * Para os demais (treeal) só existe a conta única do .env —
      * adicionar aqui exige antes implementar o build por credencial em
      * PixAcquirerManager::buildWithCredentials().
      */
