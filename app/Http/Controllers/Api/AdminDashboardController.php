@@ -481,7 +481,7 @@ class AdminDashboardController extends Controller
     private function calculateFinancialStats(Carbon $dataInicio, Carbon $dataFim): array
     {
         // Usar queries otimizadas com índices
-        $solicitacoes = Solicitacoes::where('status', 'PAID_OUT')
+        $solicitacoes = Solicitacoes::whereIn('status', ['PAID_OUT', 'COMPLETED'])
             ->whereBetween('date', [$dataInicio, $dataFim]);
 
         $saques = SolicitacoesCashOut::whereIn('status', ['COMPLETED', 'PAID_OUT'])
@@ -515,12 +515,11 @@ class AdminDashboardController extends Controller
         // mas são pagas aos afiliados (saindo do saldo do sistema), então precisam ser descontadas do lucro líquido
         $comissoesAfiliados = $this->calculateAffiliateCommissions($dataInicio, $dataFim);
         
-        // Lucro líquido = (taxas recebidas) - (custos Adquirente PIX) - (comissões pagas aos afiliados)
-        // Onde:
-        // - taxas recebidas = taxa_cash_in + taxa_cash_out (já inclui comissões de afiliados)
-        // - custos Adquirente PIX = número de transações * R$ 0,02
-        // - comissões pagas = valor total creditado aos afiliados (R$ 0,50 por transação)
-        $lucroLiquido = ($lucroDepositos + $lucroSaques) - ($taxasAdquirentes['entradas'] + $taxasAdquirentes['saidas']) - $comissoesAfiliados;
+        // Lucro do dia = cash in - cash out no range (valor pago dos depósitos - valor pago dos saques).
+        // Mesmos totais exibidos em "Total Depósitos" / "Total Saques" (amount, PAID_OUT+COMPLETED).
+        $valorTotalDepositos = (float) ($depositStats->valor_total_depositos ?? 0);
+        $valorTotalSaques = (float) ($withdrawStats->valor_total_saques ?? 0);
+        $lucroLiquido = $valorTotalDepositos - $valorTotalSaques;
 
         // Saldo total em carteiras (usando Cache facade padronizado)
         $balanceCacheKey = CacheKeyService::totalWalletsBalance();
@@ -552,7 +551,7 @@ class AdminDashboardController extends Controller
      */
     private function calculateTransactionStats(Carbon $dataInicio, Carbon $dataFim): array
     {
-        $solicitacoes = Solicitacoes::where('status', 'PAID_OUT')
+        $solicitacoes = Solicitacoes::whereIn('status', ['PAID_OUT', 'COMPLETED'])
             ->whereBetween('date', [$dataInicio, $dataFim]);
 
         $saques = SolicitacoesCashOut::whereIn('status', ['COMPLETED', 'PAID_OUT'])
@@ -644,33 +643,14 @@ class AdminDashboardController extends Controller
      */
     private function calculateAcquirerFees($solicitacoes, $saques): array
     {
-        $custoTreeal = (float) config('treeal.custo_fixo_transacao', 0.05);
-        $custoSimpay = \App\Helpers\CustoAdquirentePixHelper::CUSTO_HISTORICO_SIMPAY;
-        $custoFyhub = \App\Helpers\CustoAdquirentePixHelper::CUSTO_HISTORICO_FYHUB;
-
-        $custosEntradasRow = (clone $solicitacoes)->selectRaw(
-            'SUM(CASE
-                WHEN executor_ordem = ? THEN ?
-                WHEN executor_ordem = ? THEN ?
-                WHEN executor_ordem = ? THEN ?
-                ELSE ?
-            END) as total',
-            ['treeal', $custoTreeal, 'fyhub', $custoFyhub, 'simpay', $custoSimpay, $custoSimpay]
-        )->first();
-
-        $custosSaidasRow = (clone $saques)->selectRaw(
-            'SUM(CASE
-                WHEN executor_ordem = ? THEN ?
-                WHEN executor_ordem = ? THEN ?
-                WHEN executor_ordem = ? THEN ?
-                ELSE ?
-            END) as total',
-            ['treeal', $custoTreeal, 'fyhub', $custoFyhub, 'simpay', $custoSimpay, $custoSimpay]
-        )->first();
+        // Mesma expressão de custo por adquirente usada em DashboardService/FinancialService
+        // (inclui fluxpayments e paya55 — o CASE antigo faltava as duas, subestimando o custo).
+        $custoEntradasExpr = \App\Helpers\CustoAdquirentePixHelper::sqlCustoPorTransacaoExpr('amount', false);
+        $custoSaidasExpr = \App\Helpers\CustoAdquirentePixHelper::sqlCustoPorTransacaoExpr('amount', true);
 
         return [
-            'entradas' => (float) ($custosEntradasRow->total ?? 0),
-            'saidas' => (float) ($custosSaidasRow->total ?? 0),
+            'entradas' => (float) (clone $solicitacoes)->sum(DB::raw($custoEntradasExpr)),
+            'saidas' => (float) (clone $saques)->sum(DB::raw($custoSaidasExpr)),
         ];
     }
 
@@ -687,7 +667,7 @@ class AdminDashboardController extends Controller
     private function calculateAffiliateCommissions(Carbon $dataInicio, Carbon $dataFim): float
     {
         // Buscar IDs das transações de depósito no período
-        $depositIds = Solicitacoes::where('status', 'PAID_OUT')
+        $depositIds = Solicitacoes::whereIn('status', ['PAID_OUT', 'COMPLETED'])
             ->whereBetween('date', [$dataInicio, $dataFim])
             ->pluck('id');
 
