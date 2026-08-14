@@ -53,7 +53,10 @@ return [
     |--------------------------------------------------------------------------
     */
 
-    'verify_ssl' => filter_var(env('FYHUB_CONTAS_VERIFY_SSL', true), FILTER_VALIDATE_BOOLEAN),
+    // bool (true/false) OU caminho de CA bundle (fyhub usa CA privada ONZ).
+    // Normalização em FyhubContasMtlsOptions::normalizeVerify — não usar
+    // filter_var aqui, senão o caminho vira false e derruba a verificação TLS.
+    'verify_ssl' => env('FYHUB_CONTAS_VERIFY_SSL', true),
 
     /*
     |--------------------------------------------------------------------------
