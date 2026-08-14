@@ -13,7 +13,9 @@ class FyhubContasMtlsOptions
     public static function build(): array
     {
         $format = strtolower((string) config('fyhub_contas.cert_format', 'pfx'));
-        $verify = (bool) config('fyhub_contas.verify_ssl', true);
+        // Aceita bool OU caminho de CA bundle. Os servidores da fyhub usam CA
+        // privada (ONZ), então FYHUB_CONTAS_VERIFY_SSL aponta para o PEM da CA.
+        $verify = self::normalizeVerify(config('fyhub_contas.verify_ssl', true));
 
         if ($format === 'pfx') {
             $pfx = self::resolvePath((string) config('fyhub_contas.cert_pfx_path'));
@@ -80,5 +82,29 @@ class FyhubContasMtlsOptions
                 "Certificado mTLS FYHUB Contas ({$envKey}) não encontrado ou sem permissão de leitura: {$path}"
             );
         }
+    }
+
+    /**
+     * Aceita bool (true/false) ou caminho para CA bundle (igual ao Guzzle/cURL).
+     *
+     * @return bool|string
+     */
+    private static function normalizeVerify(mixed $value): bool|string
+    {
+        if (is_string($value)) {
+            $trim = trim($value);
+            $lower = strtolower($trim);
+            if ($lower === 'false' || $lower === '0') {
+                return false;
+            }
+            if ($lower === 'true' || $lower === '1') {
+                return true;
+            }
+            if ($trim !== '') {
+                return $trim;
+            }
+        }
+
+        return (bool) $value;
     }
 }
