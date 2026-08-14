@@ -485,6 +485,13 @@ class WithdrawalController extends Controller
         } elseif ($acquirerService->getReference() === 'fyhub') {
             app(FyhubCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($saque);
             $saque->refresh();
+            // FYHUB cancela falha (saldo insuficiente) sem webhook e o status leva
+            // alguns segundos pra refletir; re-poll assíncrono resolve em ~8-60s.
+            if (! CashOutOutcomeApplier::isTerminalStatus((string) $saque->status)) {
+                \App\Jobs\ReconcileFyhubPayoutJob::dispatch($saque->id)->delay(now()->addSeconds(8));
+                \App\Jobs\ReconcileFyhubPayoutJob::dispatch($saque->id)->delay(now()->addSeconds(25));
+                \App\Jobs\ReconcileFyhubPayoutJob::dispatch($saque->id)->delay(now()->addSeconds(60));
+            }
         } elseif ($acquirerService->getReference() === 'treeal') {
             app(TreealCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($saque);
             $saque->refresh();
