@@ -30,7 +30,7 @@ class ThrottleFyhubPixThroughput
             return $next($request);
         }
 
-        $perSecond = max(1, (int) config('fyhub.rate_limit_per_second', 200));
+        $perSecond = max(1, (int) config('fyhub.rate_limit_per_second', 500));
         $key = 'fyhub-pix-throughput:'.$user->username;
 
         $response = RateLimiter::attempt($key, $perSecond, function () use ($next, $request) {
