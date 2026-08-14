@@ -36,7 +36,7 @@ class CustoAdquirentePixHelper
     {
         return match ($adquirenteReferencia) {
             'treeal' => (float) config('treeal.custo_fixo_transacao', 0.05),
-            'fyhub' => (float) config('fyhub.custo_fixo_transacao', 0.04),
+            'fyhub' => (float) config('fyhub.custo_fixo_transacao', 0.10),
             'simpay' => self::CUSTO_HISTORICO_SIMPAY,
             'fluxpayments' => (float) config('fluxpayments.custo_fixo_transacao', 0.09),
             'paya55' => (float) config('paya55.custo_fixo_transacao', 0.03),
@@ -89,7 +89,7 @@ class CustoAdquirentePixHelper
     {
         $custoTreeal = (float) config('treeal.custo_fixo_transacao', 0.05);
         $custoSimpay = self::CUSTO_HISTORICO_SIMPAY;
-        $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
+        $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.10);
         $custoFluxpayments = (float) config('fluxpayments.custo_fixo_transacao', 0.09);
         $custoPaya55 = (float) config('paya55.custo_fixo_transacao', 0.03);
 

@@ -753,7 +753,7 @@ class FinancialService
     {
         $custoTreeal = (float) config('treeal.custo_fixo_transacao', 0.05);
         $custoSimpay = \App\Helpers\CustoAdquirentePixHelper::CUSTO_HISTORICO_SIMPAY;
-        $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
+        $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.10);
         $custoFluxpayments = (float) config('fluxpayments.custo_fixo_transacao', 0.09);
         $custoPaya55 = (float) config('paya55.custo_fixo_transacao', 0.03);
 
@@ -823,7 +823,7 @@ class FinancialService
         $dateRange = $this->getDateRange($periodo);
         $custoTreeal = (float) config('treeal.custo_fixo_transacao', 0.05);
         $custoSimpay = \App\Helpers\CustoAdquirentePixHelper::CUSTO_HISTORICO_SIMPAY;
-        $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
+        $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.10);
         $custoFluxpayments = (float) config('fluxpayments.custo_fixo_transacao', 0.09);
         $custoPaya55 = (float) config('paya55.custo_fixo_transacao', 0.03);
         $custoSaqueExpr = \App\Helpers\CustoAdquirentePixHelper::sqlCustoPorTransacaoExpr('amount', true);

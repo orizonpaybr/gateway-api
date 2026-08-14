@@ -46,7 +46,7 @@ return [
     |
     */
 
-    'custo_fixo_transacao' => (float) env('FYHUB_CUSTO_FIXO_TRANSACAO', 0.04),
+    'custo_fixo_transacao' => (float) env('FYHUB_CUSTO_FIXO_TRANSACAO', 0.10),
 
     /*
     |--------------------------------------------------------------------------
@@ -57,7 +57,7 @@ return [
     |
     */
 
-    'rate_limit_per_second' => (int) env('FYHUB_RATE_LIMIT_PER_SECOND', 200),
+    'rate_limit_per_second' => (int) env('FYHUB_RATE_LIMIT_PER_SECOND', 500),
 
     /*
     |--------------------------------------------------------------------------
