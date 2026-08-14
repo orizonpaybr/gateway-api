@@ -13,6 +13,12 @@ Schedule::job(new \App\Jobs\ReconcileFluxPaymentsPayoutsJob)
     ->withoutOverlapping()
     ->onOneServer();
 
+// FYHUB cash-in: síncrono no cron (não depende de queue worker para liquidar / postback)
+Schedule::command('fyhub:reconcile-deposits')
+    ->everyMinute()
+    ->withoutOverlapping()
+    ->onOneServer();
+
 Schedule::command('treeal:reconcile-deposits')
     ->everyMinute()
     ->withoutOverlapping()

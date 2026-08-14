@@ -753,7 +753,7 @@ class FinancialService
     {
         $custoTreeal = (float) config('treeal.custo_fixo_transacao', 0.05);
         $custoSimpay = \App\Helpers\CustoAdquirentePixHelper::CUSTO_HISTORICO_SIMPAY;
-        $custoFyhub = \App\Helpers\CustoAdquirentePixHelper::CUSTO_HISTORICO_FYHUB;
+        $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
         $custoFluxpayments = (float) config('fluxpayments.custo_fixo_transacao', 0.09);
         $custoPaya55 = (float) config('paya55.custo_fixo_transacao', 0.03);
 
@@ -823,7 +823,7 @@ class FinancialService
         $dateRange = $this->getDateRange($periodo);
         $custoTreeal = (float) config('treeal.custo_fixo_transacao', 0.05);
         $custoSimpay = \App\Helpers\CustoAdquirentePixHelper::CUSTO_HISTORICO_SIMPAY;
-        $custoFyhub = \App\Helpers\CustoAdquirentePixHelper::CUSTO_HISTORICO_FYHUB;
+        $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.04);
         $custoFluxpayments = (float) config('fluxpayments.custo_fixo_transacao', 0.09);
         $custoPaya55 = (float) config('paya55.custo_fixo_transacao', 0.03);
         $custoSaqueExpr = \App\Helpers\CustoAdquirentePixHelper::sqlCustoPorTransacaoExpr('amount', true);
@@ -985,9 +985,9 @@ class FinancialService
     }
 
     /**
-     * Estorno PIX (Treeal/FluxPayments/Paya55) permitido na UI admin.
+     * Estorno PIX (Fyhub/Treeal/FluxPayments/Paya55) permitido na UI admin.
      *
-     * Depósitos de adquirentes descontinuadas (simpay/fyhub) não estornam:
+     * Depósitos da adquirente descontinuada (simpay) não estornam:
      * não há mais integração para chamar.
      */
     private function depositPodeEstornar(Solicitacoes $item): bool
@@ -996,7 +996,7 @@ class FinancialService
         // pode variar por nominal (várias contas FluxPayments), então o gate de
         // "provider suportado" precisa usar executor_ordem, não adquirente_ref.
         $provider = strtolower(trim((string) ($item->executor_ordem ?? '')));
-        if (! in_array($provider, ['treeal', 'fluxpayments', 'paya55'], true)) {
+        if (! in_array($provider, ['fyhub', 'treeal', 'fluxpayments', 'paya55'], true)) {
             return false;
         }
 
@@ -1005,7 +1005,7 @@ class FinancialService
             return false;
         }
 
-        if ($provider === 'treeal') {
+        if (in_array($provider, ['fyhub', 'treeal'], true)) {
             return trim((string) ($item->end_to_end ?? '')) !== '';
         }
 
@@ -1014,7 +1014,7 @@ class FinancialService
     }
 
     /**
-     * Solicita estorno na adquirente (Treeal/FluxPayments/Paya55) e atualiza depósito/saldo localmente.
+     * Solicita estorno na adquirente (Fyhub/Treeal/FluxPayments/Paya55) e atualiza depósito/saldo localmente.
      *
      * @throws \Exception com código HTTP em $e->getCode() quando aplicável
      */
@@ -1034,8 +1034,8 @@ class FinancialService
         // executor_ordem = família do provider (fixo por serviço); adquirente_ref
         // pode variar por nominal (várias contas FluxPayments).
         $provider = strtolower(trim((string) ($deposit->executor_ordem ?? '')));
-        if (! in_array($provider, ['treeal', 'fluxpayments', 'paya55'], true)) {
-            throw new \Exception('Estorno disponível apenas para depósitos Treeal/FluxPayments/Paya55.', 422);
+        if (! in_array($provider, ['fyhub', 'treeal', 'fluxpayments', 'paya55'], true)) {
+            throw new \Exception('Estorno disponível apenas para depósitos Fyhub/Treeal/FluxPayments/Paya55.', 422);
         }
 
         $st = strtoupper((string) $deposit->status);
@@ -1047,13 +1047,13 @@ class FinancialService
         }
 
         $tid = trim((string) ($deposit->idTransaction ?? ''));
-        if ($provider === 'treeal') {
+        if (in_array($provider, ['fyhub', 'treeal'], true)) {
             $tid = trim((string) ($deposit->end_to_end ?? ''));
         }
         if ($tid === '') {
             throw new \Exception(
-                $provider === 'treeal'
-                    ? 'Depósito TREEAL sem endToEndId para devolução.'
+                in_array($provider, ['fyhub', 'treeal'], true)
+                    ? 'Depósito '.strtoupper($provider).' sem endToEndId para devolução.'
                     : 'Transação sem identificador na adquirente.',
                 422
             );

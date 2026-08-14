@@ -2,6 +2,7 @@
 
 namespace App\Helpers;
 
+use App\Services\Fyhub\FyhubMtlsOptions;
 use App\Services\Treeal\TreealMtlsOptions;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Http\Client\Response;
@@ -74,6 +75,10 @@ class SecureHttp
                         'Content-Type' => 'application/json',
                     ], $headers));
 
+                if (self::isFyhubQrUrl($url) && FyhubMtlsOptions::isConfigured()) {
+                    $client = $client->withOptions(FyhubMtlsOptions::build());
+                }
+
                 if (self::isTreealPixUrl($url) && TreealMtlsOptions::isConfigured()) {
                     $client = $client->withOptions(TreealMtlsOptions::build());
                 }
@@ -121,6 +126,10 @@ class SecureHttp
         // Fallback - nunca deveria chegar aqui
         $fallback = Http::timeout($timeout);
 
+        if (self::isFyhubQrUrl($url) && FyhubMtlsOptions::isConfigured()) {
+            $fallback = $fallback->withOptions(FyhubMtlsOptions::build());
+        }
+
         if (self::isTreealPixUrl($url) && TreealMtlsOptions::isConfigured()) {
             $fallback = $fallback->withOptions(TreealMtlsOptions::build());
         }
@@ -128,6 +137,20 @@ class SecureHttp
         return $fallback->{strtolower($method)}($url, $data);
     }
 
+
+    /**
+     * Detecta se a URL pertence à API QRCode da FYHUB (cash-in mTLS).
+     */
+    private static function isFyhubQrUrl(string $url): bool
+    {
+        $base = trim((string) config('fyhub.base_url', ''));
+
+        if ($base !== '' && str_starts_with($url, rtrim($base, '/'))) {
+            return true;
+        }
+
+        return str_contains($url, 'api.qrcode.fyhub.com.br');
+    }
 
     /**
      * Detecta se a URL pertence à API PIX TREEAL (cash-in mTLS).

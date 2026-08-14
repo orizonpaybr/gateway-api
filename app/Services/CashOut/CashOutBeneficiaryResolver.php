@@ -2,9 +2,11 @@
 
 namespace App\Services\CashOut;
 
+use App\Services\Fyhub\FyhubPaymentBeneficiaryReader;
 
 /**
  * Extrai nome e documento do recebedor real (credor Pix) a partir do payload do provedor.
+ * FyHub Contas: data.creditorAccount (GET /pix/payments, webhook TRANSFER).
  */
 final class CashOutBeneficiaryResolver
 {
@@ -14,6 +16,11 @@ final class CashOutBeneficiaryResolver
      */
     public static function resolve(?array $providerRaw): array
     {
+        $fromFyhub = FyhubPaymentBeneficiaryReader::creditorFromPayload($providerRaw);
+        if ($fromFyhub !== []) {
+            return $fromFyhub;
+        }
+
         $raw = self::flattenProviderPayload($providerRaw);
         if ($raw === []) {
             return [];

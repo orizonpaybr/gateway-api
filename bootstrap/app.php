@@ -45,6 +45,16 @@ return Application::configure(basePath: dirname(__DIR__))
             return Limit::perMinute($perMinute)->by('balance-check|'.$key);
         });
 
+        RateLimiter::for('fyhub-webhook', function (Request $request) {
+            return Limit::perMinute((int) config('fyhub.webhook_rate_limit_per_minute', 18000))
+                ->by('fyhub-webhook|'.$request->ip());
+        });
+
+        RateLimiter::for('fyhub-contas-webhook', function (Request $request) {
+            return Limit::perMinute((int) config('fyhub_contas.webhook_rate_limit_per_minute', 18000))
+                ->by('fyhub-contas-webhook|'.$request->ip());
+        });
+
         RateLimiter::for('treeal-webhook', function (Request $request) {
             return Limit::perMinute((int) config('treeal.webhook_rate_limit_per_minute', 18000))
                 ->by('treeal-webhook|'.$request->ip());
@@ -80,6 +90,7 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
         $middleware->validateCsrfTokens([
             '/pagarme/*',
+            '/fyhub/*',
             '/treeal/*',
             '/fluxpayments/*',
             '/paya55/*',
@@ -102,6 +113,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'check.allowed.ip' => \App\Http\Middleware\CheckAllowedIP::class,
             'check.pin' => \App\Http\Middleware\CheckPin::class,
             'secure.cors' => \App\Http\Middleware\SecureCors::class,
+            'throttle.fyhub.pix' => \App\Http\Middleware\ThrottleFyhubPixThroughput::class,
             'throttle.treeal.pix' => \App\Http\Middleware\ThrottleTreealPixThroughput::class,
             'throttle.fluxpayments.pix' => \App\Http\Middleware\ThrottleFluxPaymentsPixThroughput::class,
             'throttle.paya55.pix' => \App\Http\Middleware\ThrottlePaya55PixThroughput::class,
