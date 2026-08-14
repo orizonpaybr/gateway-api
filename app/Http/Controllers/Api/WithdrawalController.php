@@ -19,6 +19,8 @@ use App\Services\ClientWebhookPayloadBuilder;
 use App\Services\FinancialService;
 use App\Services\FluxPayments\FluxPaymentsCashOutOutcomeService;
 use App\Services\FluxPayments\FluxPaymentsPixAcquirerService;
+use App\Services\Fyhub\FyhubCashOutOutcomeService;
+use App\Services\Fyhub\FyhubPixAcquirerService;
 use App\Services\Treeal\TreealCashOutOutcomeService;
 use App\Services\Treeal\TreealPixAcquirerService;
 use App\Services\PixAcquirer\PixAcquirerManager;
@@ -420,7 +422,8 @@ class WithdrawalController extends Controller
         }
 
         $providerStatus = (string) ($payoutResult['status'] ?? 'pending');
-        $statusMapped = $acquirerService instanceof TreealPixAcquirerService
+        $statusMapped = $acquirerService instanceof FyhubPixAcquirerService
+            || $acquirerService instanceof TreealPixAcquirerService
             ? $acquirerService->resolveInitialPayoutStatus($providerStatus, $e2e)
             : $acquirerService->mapPayoutStatus($providerStatus);
 
@@ -452,7 +455,15 @@ class WithdrawalController extends Controller
         $saque->refresh();
 
         if (CashOutOutcomeApplier::isTerminalStatus($statusMapped)) {
-            if ($acquirerService->getReference() === 'treeal') {
+            if ($acquirerService->getReference() === 'fyhub') {
+                app(FyhubCashOutOutcomeService::class)->applySyncTerminalOutcome(
+                    $saque,
+                    $statusMapped,
+                    $raw,
+                    $e2e,
+                    '[MANUAL_APPROVE][OUTCOME]',
+                );
+            } elseif ($acquirerService->getReference() === 'treeal') {
                 app(TreealCashOutOutcomeService::class)->applySyncTerminalOutcome(
                     $saque,
                     $statusMapped,
@@ -470,6 +481,9 @@ class WithdrawalController extends Controller
                     '[MANUAL_APPROVE][OUTCOME]',
                 );
             }
+            $saque->refresh();
+        } elseif ($acquirerService->getReference() === 'fyhub') {
+            app(FyhubCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($saque);
             $saque->refresh();
         } elseif ($acquirerService->getReference() === 'treeal') {
             app(TreealCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($saque);

@@ -5,6 +5,7 @@ namespace App\Services\CashOut;
 use App\Helpers\Helper;
 use App\Helpers\WebhookClientMessages;
 use App\Jobs\ClientWebhookDispatchJob;
+use App\Jobs\ReconcileFyhubCashOutBeneficiaryJob;
 use App\Models\SolicitacoesCashOut;
 use App\Models\User;
 use App\Services\AffiliateCommissionService;
@@ -254,6 +255,18 @@ final class CashOutOutcomeApplier
 
         $record->refresh();
 
+        if (! $forceWebhook && $this->shouldDeferFyhubCashOutWebhookUntilBeneficiary($record, $status)) {
+            // Roda logo após enviar a resposta HTTP (não depende de queue worker).
+            ReconcileFyhubCashOutBeneficiaryJob::dispatchAfterResponse($record->id);
+
+            Log::info('[FYHUB][BENEFICIARY] Postback adiado (poll afterResponse)', [
+                'payout_id' => $record->id,
+                'transaction_id' => $record->idTransaction,
+            ]);
+
+            return;
+        }
+
         $rawForWebhook = $rawForClientMessage;
 
         $payloadForReason = self::normalizeRawForPixMessage($rawForWebhook);
@@ -268,6 +281,16 @@ final class CashOutOutcomeApplier
             ClientWebhookPayloadBuilder::extraForCashOut($record, $rawForWebhook),
             $message
         );
+    }
+
+    /**
+     * COMPLETED FyHub sem nome do recebedor: um único postback sai pelo job quando o GET trouxer creditorAccount.
+     */
+    private function shouldDeferFyhubCashOutWebhookUntilBeneficiary(SolicitacoesCashOut $record, string $status): bool
+    {
+        return $record->executor_ordem === 'fyhub'
+            && $status === 'COMPLETED'
+            && trim((string) $record->beneficiaryname) === '';
     }
 
     /**

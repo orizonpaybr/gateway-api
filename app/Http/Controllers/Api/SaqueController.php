@@ -14,6 +14,7 @@ use App\Services\CashOut\CashOutOutcomeApplier;
 use App\Services\ClientWebhookPayloadBuilder;
 use App\Services\FluxPayments\FluxPaymentsCashOutOutcomeService;
 use App\Services\FluxPayments\FluxPaymentsPixAcquirerService;
+use App\Services\Fyhub\FyhubCashOutOutcomeService;
 use App\Services\Treeal\TreealCashOutOutcomeService;
 use App\Services\PixAcquirer\PixAcquirerManager;
 use App\Services\WithdrawalFailureRefundService;
@@ -471,7 +472,8 @@ class SaqueController extends Controller
             }
 
             $providerStatus = (string) ($payoutResult['status'] ?? 'pending');
-            $statusMapped = $acquirerService instanceof \App\Services\Treeal\TreealPixAcquirerService
+            $statusMapped = $acquirerService instanceof \App\Services\Fyhub\FyhubPixAcquirerService
+                || $acquirerService instanceof \App\Services\Treeal\TreealPixAcquirerService
                 ? $acquirerService->resolveInitialPayoutStatus($providerStatus, $e2e)
                 : $acquirerService->mapPayoutStatus($providerStatus);
 
@@ -490,7 +492,14 @@ class SaqueController extends Controller
             $withdrawal->refresh();
 
             if (CashOutOutcomeApplier::isTerminalStatus($statusMapped)) {
-                if ($acquirerService->getReference() === 'treeal') {
+                if ($acquirerService->getReference() === 'fyhub') {
+                    app(FyhubCashOutOutcomeService::class)->applySyncTerminalOutcome(
+                        $withdrawal,
+                        $statusMapped,
+                        is_array($raw) ? $raw : [],
+                        $e2e,
+                    );
+                } elseif ($acquirerService->getReference() === 'treeal') {
                     app(TreealCashOutOutcomeService::class)->applySyncTerminalOutcome(
                         $withdrawal,
                         $statusMapped,
@@ -507,6 +516,9 @@ class SaqueController extends Controller
                         '[API_PAYOUT][OUTCOME]',
                     );
                 }
+                $withdrawal->refresh();
+            } elseif ($acquirerService->getReference() === 'fyhub') {
+                app(FyhubCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($withdrawal);
                 $withdrawal->refresh();
             } elseif ($acquirerService->getReference() === 'treeal') {
                 app(TreealCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($withdrawal);

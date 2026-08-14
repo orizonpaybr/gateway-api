@@ -8,6 +8,7 @@ use App\Helpers\Helper;
 use App\Helpers\TaxaFlexivelHelper;
 use App\Http\Controllers\Controller;
 use App\Jobs\ReconcileFluxPaymentsDepositJob;
+use App\Jobs\ReconcileFyhubDepositJob;
 use App\Jobs\ReconcileTreealDepositJob;
 use App\Services\FluxPayments\FluxPaymentsPixAcquirerService;
 use App\Models\App;
@@ -761,6 +762,11 @@ class DepositController extends Controller
             'executor_ordem' => $acquirerService->getReference(),
             'has_postback' => ! empty($request->postback) && $request->postback !== 'web',
         ]);
+
+        if ($acquirerService->getReference() === 'fyhub') {
+            ReconcileFyhubDepositJob::dispatch($deposit->id)->delay(now()->addSeconds(45));
+            ReconcileFyhubDepositJob::dispatch($deposit->id)->delay(now()->addSeconds(120));
+        }
 
         if ($acquirerService->getReference() === 'treeal') {
             ReconcileTreealDepositJob::dispatch($deposit->id)->delay(now()->addSeconds(45));

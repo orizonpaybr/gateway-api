@@ -384,6 +384,23 @@ class UserController extends Controller
             $isNumericId = ctype_digit((string) $idNumerico);
 
             if (! $soSaque) {
+                $pendingFyhubDeposit = \App\Models\Solicitacoes::where('user_id', $user->username)
+                    ->where('status', 'WAITING_FOR_APPROVAL')
+                    ->where('executor_ordem', 'fyhub')
+                    ->where(function ($query) use ($idNumerico, $isNumericId) {
+                        if ($isNumericId) {
+                            $query->where('id', (int) $idNumerico);
+                        }
+                        $query->orWhere('idTransaction', $idNumerico)
+                            ->orWhere('externalreference', $idNumerico);
+                    })
+                    ->first();
+
+                if ($pendingFyhubDeposit) {
+                    app(\App\Services\Fyhub\FyhubDepositReconciler::class)->reconcileIfPaid($pendingFyhubDeposit);
+                    \Illuminate\Support\Facades\Cache::forget($cacheKey);
+                }
+
                 $pendingTreealDeposit = \App\Models\Solicitacoes::where('user_id', $user->username)
                     ->where('status', 'WAITING_FOR_APPROVAL')
                     ->where('executor_ordem', 'treeal')

@@ -982,7 +982,7 @@ class AdminDashboardController extends Controller
 
     /**
      * Providers que suportam múltiplas nominais (contas com credenciais próprias).
-     * Para os demais (treeal) só existe a conta única do .env —
+     * Para os demais (treeal/fyhub) só existe a conta única do .env —
      * adicionar aqui exige antes implementar o build por credencial em
      * PixAcquirerManager::buildWithCredentials().
      */
