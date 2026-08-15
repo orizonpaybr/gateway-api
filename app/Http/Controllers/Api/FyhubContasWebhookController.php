@@ -38,21 +38,38 @@ class FyhubContasWebhookController extends Controller
     private function webhookAuthorized(Request $request): bool
     {
         $secret = trim((string) config('fyhub_contas.webhook_secret', ''));
-        if ($secret === '') {
+        $allowedIps = array_filter(array_map('trim', explode(',', (string) config('fyhub_contas.webhook_allowed_ips', ''))));
+
+        // 1) Secret no header (se a fyhub reenviar o header configurado no cadastro).
+        if ($secret !== '') {
+            $header = (string) config('fyhub_contas.webhook_secret_header', 'X-Webhook-Token');
+            $sent = trim((string) $request->header($header, ''));
+            if ($sent !== '' && hash_equals($secret, $sent)) {
+                return true;
+            }
+        }
+
+        // 2) IP de origem confiável da fyhub (webhooks saem de IP fixo). Fallback
+        //    robusto quando o header custom não é reenviado como esperado.
+        if ($allowedIps !== [] && in_array($request->ip(), $allowedIps, true)) {
             return true;
         }
 
-        $header = (string) config('fyhub_contas.webhook_secret_header', 'X-Webhook-Token');
-        $sent = trim((string) $request->header($header, ''));
-
-        return $sent !== '' && hash_equals($secret, $sent);
+        // 3) Nenhuma trava configurada = aberto (retrocompatível).
+        return $secret === '' && $allowedIps === [];
     }
 
     public function handle(Request $request): JsonResponse
     {
         if (! $this->webhookAuthorized($request)) {
+            $headerName = (string) config('fyhub_contas.webhook_secret_header', 'X-Webhook-Token');
             Log::warning('[FYHUB_CONTAS][WEBHOOK] Rejeitado: secret inválido', [
                 'ip' => $request->ip(),
+                'header_esperado' => $headerName,
+                'header_presente' => $request->hasHeader($headerName),
+                'header_len' => strlen((string) $request->header($headerName, '')),
+                'secret_len' => strlen(trim((string) config('fyhub_contas.webhook_secret', ''))),
+                'headers_recebidos' => array_keys($request->headers->all()),
             ]);
 
             return response()->json(['received' => true, 'processed' => false, 'reason' => 'unauthorized'], 401);

@@ -150,6 +150,8 @@ FYHUB_CONTAS_WEBHOOK_RATE_LIMIT_PER_MINUTE=18000
 # (POST /webhooks/transfer {headers:{"X-Webhook-Token":"<secret>"}}). Vazio = sem checagem.
 FYHUB_CONTAS_WEBHOOK_SECRET=
 FYHUB_CONTAS_WEBHOOK_SECRET_HEADER=X-Webhook-Token
+# IPs de origem confiáveis da fyhub (CSV) — fallback quando o header custom não vem
+FYHUB_CONTAS_WEBHOOK_ALLOWED_IPS=
 
 
 # Configurações FluxPayments (PIX IN)
