@@ -91,4 +91,8 @@ return [
 
     'webhook_secret_header' => env('FYHUB_CONTAS_WEBHOOK_SECRET_HEADER', 'X-Webhook-Token'),
 
+    // IPs de origem confiáveis da fyhub (CSV). Fallback de auth quando o header
+    // custom não é reenviado. Webhook aceito se bater o secret OU o IP.
+    'webhook_allowed_ips' => env('FYHUB_CONTAS_WEBHOOK_ALLOWED_IPS'),
+
 ];
