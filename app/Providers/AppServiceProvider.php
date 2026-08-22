@@ -19,6 +19,10 @@ use App\Services\FyhubContas\FyhubContasPixOutService;
 use App\Services\Paya55\Paya55AuthService;
 use App\Services\Paya55\Paya55PixAcquirerService;
 use App\Services\PixAcquirer\PixAcquirerManager;
+use App\Services\Simpay\SimpayAuthService;
+use App\Services\Simpay\SimpayCashOutOutcomeService;
+use App\Services\Simpay\SimpayInfractionService;
+use App\Services\Simpay\SimpayPixAcquirerService;
 use App\Services\Treeal\TreealAuthService;
 use App\Services\Treeal\TreealCashOutOutcomeService;
 use App\Services\Treeal\TreealPixAcquirerService;
@@ -115,6 +119,18 @@ class AppServiceProvider extends ServiceProvider
                 $app->make(FyhubContasPixOutService::class),
             );
         });
+
+        $this->app->singleton(SimpayAuthService::class);
+
+        $this->app->singleton(SimpayCashOutOutcomeService::class);
+
+        $this->app->singleton(SimpayPixAcquirerService::class, function ($app) {
+            return new SimpayPixAcquirerService($app->make(SimpayAuthService::class));
+        });
+
+        $this->app->singleton(SimpayInfractionService::class, function ($app) {
+            return new SimpayInfractionService($app->make(SimpayAuthService::class));
+        });
     }
 
     /**
@@ -133,6 +149,9 @@ class AppServiceProvider extends ServiceProvider
 
         $this->app->make(PixAcquirerManager::class)
             ->register('fyhub', FyhubPixAcquirerService::class);
+
+        $this->app->make(PixAcquirerManager::class)
+            ->register('simpay', SimpayPixAcquirerService::class);
 
         // Registrar Observers para monitorar mudanças de status
         Solicitacoes::observe(SolicitacoesObserver::class);

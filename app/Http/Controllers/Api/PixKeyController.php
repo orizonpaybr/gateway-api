@@ -832,6 +832,11 @@ class PixKeyController extends Controller
                     $withdrawal->refresh();
                 }
 
+                if ($acquirerService->getReference() === 'simpay') {
+                    app(\App\Services\Simpay\SimpayCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($withdrawal);
+                    $withdrawal->refresh();
+                }
+
                 if ($acquirerService instanceof FluxPaymentsPixAcquirerService) {
                     app(FluxPaymentsCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($withdrawal);
                     $withdrawal->refresh();

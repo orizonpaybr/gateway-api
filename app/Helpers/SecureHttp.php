@@ -75,6 +75,14 @@ class SecureHttp
                         'Content-Type' => 'application/json',
                     ], $headers));
 
+                if (str_contains($url, 'somossimpay.com.br')) {
+                    $client = $client->withOptions([
+                        'curl' => [
+                            \CURLOPT_IPRESOLVE => \CURL_IPRESOLVE_V4,
+                        ],
+                    ]);
+                }
+
                 if (self::isFyhubQrUrl($url) && FyhubMtlsOptions::isConfigured()) {
                     $client = $client->withOptions(FyhubMtlsOptions::build());
                 }
@@ -125,6 +133,14 @@ class SecureHttp
 
         // Fallback - nunca deveria chegar aqui
         $fallback = Http::timeout($timeout);
+
+        if (str_contains($url, 'somossimpay.com.br')) {
+            $fallback = $fallback->withOptions([
+                'curl' => [
+                    \CURLOPT_IPRESOLVE => \CURL_IPRESOLVE_V4,
+                ],
+            ]);
+        }
 
         if (self::isFyhubQrUrl($url) && FyhubMtlsOptions::isConfigured()) {
             $fallback = $fallback->withOptions(FyhubMtlsOptions::build());
