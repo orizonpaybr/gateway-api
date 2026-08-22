@@ -125,6 +125,51 @@ class DepositController extends Controller
         return response()->json($response['data'], $response['status']);
     }
 
+    /**
+     * Decodifica um copia-e-cola PIX e devolve os dados do recebedor para o cliente
+     * CONFERIR antes de pagar (nome, CPF/CNPJ, banco). Usa a adquirente do cliente
+     * quando ela suporta a consulta (ex.: SIMPAY /decode-qrcode).
+     */
+    public function decodeQrCode(Request $request)
+    {
+        $validated = $request->validate([
+            'pix_copy_and_paste' => ['required', 'string', 'max:2000'],
+            'payment_date' => ['nullable', 'string', 'max:10'],
+        ]);
+
+        $user = $request->user();
+        if (! $user) {
+            return response()->json(['status' => 'error', 'message' => 'Não autenticado.'], 401);
+        }
+
+        $default = Helper::adquirenteDefault($user->username ?? $user->user_id);
+        $acquirerService = app(PixAcquirerManager::class)->resolve($default);
+
+        if (! method_exists($acquirerService, 'decodeQrCode')) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Consulta de recebedor não suportada pela adquirente atual.',
+            ], 422);
+        }
+
+        $result = $acquirerService->decodeQrCode(
+            (string) $validated['pix_copy_and_paste'],
+            $validated['payment_date'] ?? null
+        );
+
+        if (! ($result['success'] ?? false)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $result['message'] ?? 'Não foi possível decodificar o copia e cola.',
+            ], 422);
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'data' => $result['data'] ?? [],
+        ]);
+    }
+
     public function statusDeposito(Request $request)
     {
         // Consulta pelo número de pedido do integrador (external_reference).

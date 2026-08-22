@@ -497,6 +497,11 @@ class WithdrawalController extends Controller
             $saque->refresh();
         }
 
+        if ($acquirerService->getReference() === 'simpay') {
+            app(\App\Services\Simpay\SimpayCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($saque);
+            $saque->refresh();
+        }
+
         if ($acquirerService instanceof FluxPaymentsPixAcquirerService) {
             app(FluxPaymentsCashOutOutcomeService::class)->pollApiAndApplyIfTerminal($saque);
             $saque->refresh();

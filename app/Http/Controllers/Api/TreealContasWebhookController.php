@@ -226,14 +226,12 @@ class TreealContasWebhookController extends Controller
         array $data,
         string $endToEndId,
     ): void {
-        $hasProviderColumn = \Illuminate\Support\Facades\Schema::hasColumn('pix_infracoes', 'provider_infraction_id');
-
         $creation = $this->parseDate($data['creationDate'] ?? null) ?? Carbon::now();
         // A API Treeal não envia deadlineDate; prazo padrão MED = 5 dias após abertura.
         $limite = $this->parseDate($data['deadlineDate'] ?? null)
             ?? $creation->copy()->addDays(5);
 
-        $attributes = [
+        app(\App\Services\Infraction\InfractionEffectApplier::class)->upsert('treeal', $infractionId, [
             'user_id' => (string) $deposit->user_id,
             'transaction_id' => (string) ($deposit->idTransaction ?? ''),
             'status' => $this->mapInfractionStatusToLocal($status),
@@ -249,128 +247,33 @@ class TreealContasWebhookController extends Controller
                 'analysisResult' => $analysisResult !== '' ? $analysisResult : null,
                 'reportedBy' => $data['reportedBy'] ?? null,
             ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            'updated_at' => Carbon::now(),
-        ];
-
-        if ($hasProviderColumn) {
-            $attributes['provider'] = 'treeal';
-            if (\Illuminate\Support\Facades\Schema::hasColumn('pix_infracoes', 'analysis_result')) {
-                $attributes['analysis_result'] = $analysisResult !== '' ? $analysisResult : null;
-            }
-
-            $existing = DB::table('pix_infracoes')->where('provider_infraction_id', $infractionId)->first();
-            if ($existing) {
-                DB::table('pix_infracoes')->where('id', $existing->id)->update($attributes);
-            } else {
-                $attributes['provider_infraction_id'] = $infractionId;
-                $attributes['created_at'] = Carbon::now();
-                DB::table('pix_infracoes')->insert($attributes);
-            }
-
-            return;
-        }
-
-        // Fallback sem a coluna de id externo: deduplica por end_to_end + user.
-        $existing = DB::table('pix_infracoes')
-            ->where('user_id', $attributes['user_id'])
-            ->where('end_to_end', $attributes['end_to_end'])
-            ->first();
-
-        if ($existing) {
-            DB::table('pix_infracoes')->where('id', $existing->id)->update($attributes);
-        } else {
-            $attributes['created_at'] = Carbon::now();
-            DB::table('pix_infracoes')->insert($attributes);
-        }
+            'analysis_result' => $analysisResult !== '' ? $analysisResult : null,
+        ]);
     }
 
     /**
-     * Aplica o efeito da infração ao depósito (bloqueio / devolução / liberação).
+     * Aplica o efeito da infração ao depósito (bloqueio / devolução / liberação),
+     * via {@see \App\Services\Infraction\InfractionEffectApplier} (compartilhado).
      */
     private function applyInfractionToDeposit(Solicitacoes $deposit, string $status, string $analysisResult): bool
     {
-        // Infração ativa: bloquear o valor (MEDIATION) se ainda creditado.
+        $applier = app(\App\Services\Infraction\InfractionEffectApplier::class);
+
         if (in_array($status, self::INFRACTION_ACTIVE_STATUSES, true)) {
-            return DB::transaction(function () use ($deposit) {
-                $locked = Solicitacoes::where('id', $deposit->id)->lockForUpdate()->first();
-                if (! $locked || ! in_array($locked->status, ['PAID_OUT', 'COMPLETED'], true)) {
-                    return false;
-                }
-
-                $locked->update(['status' => 'MEDIATION']);
-
-                return true;
-            });
+            return $applier->hold($deposit);
         }
 
         if ($status === 'CLOSED') {
-            if ($analysisResult === 'AGREED') {
-                return $this->settleInfractionRefund($deposit);
-            }
-
-            return $this->releaseInfractionHold($deposit);
+            return $analysisResult === 'AGREED'
+                ? $applier->refund($deposit)
+                : $applier->release($deposit);
         }
 
         if ($status === 'CANCELLED') {
-            return $this->releaseInfractionHold($deposit);
+            return $applier->release($deposit);
         }
 
         return false;
-    }
-
-    private function settleInfractionRefund(Solicitacoes $deposit): bool
-    {
-        return DB::transaction(function () use ($deposit) {
-            $locked = Solicitacoes::where('id', $deposit->id)->lockForUpdate()->first();
-            if (! $locked || $locked->status === 'REFUNDED') {
-                return false;
-            }
-
-            $previousStatus = (string) $locked->status;
-            $locked->update(['status' => 'REFUNDED']);
-
-            // Estorna do saldo apenas se o valor havia sido creditado (estava pago ou bloqueado).
-            if (in_array($previousStatus, ['PAID_OUT', 'COMPLETED', 'MEDIATION'], true)) {
-                $user = User::where('user_id', $locked->user_id)
-                    ->orWhere('username', $locked->user_id)
-                    ->lockForUpdate()
-                    ->first();
-
-                if ($user) {
-                    app(BalanceService::class)->decrementBalanceForRefund(
-                        $user,
-                        (float) $locked->deposito_liquido,
-                        'saldo',
-                    );
-
-                    try {
-                        app(\App\Services\AffiliateCommissionService::class)
-                            ->reverseCashInCommissionForRefundedDeposit($locked);
-                    } catch (\Throwable $e) {
-                        Log::warning('[TREEAL_CONTAS][INFRACTION] Falha ao estornar comissão de afiliado', [
-                            'deposit_id' => $locked->id,
-                            'error' => $e->getMessage(),
-                        ]);
-                    }
-                }
-            }
-
-            return true;
-        });
-    }
-
-    private function releaseInfractionHold(Solicitacoes $deposit): bool
-    {
-        return DB::transaction(function () use ($deposit) {
-            $locked = Solicitacoes::where('id', $deposit->id)->lockForUpdate()->first();
-            if (! $locked || $locked->status !== 'MEDIATION') {
-                return false;
-            }
-
-            $locked->update(['status' => 'COMPLETED']);
-
-            return true;
-        });
     }
 
     private function mapInfractionStatusToLocal(string $status): string

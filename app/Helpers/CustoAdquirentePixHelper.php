@@ -5,17 +5,10 @@ namespace App\Helpers;
 /**
  * Custo da rede/adquirente por transação PIX (split interno: taxa cliente − custo − afiliado).
  *
- * Treeal / Fyhub / FluxPayments / Paya55: custo fixo em R$ por transação.
+ * Treeal / Fyhub / Simpay / FluxPayments / Paya55: custo fixo em R$ por transação.
  */
 class CustoAdquirentePixHelper
 {
-    /**
-     * Adquirente descontinuada: custo congelado apenas para relatórios de
-     * transações históricas (executor_ordem = 'simpay'). Sem config, sem .env —
-     * nenhuma transação nova usa este valor.
-     */
-    public const CUSTO_HISTORICO_SIMPAY = 0.035;
-
     /**
      * Percentual cobrado pela adquirente sobre o valor da transação (ex.: 1 = 1%).
      */
@@ -29,6 +22,7 @@ class CustoAdquirentePixHelper
      *
      * @see config('treeal.custo_fixo_transacao')
      * @see config('fyhub.custo_fixo_transacao')
+     * @see config('simpay.custo_fixo_transacao')
      * @see config('fluxpayments.custo_fixo_transacao')
      * @see config('paya55.custo_fixo_transacao')
      */
@@ -37,7 +31,7 @@ class CustoAdquirentePixHelper
         return match ($adquirenteReferencia) {
             'treeal' => (float) config('treeal.custo_fixo_transacao', 0.05),
             'fyhub' => (float) config('fyhub.custo_fixo_transacao', 0.10),
-            'simpay' => self::CUSTO_HISTORICO_SIMPAY,
+            'simpay' => (float) config('simpay.custo_fixo_transacao', 0.75),
             'fluxpayments' => (float) config('fluxpayments.custo_fixo_transacao', 0.09),
             'paya55' => (float) config('paya55.custo_fixo_transacao', 0.03),
             default => 0.0,
@@ -88,7 +82,7 @@ class CustoAdquirentePixHelper
     public static function sqlCustoPorTransacaoExpr(string $amountColumn = 'amount', bool $cashOutTable = false): string
     {
         $custoTreeal = (float) config('treeal.custo_fixo_transacao', 0.05);
-        $custoSimpay = self::CUSTO_HISTORICO_SIMPAY;
+        $custoSimpay = (float) config('simpay.custo_fixo_transacao', 0.75);
         $custoFyhub = (float) config('fyhub.custo_fixo_transacao', 0.10);
         $custoFluxpayments = (float) config('fluxpayments.custo_fixo_transacao', 0.09);
         $custoPaya55 = (float) config('paya55.custo_fixo_transacao', 0.03);

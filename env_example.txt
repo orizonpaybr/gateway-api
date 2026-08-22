@@ -103,6 +103,24 @@ BSPAY_BASE_URL=https://api.bspay.com.br/
 WOOVI_TOKEN=
 WOOVI_WEBHOOK_TOKEN=
 
+# Configurações SIMPAY — OAuth2 (Bearer) + HMAC-SHA512, cash-in/out + MED + decode QR
+SIMPAY_BASE_URL=https://api.somossimpay.com.br/v2/finance
+SIMPAY_BASE_URL_ROOT=https://api.somossimpay.com.br
+SIMPAY_CLIENT_ID=
+SIMPAY_CLIENT_SECRET=
+SIMPAY_HMAC_KEY=
+SIMPAY_TIMEOUT=30
+SIMPAY_TOKEN_CACHE_MINUTES=55
+SIMPAY_SOURCE_ACCOUNT_BRANCH=0001
+SIMPAY_SOURCE_ACCOUNT_NUMBER=
+SIMPAY_CUSTO_FIXO_TRANSACAO=0.75
+SIMPAY_RATE_LIMIT_PER_MINUTE=18000
+SIMPAY_RATE_LIMIT_PER_SECOND=500
+SIMPAY_WEBHOOK_RATE_LIMIT_PER_MINUTE=18000
+# Auth do webhook inbound: mesmo valor aqui e no authorization_token do cadastro do webhook
+SIMPAY_WEBHOOK_AUTHORIZATION_TOKEN=
+SIMPAY_WEBHOOK_AUTHORIZATION_HEADER=Authorization
+
 # Configurações FYHUB — API QRCode (PIX IN / cash-in), OAuth2 + mTLS obrigatório
 FYHUB_BASE_URL=https://api.qrcode.fyhub.com.br
 FYHUB_CLIENT_ID=

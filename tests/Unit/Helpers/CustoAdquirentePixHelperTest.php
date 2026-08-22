@@ -17,12 +17,13 @@ class CustoAdquirentePixHelperTest extends TestCase
     {
         config()->set('treeal.custo_fixo_transacao', 0.05);
         config()->set('fyhub.custo_fixo_transacao', 0.10);
+        config()->set('simpay.custo_fixo_transacao', 0.75);
 
         $this->assertSame(0.05, CustoAdquirentePixHelper::custoFixoTransacao('treeal'));
         // Fyhub ativa: custo config-driven (.env FYHUB_CUSTO_FIXO_TRANSACAO).
         $this->assertSame(0.10, CustoAdquirentePixHelper::custoFixoTransacao('fyhub'));
-        // Simpay descontinuada: custo congelado no helper (sem config), só relatório histórico.
-        $this->assertSame(0.035, CustoAdquirentePixHelper::custoFixoTransacao('simpay'));
+        // Simpay ativa: custo config-driven (.env SIMPAY_CUSTO_FIXO_TRANSACAO).
+        $this->assertSame(0.75, CustoAdquirentePixHelper::custoFixoTransacao('simpay'));
         $this->assertSame(0.0, CustoAdquirentePixHelper::custoFixoTransacao(null));
         $this->assertSame(0.0, CustoAdquirentePixHelper::custoFixoTransacao('desconhecido'));
     }

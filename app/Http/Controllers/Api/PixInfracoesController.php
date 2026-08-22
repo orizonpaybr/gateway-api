@@ -316,6 +316,9 @@ class PixInfracoesController extends Controller
 
             if (in_array($provider, ['fluxpayments', 'paya55'], true)) {
                 $result = $this->submitFluxPaymentsDefenseLocally($row, (string) $validated['defense'], $files, $provider);
+            } elseif ($provider === 'simpay') {
+                $result = app(\App\Services\Simpay\SimpayInfractionService::class)
+                    ->submitDefense($providerId, (string) $validated['defense'], $files);
             } else {
                 $service = app(TreealContasInfractionService::class);
                 $result = $service->submitDefense($providerId, (string) $validated['defense'], $files);
