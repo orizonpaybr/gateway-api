@@ -155,6 +155,10 @@ class User extends Authenticatable
             "webhook_endpoint" => 'array',
             'taxas_personalizadas_ativas' => 'boolean',
             'taxa_modo_percentual' => 'boolean',
+            // saldo agora é DECIMAL(15,2) no banco (exato). Cast p/ float mantém o
+            // comportamento anterior no PHP/JSON (era coluna float) sem drift de
+            // armazenamento — a fonte de verdade é o DECIMAL exato.
+            'saldo' => 'float',
             // Taxas em reais (até 3 decimais, ex.: 0,015)
             'taxa_fixa_deposito' => 'decimal:3',
             'taxa_fixa_pix' => 'decimal:3',
