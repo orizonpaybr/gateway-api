@@ -84,4 +84,9 @@ return [
 
     'webhook_authorization_header' => env('SIMPAY_WEBHOOK_AUTHORIZATION_HEADER', 'Authorization'),
 
+    // IPs de origem dos webhooks SIMPAY (CSV). Como o painel não expõe campo de
+    // authorization_token, o IP fixo é a trava prática. Observado em produção:
+    // 15.229.172.177 (UA python-httpx). Vazio = sem checagem de IP.
+    'webhook_allowed_ips' => env('SIMPAY_WEBHOOK_ALLOWED_IPS'),
+
 ];

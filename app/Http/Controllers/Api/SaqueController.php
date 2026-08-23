@@ -545,6 +545,28 @@ class SaqueController extends Controller
             Helper::calculaSaldoLiquido($user->user_id ?? $user->username);
             app(\App\Services\PaymentProcessingService::class)->invalidateCachesAfterPayment($withdrawal->user_id);
 
+            // Saque terminou negativo já na resposta síncrona (ex.: SIMPAY cancela por
+            // saldo insuficiente da master). Valor já devolvido pelo OutcomeApplier.
+            // Envelope 'error' p/ o integrador não interpretar como saque efetivado.
+            $finalStatus = (string) $withdrawal->status;
+            if (in_array($finalStatus, ['CANCELLED', 'FAILED', 'REFUNDED'], true)) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Saque não realizado. O valor foi devolvido ao saldo.',
+                    'data' => [
+                        'transaction_id' => $idTxn,
+                        'amount' => $amount,
+                        'pixKeyType' => $keyType,
+                        'pixKey' => $keyValue,
+                        'description' => $description,
+                        'status' => $finalStatus,
+                        'tipo_processamento' => 'Automático',
+                        'created_at' => now()->toISOString(),
+                        'adquirente' => $acquirerService->getReference(),
+                    ],
+                ], 200);
+            }
+
             return response()->json([
                 'status' => 'success',
                 'message' => 'Saque PIX processado.',
