@@ -996,7 +996,7 @@ class FinancialService
         // pode variar por nominal (várias contas FluxPayments), então o gate de
         // "provider suportado" precisa usar executor_ordem, não adquirente_ref.
         $provider = strtolower(trim((string) ($item->executor_ordem ?? '')));
-        if (! in_array($provider, ['fyhub', 'treeal', 'fluxpayments', 'paya55'], true)) {
+        if (! in_array($provider, ['fyhub', 'treeal', 'fluxpayments', 'paya55', 'simpay'], true)) {
             return false;
         }
 
@@ -1009,7 +1009,7 @@ class FinancialService
             return trim((string) ($item->end_to_end ?? '')) !== '';
         }
 
-        // FluxPayments / Paya55: idTransaction
+        // FluxPayments / Paya55 / Simpay: idTransaction (na Simpay = qr_code_id do refund).
         return trim((string) ($item->idTransaction ?? '')) !== '';
     }
 
@@ -1034,8 +1034,8 @@ class FinancialService
         // executor_ordem = família do provider (fixo por serviço); adquirente_ref
         // pode variar por nominal (várias contas FluxPayments).
         $provider = strtolower(trim((string) ($deposit->executor_ordem ?? '')));
-        if (! in_array($provider, ['fyhub', 'treeal', 'fluxpayments', 'paya55'], true)) {
-            throw new \Exception('Estorno disponível apenas para depósitos Fyhub/Treeal/FluxPayments/Paya55.', 422);
+        if (! in_array($provider, ['fyhub', 'treeal', 'fluxpayments', 'paya55', 'simpay'], true)) {
+            throw new \Exception('Estorno disponível apenas para depósitos Fyhub/Treeal/FluxPayments/Paya55/Simpay.', 422);
         }
 
         $st = strtoupper((string) $deposit->status);

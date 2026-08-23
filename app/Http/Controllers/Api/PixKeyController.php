@@ -845,6 +845,29 @@ class PixKeyController extends Controller
                 \App\Helpers\Helper::calculaSaldoLiquido($user->user_id ?? $user->username);
                 app(\App\Services\PaymentProcessingService::class)->invalidateCachesAfterPayment($withdrawal->user_id);
 
+                // Se a adquirente já resolveu o saque como negativo na resposta síncrona
+                // (ex.: SIMPAY cancela por saldo insuficiente da conta master), o valor já
+                // foi devolvido pelo OutcomeApplier. NÃO reportar sucesso — o cliente não
+                // pode achar que o PIX saiu. Ver usePixKeyForm.onSuccess (front trata o status).
+                $finalStatus = (string) $withdrawal->status;
+                if (in_array($finalStatus, ['CANCELLED', 'FAILED', 'REFUNDED'], true)) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Saque não realizado. O valor foi devolvido ao seu saldo.',
+                        'data' => [
+                            'transaction_id' => $idTxn,
+                            'amount' => $amount,
+                            'key_type' => $keyType,
+                            'key_value' => $keyValue,
+                            'description' => $description,
+                            'status' => $finalStatus,
+                            'tipo_processamento' => 'Automático',
+                            'created_at' => now()->toISOString(),
+                            'adquirente' => $acquirerService->getReference(),
+                        ],
+                    ])->header('Access-Control-Allow-Origin', '*');
+                }
+
                 return response()->json([
                     'success' => true,
                     'message' => 'Saque PIX realizado com sucesso',

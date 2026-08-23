@@ -120,6 +120,9 @@ SIMPAY_WEBHOOK_RATE_LIMIT_PER_MINUTE=18000
 # Auth do webhook inbound: mesmo valor aqui e no authorization_token do cadastro do webhook
 SIMPAY_WEBHOOK_AUTHORIZATION_TOKEN=
 SIMPAY_WEBHOOK_AUTHORIZATION_HEADER=Authorization
+# IPs de origem dos webhooks SIMPAY (CSV). Painel não expõe token -> IP fixo é a trava.
+# Observado em prod: 15.229.172.177
+SIMPAY_WEBHOOK_ALLOWED_IPS=15.229.172.177
 
 # Configurações FYHUB — API QRCode (PIX IN / cash-in), OAuth2 + mTLS obrigatório
 FYHUB_BASE_URL=https://api.qrcode.fyhub.com.br

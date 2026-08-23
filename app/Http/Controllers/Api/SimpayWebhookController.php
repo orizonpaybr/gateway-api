@@ -55,15 +55,27 @@ class SimpayWebhookController extends Controller
     private function webhookAuthorized(Request $request): bool
     {
         $token = trim((string) config('simpay.webhook_authorization_token', ''));
-        if ($token === '') {
+        $allowedIps = array_filter(array_map('trim', explode(',', (string) config('simpay.webhook_allowed_ips', ''))));
+
+        // 1) authorization_token no header (se a SIMPAY reenviar o token do cadastro).
+        if ($token !== '') {
+            $header = (string) config('simpay.webhook_authorization_header', 'Authorization');
+            $sent = trim((string) $request->header($header, ''));
+            $sent = (string) preg_replace('/^Bearer\s+/i', '', $sent);
+            if ($sent !== '' && hash_equals($token, $sent)) {
+                return true;
+            }
+        }
+
+        // 2) IP de origem fixo da SIMPAY. O painel não expõe campo de token, então o
+        //    IP é a trava prática: webhooks saem de IP fixo (ver logs nginx). Fallback
+        //    robusto p/ o cash-in, que credita saldo direto do payload.
+        if ($allowedIps !== [] && in_array($request->ip(), $allowedIps, true)) {
             return true;
         }
 
-        $header = (string) config('simpay.webhook_authorization_header', 'Authorization');
-        $sent = trim((string) $request->header($header, ''));
-        $sent = (string) preg_replace('/^Bearer\s+/i', '', $sent);
-
-        return $sent !== '' && hash_equals($token, $sent);
+        // 3) Nenhuma trava configurada = aberto (retrocompatível).
+        return $token === '' && $allowedIps === [];
     }
 
     public function handle(Request $request): JsonResponse
