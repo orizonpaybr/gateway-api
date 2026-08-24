@@ -562,7 +562,7 @@ class SaqueController extends Controller
                         'status' => $finalStatus,
                         'tipo_processamento' => 'Automático',
                         'created_at' => now()->toISOString(),
-                        'adquirente' => $acquirerService->getReference(),
+                        'adquirente' => 'coratri', // marca Coratri: não expõe a adquirente real ao cliente da API
                     ],
                 ], 200);
             }
@@ -579,7 +579,7 @@ class SaqueController extends Controller
                     'status' => $withdrawal->status,
                     'tipo_processamento' => 'Automático',
                     'created_at' => now()->toISOString(),
-                    'adquirente' => $acquirerService->getReference(),
+                    'adquirente' => 'coratri', // marca Coratri: não expõe a adquirente real ao cliente da API
                     'taxa_cash_out' => round($taxaCashOut, 2),
                     'taxa_adquirente' => round($taxaAdquirente, 2),
                     'taxa_aplicacao' => round($taxaAplicacao, 2),
