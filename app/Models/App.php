@@ -22,6 +22,8 @@ class App extends Model
         'taxa_fixa_pix',
         'taxa_fixa_padrao',
         'taxa_comissao_afiliado_padrao',
+        'taxa_minima_fixa',
+        'taxa_minima_percentual',
         'taxa_fixa_padrao_cash_out',
         'sms_url_cadastro_pendente',
         'sms_url_cadastro_ativo',
@@ -83,6 +85,8 @@ class App extends Model
         'relatorio_saidas_mostrar_taxa' => 'boolean',
         // Casts de valores numéricos (taxas em reais, até 3 decimais ex.: 0,015)
         'taxa_fixa_padrao' => 'decimal:3',
+        'taxa_minima_fixa' => 'decimal:4',
+        'taxa_minima_percentual' => 'decimal:3',
         'taxa_fixa_padrao_cash_out' => 'decimal:2',
         'taxa_fixa_pix' => 'decimal:3',
         'taxa_comissao_afiliado_padrao' => 'decimal:3',

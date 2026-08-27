@@ -23,6 +23,10 @@ use App\Services\Simpay\SimpayAuthService;
 use App\Services\Simpay\SimpayCashOutOutcomeService;
 use App\Services\Simpay\SimpayInfractionService;
 use App\Services\Simpay\SimpayPixAcquirerService;
+use App\Services\Paytler\PaytlerAuthService;
+use App\Services\Paytler\PaytlerCashOutOutcomeService;
+use App\Services\Paytler\PaytlerInfractionService;
+use App\Services\Paytler\PaytlerPixAcquirerService;
 use App\Services\Treeal\TreealAuthService;
 use App\Services\Treeal\TreealCashOutOutcomeService;
 use App\Services\Treeal\TreealPixAcquirerService;
@@ -131,6 +135,18 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(SimpayInfractionService::class, function ($app) {
             return new SimpayInfractionService($app->make(SimpayAuthService::class));
         });
+
+        $this->app->singleton(PaytlerAuthService::class);
+
+        $this->app->singleton(PaytlerCashOutOutcomeService::class);
+
+        $this->app->singleton(PaytlerPixAcquirerService::class, function ($app) {
+            return new PaytlerPixAcquirerService($app->make(PaytlerAuthService::class));
+        });
+
+        $this->app->singleton(PaytlerInfractionService::class, function ($app) {
+            return new PaytlerInfractionService($app->make(PaytlerAuthService::class));
+        });
     }
 
     /**
@@ -152,6 +168,9 @@ class AppServiceProvider extends ServiceProvider
 
         $this->app->make(PixAcquirerManager::class)
             ->register('simpay', SimpayPixAcquirerService::class);
+
+        $this->app->make(PixAcquirerManager::class)
+            ->register('paytler', PaytlerPixAcquirerService::class);
 
         // Registrar Observers para monitorar mudanças de status
         Solicitacoes::observe(SolicitacoesObserver::class);

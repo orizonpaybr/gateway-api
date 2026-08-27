@@ -44,6 +44,9 @@ class TaxValidationService
             'taxa_fixa_deposito' => 'nullable|numeric|min:0',
             'taxa_fixa_pix' => 'nullable|numeric|min:0',
             'taxa_comissao_afiliado_padrao' => 'nullable|numeric|min:0',
+            // Piso da plataforma (regra própria, independente de adquirente).
+            'taxa_minima_fixa' => 'nullable|numeric|min:0',
+            'taxa_minima_percentual' => 'nullable|numeric|min:0|max:100',
         ];
     }
 
@@ -119,6 +122,8 @@ class TaxValidationService
             'taxa_percentual_pix',
             'taxa_comissao_afiliado_padrao',
             'taxa_comissao_afiliado',
+            'taxa_minima_fixa',
+            'taxa_minima_percentual',
         ];
 
         $booleanFields = [

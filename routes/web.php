@@ -25,6 +25,7 @@ Route::get('/download-boleto', function () {
 // Rotas de adquirentes (webhooks e callbacks específicos)
 require __DIR__.'/groups/adquirentes/pagarme.php';
 require __DIR__.'/groups/adquirentes/simpay.php';
+require __DIR__.'/groups/adquirentes/paytler.php';
 require __DIR__.'/groups/adquirentes/fyhub.php';
 require __DIR__.'/groups/adquirentes/treeal.php';
 require __DIR__.'/groups/adquirentes/fluxpayments.php';

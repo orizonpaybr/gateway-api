@@ -104,6 +104,11 @@ WOOVI_TOKEN=
 WOOVI_WEBHOOK_TOKEN=
 
 # Configurações SIMPAY — OAuth2 (Bearer) + HMAC-SHA512, cash-in/out + MED + decode QR
+# ===== PLATAFORMA (regras de taxa PRÓPRIAS da Coratri, independentes de adquirente) =====
+# Piso mínimo cobrado do cliente por transação (nossa política, NÃO custo de adquirente).
+PLATAFORMA_TAXA_MINIMA_FIXA=0.05
+PLATAFORMA_TAXA_MINIMA_PERCENTUAL=0
+
 SIMPAY_BASE_URL=https://api.somossimpay.com.br/v2/finance
 SIMPAY_BASE_URL_ROOT=https://api.somossimpay.com.br
 SIMPAY_CLIENT_ID=
@@ -123,6 +128,22 @@ SIMPAY_WEBHOOK_AUTHORIZATION_HEADER=Authorization
 # IPs de origem dos webhooks SIMPAY (CSV). Painel não expõe token -> IP fixo é a trava.
 # Observado em prod: 15.229.172.177
 SIMPAY_WEBHOOK_ALLOWED_IPS=15.229.172.177
+
+# ===== PAYTLER (adquirente PIX) =====
+# Auth OAuth2 (Bearer JWT, sem HMAC). base_url inclui /v1/customers.
+PAYTLER_BASE_URL=https://api.paytler.com/v1/customers
+PAYTLER_CLIENT_ID=
+PAYTLER_CLIENT_SECRET=
+PAYTLER_TIMEOUT=30
+PAYTLER_TOKEN_CACHE_MINUTES=55
+# Paytler cobra PERCENTUAL (2%), não custo fixo. custo_percentual=2 -> 2%.
+PAYTLER_CUSTO_FIXO_TRANSACAO=0
+PAYTLER_CUSTO_PERCENTUAL_TRANSACAO=2
+PAYTLER_RATE_LIMIT_PER_SECOND=500
+# Webhook inbound: HTTP Basic (mesmos valores no cadastro do webhook Paytler) + IP allowlist opcional.
+PAYTLER_WEBHOOK_USERNAME=
+PAYTLER_WEBHOOK_PASSWORD=
+PAYTLER_WEBHOOK_ALLOWED_IPS=
 
 # Configurações FYHUB — API QRCode (PIX IN / cash-in), OAuth2 + mTLS obrigatório
 FYHUB_BASE_URL=https://api.qrcode.fyhub.com.br

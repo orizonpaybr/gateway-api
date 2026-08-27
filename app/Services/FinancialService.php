@@ -996,7 +996,7 @@ class FinancialService
         // pode variar por nominal (várias contas FluxPayments), então o gate de
         // "provider suportado" precisa usar executor_ordem, não adquirente_ref.
         $provider = strtolower(trim((string) ($item->executor_ordem ?? '')));
-        if (! in_array($provider, ['fyhub', 'treeal', 'fluxpayments', 'paya55', 'simpay'], true)) {
+        if (! in_array($provider, ['fyhub', 'treeal', 'fluxpayments', 'paya55', 'simpay', 'paytler'], true)) {
             return false;
         }
 
@@ -1005,7 +1005,7 @@ class FinancialService
             return false;
         }
 
-        if (in_array($provider, ['fyhub', 'treeal'], true)) {
+        if (in_array($provider, ['fyhub', 'treeal', 'paytler'], true)) {
             return trim((string) ($item->end_to_end ?? '')) !== '';
         }
 
@@ -1034,8 +1034,8 @@ class FinancialService
         // executor_ordem = família do provider (fixo por serviço); adquirente_ref
         // pode variar por nominal (várias contas FluxPayments).
         $provider = strtolower(trim((string) ($deposit->executor_ordem ?? '')));
-        if (! in_array($provider, ['fyhub', 'treeal', 'fluxpayments', 'paya55', 'simpay'], true)) {
-            throw new \Exception('Estorno disponível apenas para depósitos Fyhub/Treeal/FluxPayments/Paya55/Simpay.', 422);
+        if (! in_array($provider, ['fyhub', 'treeal', 'fluxpayments', 'paya55', 'simpay', 'paytler'], true)) {
+            throw new \Exception('Estorno disponível apenas para depósitos Fyhub/Treeal/FluxPayments/Paya55/Simpay/Paytler.', 422);
         }
 
         $st = strtoupper((string) $deposit->status);
@@ -1047,7 +1047,8 @@ class FinancialService
         }
 
         $tid = trim((string) ($deposit->idTransaction ?? ''));
-        if (in_array($provider, ['fyhub', 'treeal'], true)) {
+        if (in_array($provider, ['fyhub', 'treeal', 'paytler'], true)) {
+            // Paytler devolve pelo endToEnd (reverse-pix-in), não pelo id da transação.
             $tid = trim((string) ($deposit->end_to_end ?? ''));
         }
         if ($tid === '') {

@@ -319,6 +319,9 @@ class PixInfracoesController extends Controller
             } elseif ($provider === 'simpay') {
                 $result = app(\App\Services\Simpay\SimpayInfractionService::class)
                     ->submitDefense($providerId, (string) $validated['defense'], $files);
+            } elseif ($provider === 'paytler') {
+                $result = app(\App\Services\Paytler\PaytlerInfractionService::class)
+                    ->submitDefense($providerId, (string) $validated['defense'], $files);
             } else {
                 $service = app(TreealContasInfractionService::class);
                 $result = $service->submitDefense($providerId, (string) $validated['defense'], $files);
