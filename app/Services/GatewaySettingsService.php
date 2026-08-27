@@ -99,6 +99,11 @@ class GatewaySettingsService
             // Taxa global de comissão de afiliado por transação, em reais
             'taxa_comissao_afiliado_padrao' => (float) ($settings->taxa_comissao_afiliado_padrao ?? 0.50),
 
+            // Piso da plataforma (regra própria, independente de adquirente).
+            // Fallback pra config quando a coluna ainda não existe (pré-migration).
+            'taxa_minima_fixa' => (float) ($settings->taxa_minima_fixa ?? config('plataforma.taxa_minima_fixa', 0.05)),
+            'taxa_minima_percentual' => (float) ($settings->taxa_minima_percentual ?? config('plataforma.taxa_minima_percentual', 0.0)),
+
             // Personalização de Relatórios - Entradas
             'relatorio_entradas_mostrar_meio' => (bool) ($settings->relatorio_entradas_mostrar_meio ?? true),
             'relatorio_entradas_mostrar_transacao_id' => (bool) ($settings->relatorio_entradas_mostrar_transacao_id ?? true),
@@ -142,6 +147,8 @@ class GatewaySettingsService
             'taxa_fixa_deposito' => 'taxa_fixa_padrao',
             'taxa_fixa_pix' => 'taxa_fixa_pix',
             'taxa_comissao_afiliado_padrao' => 'taxa_comissao_afiliado_padrao',
+            'taxa_minima_fixa' => 'taxa_minima_fixa',
+            'taxa_minima_percentual' => 'taxa_minima_percentual',
         ];
     }
 

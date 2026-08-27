@@ -50,6 +50,11 @@ return Application::configure(basePath: dirname(__DIR__))
                 ->by('simpay-webhook|'.$request->ip());
         });
 
+        RateLimiter::for('paytler-webhook', function (Request $request) {
+            return Limit::perMinute((int) config('paytler.webhook_rate_limit_per_minute', 18000))
+                ->by('paytler-webhook|'.$request->ip());
+        });
+
         RateLimiter::for('fyhub-webhook', function (Request $request) {
             return Limit::perMinute((int) config('fyhub.webhook_rate_limit_per_minute', 18000))
                 ->by('fyhub-webhook|'.$request->ip());
@@ -96,6 +101,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->validateCsrfTokens([
             '/pagarme/*',
             '/simpay/*',
+            '/paytler/*',
             '/fyhub/*',
             '/treeal/*',
             '/fluxpayments/*',
@@ -120,6 +126,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'check.pin' => \App\Http\Middleware\CheckPin::class,
             'secure.cors' => \App\Http\Middleware\SecureCors::class,
             'throttle.simpay.pix' => \App\Http\Middleware\ThrottleSimpayPixThroughput::class,
+            'throttle.paytler.pix' => \App\Http\Middleware\ThrottlePaytlerPixThroughput::class,
             'throttle.fyhub.pix' => \App\Http\Middleware\ThrottleFyhubPixThroughput::class,
             'throttle.treeal.pix' => \App\Http\Middleware\ThrottleTreealPixThroughput::class,
             'throttle.fluxpayments.pix' => \App\Http\Middleware\ThrottleFluxPaymentsPixThroughput::class,

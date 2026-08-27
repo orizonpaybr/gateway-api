@@ -99,16 +99,15 @@ class TaxaSaqueHelper
             $percentualAplicado = max(0, (float) ($user->taxa_percentual_pix ?? 0));
             $taxaPercentualBruta = ($amount * $percentualAplicado) / 100;
 
-            // PISO: nunca menor que o custo fixo da adquirente principal (Treeal).
-            $piso = CustoAdquirentePixHelper::pisoTaxa($amount);
-            $taxaTotal = max($taxaPercentualBruta, $piso);
+            // Piso (mínimo da plataforma + custo da adquirente) é aplicado adiante,
+            // uniformemente para TODOS os modos de taxa.
+            $taxaTotal = $taxaPercentualBruta;
             $descricao = $isInterfaceWeb ? 'PERSONALIZADA_INTERFACE_WEB_PERCENTUAL' : 'PERSONALIZADA_API_PERCENTUAL';
 
             Log::info('TaxaSaqueHelper::calcularTaxaSaque - Usando taxa percentual', [
                 'user_id' => $user->user_id ?? 'N/A',
                 'percentual' => $percentualAplicado,
                 'taxa_percentual_bruta' => $taxaPercentualBruta,
-                'piso_taxa' => $piso,
                 'taxa_aplicada' => $taxaTotal,
             ]);
         } elseif ($taxasPersonalizadasAtivas) {
@@ -131,6 +130,14 @@ class TaxaSaqueHelper
         // Garantir que a taxa não seja negativa
         $taxaTotal = max(0, (float) $taxaTotal);
 
+        // Dois pisos, aplicados a TODOS os modos de taxa:
+        //  1) Piso da PLATAFORMA — nossa regra própria (config plataforma.*), não depende de adquirente.
+        //  2) Custo REAL da adquirente ativa — nunca cobrar menos do que pagamos naquela
+        //     transação (ex.: Paytler 2%). Protege a margem sem prender nossa política a uma adquirente.
+        $pisoPlataforma = CustoAdquirentePixHelper::pisoTaxa($amount, $setting);
+        $custoAdquirente = CustoAdquirentePixHelper::custoTransacao($amount, $adquirenteReferencia);
+        $taxaTotal = max($taxaTotal, $pisoPlataforma, $custoAdquirente);
+
         // IMPORTANTE: A comissão do afiliado NÃO é adicionada à taxa total
         // Ela sai da taxa fixa, reduzindo o lucro da Coratri
         $comissaoAfiliado = 0.00;
@@ -152,9 +159,8 @@ class TaxaSaqueHelper
             ]);
         }
 
-        $custoAdquirente = CustoAdquirentePixHelper::custoTransacao($amount, $adquirenteReferencia);
-
-        // Lucro líquido da aplicação = taxa fixa - custo Adquirente PIX - comissão afiliado
+        // $custoAdquirente já calculado no piso acima.
+        // Lucro líquido da aplicação = taxa - custo Adquirente PIX - comissão afiliado
         $lucroAplicacao = max(0, $taxaTotal - $custoAdquirente - $comissaoAfiliado);
 
         Log::info('TaxaSaqueHelper: Taxas calculadas', [
@@ -246,7 +252,7 @@ class TaxaSaqueHelper
             // No modo percentual: saldo = valor + valor × taxaEfetiva/100.
             // taxaEfetiva = max(% usuário, % mínimo da adquirente principal).
             $percentual = max(0, (float) ($user->taxa_percentual_pix ?? 0));
-            $percentualMinimo = CustoAdquirentePixHelper::percentualPrincipal();
+            $percentualMinimo = CustoAdquirentePixHelper::percentualPrincipal($setting);
             $taxaEfetivaPercent = max($percentual, $percentualMinimo);
 
             // Taxa por dentro: pode solicitar o saldo inteiro; a taxa percentual sai de dentro do valor.
