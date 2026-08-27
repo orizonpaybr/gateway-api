@@ -44,7 +44,7 @@ return [
     |--------------------------------------------------------------------------
     | TPS informado pela Paytler — ajustar via .env. Default conservador.
     */
-    'rate_limit_per_second' => (int) env('PAYTLER_RATE_LIMIT_PER_SECOND', 500),
+    'rate_limit_per_second' => (int) env('PAYTLER_RATE_LIMIT_PER_SECOND', 300),
     'rate_limit_per_minute' => (int) env('PAYTLER_RATE_LIMIT_PER_MINUTE', 18000),
     'webhook_rate_limit_per_minute' => (int) env('PAYTLER_WEBHOOK_RATE_LIMIT_PER_MINUTE', 18000),
 
