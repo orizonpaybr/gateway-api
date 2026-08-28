@@ -154,6 +154,19 @@ class PaytlerWebhookController extends Controller
      */
     private function handleCashIn(string $status, array $transaction, array $bankData): JsonResponse
     {
+        $txid = trim((string) ($transaction['transactionId'] ?? ''));
+        $extId = trim((string) ($transaction['externalId'] ?? ''));
+        $e2e = trim((string) ($bankData['endtoendId'] ?? ''));
+
+        // O endToEnd só vem no WEBHOOK — o endpoint de status da Paytler não retorna.
+        // Cacheia por id do pagamento (txid/externalId) pra o crédito (via reconcile)
+        // gravar o e2e no depósito e habilitar o estorno (reverse-pix-in exige endToEnd).
+        if ($e2e !== '' && strtoupper($status) === 'COMPLETED') {
+            foreach (array_filter([$txid, $extId]) as $k) {
+                \Illuminate\Support\Facades\Cache::put('paytler_e2e:'.$k, $e2e, now()->addHours(2));
+            }
+        }
+
         $deposit = $this->findDeposit($transaction);
         if (! $deposit) {
             // A Paytler manda ids de PAGAMENTO no webhook (txid/uuid do pagamento), não
@@ -180,11 +193,6 @@ class PaytlerWebhookController extends Controller
 
             return response()->json(['received' => true, 'processed' => false, 'reason' => 'deposit_not_found']);
         }
-
-        $e2e = trim((string) ($bankData['endtoendId'] ?? ''));
-        // transactionId = id do PAGAMENTO na Paytler (compartilhado entre charges do
-        // mesmo pagamento). Chave de dedup — ver PaytlerCashInService.
-        $txid = trim((string) ($transaction['transactionId'] ?? ''));
 
         if ($status === 'COMPLETED') {
             return $this->creditDeposit($deposit, $txid, $e2e);

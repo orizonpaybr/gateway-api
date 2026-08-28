@@ -52,6 +52,24 @@ class PaytlerCashInDedupTest extends TestCase
     }
 
     /** @test */
+    public function e2e_do_webhook_e_gravado_via_cache_habilitando_estorno(): void
+    {
+        // O status endpoint da Paytler não retorna e2e; o webhook cacheia por txid.
+        \Illuminate\Support\Facades\Cache::put('paytler_e2e:TXID-E', 'E12345678202608281200abc', now()->addHour());
+
+        User::factory()->create(['user_id' => 'lojaZ', 'username' => 'lojaZ', 'saldo' => 0]);
+        $d = Solicitacoes::factory()->pending()->create([
+            'user_id' => 'lojaZ', 'amount' => 5.00, 'deposito_liquido' => 4.90,
+            'executor_ordem' => 'paytler', 'idTransaction' => 'uuid-e', 'status' => 'WAITING_FOR_APPROVAL',
+            'end_to_end' => null,
+        ]);
+
+        // Crédito sem e2e explícito → pega do cache pelo txid.
+        $this->assertSame('credited', app(PaytlerCashInService::class)->creditIfNotDuplicate($d, 'TXID-E', null));
+        $this->assertSame('E12345678202608281200abc', (string) $d->fresh()->end_to_end, 'e2e do cache deve ser gravado no depósito (habilita estorno)');
+    }
+
+    /** @test */
     public function txids_diferentes_creditam_normalmente(): void
     {
         User::factory()->create(['user_id' => 'lojaY', 'username' => 'lojaY', 'saldo' => 0]);
