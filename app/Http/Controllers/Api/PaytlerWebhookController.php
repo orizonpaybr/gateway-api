@@ -165,9 +165,12 @@ class PaytlerWebhookController extends Controller
         }
 
         $e2e = trim((string) ($bankData['endtoendId'] ?? ''));
+        // transactionId = id do PAGAMENTO na Paytler (compartilhado entre charges do
+        // mesmo pagamento). Chave de dedup — ver PaytlerCashInService.
+        $txid = trim((string) ($transaction['transactionId'] ?? ''));
 
         if ($status === 'COMPLETED') {
-            return $this->creditDeposit($deposit, $e2e);
+            return $this->creditDeposit($deposit, $txid, $e2e);
         }
         if ($status === 'REFUNDED') {
             return $this->refundDepositRecord($deposit, $e2e);
@@ -192,45 +195,30 @@ class PaytlerWebhookController extends Controller
         return $this->refundDepositRecord($deposit, trim((string) ($bankData['endtoendId'] ?? '')));
     }
 
-    private function creditDeposit(Solicitacoes $deposit, string $e2e): JsonResponse
+    private function creditDeposit(Solicitacoes $deposit, string $txid, string $e2e): JsonResponse
     {
         if ($deposit->status === 'PAID_OUT') {
             return response()->json(['received' => true, 'processed' => false, 'reason' => 'already_paid']);
         }
 
-        $updated = DB::transaction(function () use ($deposit, $e2e) {
-            $locked = Solicitacoes::where('id', $deposit->id)->lockForUpdate()->first();
-            if (! $locked || $locked->status === 'PAID_OUT') {
-                return false;
-            }
-            $data = ['status' => 'PAID_OUT'];
-            if ($e2e !== '') {
-                $data['end_to_end'] = $e2e;
-            }
-            $locked->update($data);
+        // Crédito com dedup por pagamento (txid): um pagamento credita no máximo 1 depósito.
+        $outcome = app(\App\Services\Paytler\PaytlerCashInService::class)
+            ->creditIfNotDuplicate($deposit, $txid, $e2e !== '' ? $e2e : null);
 
-            return true;
-        });
-
-        if (! $updated) {
-            return response()->json(['received' => true, 'processed' => false]);
+        if ($outcome === 'duplicate') {
+            return response()->json(['received' => true, 'processed' => false, 'reason' => 'duplicate_payment']);
         }
-
-        $fresh = Solicitacoes::find($deposit->id);
-        if ($fresh) {
-            try {
-                app(PaymentProcessingService::class)->processPaymentReceived($fresh);
-            } catch (\Throwable $e) {
-                Log::error('[PAYTLER][WEBHOOK] Falha ao creditar depósito', [
-                    'deposit_id' => $deposit->id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
+        if ($outcome !== 'credited') {
+            return response()->json(['received' => true, 'processed' => false]);
         }
 
         $this->dispatchClientWebhook($deposit, 'PAID_OUT', 'PIX_IN');
 
-        Log::info('[PAYTLER][WEBHOOK] Depósito confirmado', ['deposit_id' => $deposit->id, 'end_to_end' => $e2e]);
+        Log::info('[PAYTLER][WEBHOOK] Depósito confirmado', [
+            'deposit_id' => $deposit->id,
+            'txid' => $txid,
+            'end_to_end' => $e2e,
+        ]);
 
         return response()->json(['received' => true, 'processed' => true]);
     }
