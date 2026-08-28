@@ -156,6 +156,23 @@ class PaytlerWebhookController extends Controller
     {
         $deposit = $this->findDeposit($transaction);
         if (! $deposit) {
+            // A Paytler manda ids de PAGAMENTO no webhook (txid/uuid do pagamento), não
+            // o uuid do charge que guardamos — impossível casar o depósito por id. O
+            // webhook é o SINAL de que um pagamento completou: dispara o reconcile
+            // (poll) que credita o depósito pago em SEGUNDOS, com dedup por txid.
+            if (strtoupper($status) === 'COMPLETED') {
+                // Imediato + retry curto: cobre lag de consistência entre webhook e
+                // o endpoint de status. O agendado (2min) é a rede final.
+                \App\Jobs\ReconcilePaytlerDepositsJob::dispatch();
+                \App\Jobs\ReconcilePaytlerDepositsJob::dispatch()->delay(now()->addSeconds(15));
+                Log::info('[PAYTLER][WEBHOOK] Cash-in não casado por id — reconcile disparado', [
+                    'external_id' => $transaction['externalId'] ?? null,
+                    'uuid' => $transaction['uuid'] ?? null,
+                ]);
+
+                return response()->json(['received' => true, 'processed' => true, 'reason' => 'reconcile_triggered']);
+            }
+
             Log::warning('[PAYTLER][WEBHOOK] Depósito não encontrado', [
                 'external_id' => $transaction['externalId'] ?? null,
                 'uuid' => $transaction['uuid'] ?? null,
