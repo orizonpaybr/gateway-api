@@ -24,6 +24,16 @@ class PaytlerCashInService
     public function creditIfNotDuplicate(Solicitacoes $deposit, string $txid, ?string $e2e = null): string
     {
         $txid = trim($txid);
+
+        // O endToEnd não vem no endpoint de status da Paytler — o webhook cacheou por
+        // txid. Usa esse e2e pra habilitar o estorno (reverse-pix-in exige endToEnd).
+        if (($e2e === null || $e2e === '') && $txid !== '') {
+            $cached = \Illuminate\Support\Facades\Cache::get('paytler_e2e:'.$txid);
+            if (is_string($cached) && $cached !== '') {
+                $e2e = $cached;
+            }
+        }
+
         $lockName = $txid !== '' ? 'paytler_pay:'.$txid : null;
 
         if ($lockName !== null) {
