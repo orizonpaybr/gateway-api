@@ -146,17 +146,21 @@ class PaytlerPixAcquirerService implements PixAcquirerInterface
         $document = preg_replace('/\D/', '', (string) $recipientDocument);
         $name = trim((string) $recipientName);
 
+        // externalId é OBRIGATÓRIO no withdraw da Paytler — sempre presente
+        // (fallback pra UUID se não vier correlationId).
+        $externalId = ($correlationId !== null && $correlationId !== '')
+            ? $correlationId
+            : (string) \Illuminate\Support\Str::uuid();
+
         $payload = [
             'amount' => round($amountReais, 2),
             'key' => $pixKey,
             'name' => $name !== '' ? $name : 'Recebedor',
             'documentNumber' => $document,
+            'externalId' => $externalId,
             'notify' => true,
         ];
 
-        if ($correlationId !== null && $correlationId !== '') {
-            $payload['externalId'] = $correlationId;
-        }
         if ($description !== null && trim($description) !== '') {
             $payload['description'] = mb_substr(trim($description), 0, 140);
         }
