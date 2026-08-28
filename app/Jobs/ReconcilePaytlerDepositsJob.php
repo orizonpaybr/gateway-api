@@ -4,7 +4,6 @@ namespace App\Jobs;
 
 use App\Models\Solicitacoes;
 use App\Services\ClientWebhookPayloadBuilder;
-use App\Services\PaymentProcessingService;
 use App\Services\Paytler\PaytlerPixAcquirerService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -57,33 +56,37 @@ class ReconcilePaytlerDepositsJob implements ShouldQueue
                 }
 
                 $raw = $result['raw'] ?? [];
-                $e2e = $raw['endToEndId'] ?? null;
+                $e2e = isset($raw['endToEndId']) && $raw['endToEndId'] !== '' ? (string) $raw['endToEndId'] : null;
+                $txid = trim((string) ($raw['transaction_id'] ?? ''));
                 $paymentDate = $raw['payment_date'] ?? null;
 
-                DB::transaction(function () use ($deposit, $newStatus, $e2e) {
-                    $locked = Solicitacoes::where('id', $deposit->id)->lockForUpdate()->first();
-                    if (! $locked || $locked->status !== 'WAITING_FOR_APPROVAL') {
-                        return;
-                    }
-                    $data = ['status' => $newStatus];
-                    if ($e2e !== null && $e2e !== '') {
-                        $data['end_to_end'] = $e2e;
-                    }
-                    $locked->update($data);
-                });
+                $effectiveStatus = $newStatus;
 
                 if ($newStatus === 'PAID_OUT') {
-                    $fresh = Solicitacoes::find($deposit->id);
-                    if ($fresh) {
-                        try {
-                            app(PaymentProcessingService::class)->processPaymentReceived($fresh);
-                        } catch (\Throwable $e) {
-                            Log::error('[PAYTLER][RECONCILE_DEPOSIT] Falha ao creditar depósito', [
-                                'deposit_id' => $deposit->id,
-                                'error' => $e->getMessage(),
-                            ]);
-                        }
+                    // Crédito com dedup por pagamento (txid): não credita 2x o mesmo
+                    // pagamento (Paytler amarra vários charges a 1 txid). Ver PaytlerCashInService.
+                    $outcome = app(\App\Services\Paytler\PaytlerCashInService::class)
+                        ->creditIfNotDuplicate($deposit, $txid, $e2e);
+                    if ($outcome === 'noop') {
+                        continue;
                     }
+                    if ($outcome === 'duplicate') {
+                        // Charge redundante anulado (sem crédito) — reporta CANCELLED ao cliente.
+                        $effectiveStatus = 'CANCELLED';
+                    }
+                } else {
+                    // Status terminal negativo — atualiza sem creditar.
+                    DB::transaction(function () use ($deposit, $newStatus, $e2e) {
+                        $locked = Solicitacoes::where('id', $deposit->id)->lockForUpdate()->first();
+                        if (! $locked || $locked->status !== 'WAITING_FOR_APPROVAL') {
+                            return;
+                        }
+                        $data = ['status' => $newStatus];
+                        if ($e2e !== null && $e2e !== '') {
+                            $data['end_to_end'] = $e2e;
+                        }
+                        $locked->update($data);
+                    });
                 }
 
                 if (! empty($deposit->callback) && $deposit->callback !== 'web') {
@@ -92,11 +95,11 @@ class ReconcilePaytlerDepositsJob implements ShouldQueue
                         ClientWebhookDispatchJob::send(
                             $deposit->callback,
                             $deposit->idTransaction,
-                            $newStatus,
+                            $effectiveStatus,
                             (float) $deposit->amount,
                             $paymentDate ?? now()->toIso8601String(),
                             ClientWebhookPayloadBuilder::extraForDeposit($fresh),
-                            $newStatus === 'PAID_OUT'
+                            $effectiveStatus === 'PAID_OUT'
                                 ? 'Depósito PIX recebido com sucesso.'
                                 : 'Depósito PIX cancelado/expirado.'
                         );
