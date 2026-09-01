@@ -1078,27 +1078,82 @@ class FinancialService
             throw new \Exception($msg, 502);
         }
 
-        DB::transaction(function () use ($deposit) {
-            $locked = Solicitacoes::where('id', $deposit->id)
-                ->lockForUpdate()
-                ->first();
+        // Devolução ASSÍNCRONA (Paytler): a adquirente retorna a devolução como NEW e
+        // processa em segundos, podendo FALHAR. NÃO decrementa o saldo agora — marca
+        // "em processamento" + guarda o id da devolução. O ReconcilePaytlerRefundsJob
+        // confirma depois: REFUNDED -> finaliza (decrementa); FAILED -> reverte (PAID_OUT).
+        if ($refundResult['async'] ?? false) {
+            $reversalId = trim((string) ($refundResult['refundId'] ?? ''));
 
+            DB::transaction(function () use ($deposit, $reversalId) {
+                $locked = Solicitacoes::where('id', $deposit->id)->lockForUpdate()->first();
+                if (! $locked) {
+                    throw new \Exception('Depósito não encontrado após resposta da adquirente.', 500);
+                }
+                $cur = strtoupper((string) $locked->status);
+                if ($cur === 'REFUNDED') {
+                    throw new \Exception('Depósito já estornado.', 409);
+                }
+                if ($cur === 'REFUND_PROCESSING') {
+                    throw new \Exception('Estorno já em processamento.', 409);
+                }
+                if (! in_array($cur, ['PAID_OUT', 'COMPLETED'], true)) {
+                    throw new \Exception('Status do depósito não permite estorno.', 409);
+                }
+                $locked->update([
+                    'status' => 'REFUND_PROCESSING',
+                    'refund_provider_id' => $reversalId,
+                    'updated_at' => Carbon::now(),
+                ]);
+            });
+
+            \App\Jobs\ReconcilePaytlerRefundsJob::dispatch();
+            \App\Jobs\ReconcilePaytlerRefundsJob::dispatch()->delay(now()->addSeconds(15));
+
+            $this->invalidateDepositsCache();
+            $depositFresh = Solicitacoes::with('user:id,user_id,name,username')->find($depositoId);
+
+            return $this->formatDeposit($depositFresh);
+        }
+
+        // Síncrono (fyhub/treeal/simpay): finaliza na hora.
+        $this->finalizeRefund($deposit);
+
+        $depositFresh = Solicitacoes::with('user:id,user_id,name,username')->find($depositoId);
+
+        if (! $depositFresh) {
+            throw new \Exception('Erro ao recarregar depósito após estorno.', 500);
+        }
+
+        app(PaymentProcessingService::class)->invalidateCachesAfterPayment($depositFresh->user_id);
+
+        $this->invalidateDepositsCache();
+
+        $this->dispatchDepositRefundWebhookToClient($depositFresh);
+
+        return $this->formatDeposit($depositFresh);
+    }
+
+    /**
+     * Aplica o efeito do estorno no banco (marca REFUNDED + decrementa saldo + estorna
+     * comissão de afiliado). Usado pelo estorno síncrono e pela finalização do async.
+     */
+    private function finalizeRefund(Solicitacoes $deposit): void
+    {
+        DB::transaction(function () use ($deposit) {
+            $locked = Solicitacoes::where('id', $deposit->id)->lockForUpdate()->first();
             if (! $locked) {
                 throw new \Exception('Depósito não encontrado após resposta da adquirente.', 500);
             }
-
             $cur = strtoupper((string) $locked->status);
             if ($cur === 'REFUNDED') {
                 throw new \Exception('Depósito já estornado.', 409);
             }
-            if (! in_array($cur, ['PAID_OUT', 'COMPLETED'], true)) {
+            if (! in_array($cur, ['PAID_OUT', 'COMPLETED', 'REFUND_PROCESSING'], true)) {
                 throw new \Exception('Status do depósito não permite estorno.', 409);
             }
 
-            $locked->update([
-                'status' => 'REFUNDED',
-                'updated_at' => Carbon::now(),
-            ]);
+            $locked->update(['status' => 'REFUNDED', 'updated_at' => Carbon::now()]);
 
             $user = User::where('user_id', $locked->user_id)->lockForUpdate()->first();
             if ($user) {
@@ -1121,20 +1176,39 @@ class FinancialService
 
             Helper::calculaSaldoLiquido($locked->user_id);
         });
+    }
 
-        $depositFresh = Solicitacoes::with('user:id,user_id,name,username')->find($depositoId);
+    /**
+     * Finaliza um estorno assíncrono CONFIRMADO (devolução virou REFUNDED na adquirente):
+     * aplica o efeito no banco + notifica o cliente. Chamado pelo ReconcilePaytlerRefundsJob.
+     */
+    public function completeAsyncRefund(Solicitacoes $deposit): void
+    {
+        $this->finalizeRefund($deposit);
 
-        if (! $depositFresh) {
-            throw new \Exception('Erro ao recarregar depósito após estorno.', 500);
+        $fresh = Solicitacoes::with('user:id,user_id,name,username')->find($deposit->id);
+        if (! $fresh) {
+            return;
         }
 
-        app(PaymentProcessingService::class)->invalidateCachesAfterPayment($depositFresh->user_id);
-
+        app(PaymentProcessingService::class)->invalidateCachesAfterPayment($fresh->user_id);
         $this->invalidateDepositsCache();
+        $this->dispatchDepositRefundWebhookToClient($fresh);
+    }
 
-        $this->dispatchDepositRefundWebhookToClient($depositFresh);
-
-        return $this->formatDeposit($depositFresh);
+    /**
+     * Reverte um estorno que FALHOU na adquirente: volta o depósito pra PAID_OUT.
+     * O saldo NUNCA foi decrementado no fluxo async, então não precisa re-creditar.
+     */
+    public function revertFailedAsyncRefund(Solicitacoes $deposit): void
+    {
+        DB::transaction(function () use ($deposit) {
+            $locked = Solicitacoes::where('id', $deposit->id)->lockForUpdate()->first();
+            if ($locked && strtoupper((string) $locked->status) === 'REFUND_PROCESSING') {
+                $locked->update(['status' => 'PAID_OUT', 'updated_at' => Carbon::now()]);
+            }
+        });
+        $this->invalidateDepositsCache();
     }
 
     /**

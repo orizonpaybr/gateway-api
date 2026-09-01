@@ -9,6 +9,7 @@ use App\Jobs\ClientWebhookDispatchJob;
 use App\Models\Solicitacoes;
 use App\Models\SolicitacoesCashOut;
 use App\Services\ClientWebhookPayloadBuilder;
+use App\Services\FinancialService;
 use App\Services\PaymentProcessingService;
 use App\Services\Paytler\PaytlerCashOutOutcomeService;
 use App\Services\Paytler\PaytlerPixAcquirerService;
@@ -212,12 +213,31 @@ class PaytlerWebhookController extends Controller
      */
     private function handleCashInRefund(array $transaction, array $bankData): JsonResponse
     {
-        $deposit = $this->findDeposit($transaction);
+        // Numa devolução a Paytler manda o id da DEVOLUÇÃO (não o do depósito) — casa
+        // pelo refund_provider_id guardado no createRefund; cai pro findDeposit (id do
+        // depósito) pra devoluções não solicitadas por nós.
+        $deposit = $this->findDepositForRefund($transaction) ?? $this->findDeposit($transaction);
         if (! $deposit) {
             return response()->json(['received' => true, 'processed' => false, 'reason' => 'deposit_not_found']);
         }
 
-        return $this->refundDepositRecord($deposit, trim((string) ($bankData['endtoendId'] ?? '')));
+        return $this->refundDepositRecord($deposit);
+    }
+
+    private function findDepositForRefund(array $transaction): ?Solicitacoes
+    {
+        $base = Solicitacoes::query()->where('executor_ordem', 'paytler');
+        foreach (array_filter([
+            trim((string) ($transaction['transactionId'] ?? '')),
+            trim((string) ($transaction['uuid'] ?? '')),
+        ]) as $rid) {
+            $found = (clone $base)->where('refund_provider_id', $rid)->first();
+            if ($found !== null) {
+                return $found;
+            }
+        }
+
+        return null;
     }
 
     private function creditDeposit(Solicitacoes $deposit, string $txid, string $e2e): JsonResponse
@@ -248,33 +268,31 @@ class PaytlerWebhookController extends Controller
         return response()->json(['received' => true, 'processed' => true]);
     }
 
-    private function refundDepositRecord(Solicitacoes $deposit, string $e2e): JsonResponse
+    private function refundDepositRecord(Solicitacoes $deposit): JsonResponse
     {
-        if ($deposit->status === 'REFUNDED') {
+        if (strtoupper((string) $deposit->status) === 'REFUNDED') {
             return response()->json(['received' => true, 'processed' => false, 'reason' => 'already_refunded']);
         }
 
-        $updated = DB::transaction(function () use ($deposit, $e2e) {
-            $locked = Solicitacoes::where('id', $deposit->id)->lockForUpdate()->first();
-            if (! $locked || $locked->status === 'REFUNDED') {
-                return false;
-            }
-            $data = ['status' => 'REFUNDED'];
-            if ($e2e !== '') {
-                $data['end_to_end'] = $e2e;
-            }
-            $locked->update($data);
-
-            return true;
-        });
-
-        if (! $updated) {
-            return response()->json(['received' => true, 'processed' => false]);
+        // Só finaliza estorno de depósito pago ou com estorno em processamento (async).
+        if (! in_array(strtoupper((string) $deposit->status), ['PAID_OUT', 'COMPLETED', 'REFUND_PROCESSING'], true)) {
+            return response()->json(['received' => true, 'processed' => false, 'reason' => 'invalid_status']);
         }
 
-        Helper::calculaSaldoLiquido($deposit->user_id);
-        app(PaymentProcessingService::class)->invalidateCachesAfterPayment($deposit->user_id);
-        $this->dispatchClientWebhook($deposit, 'REFUNDED', 'PIX_IN');
+        try {
+            // Efeito COMPLETO do estorno: marca REFUNDED + DECREMENTA saldo + estorna
+            // comissão + notifica cliente. Sem o decremento o lojista ficava com saldo
+            // fantasma de um depósito já devolvido ao pagador.
+            app(FinancialService::class)->completeAsyncRefund($deposit);
+        } catch (\Throwable $e) {
+            // Corrida com o ReconcilePaytlerRefundsJob (já finalizou) — idempotente.
+            Log::info('[PAYTLER][WEBHOOK] Estorno já finalizado', [
+                'deposit_id' => $deposit->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json(['received' => true, 'processed' => false, 'reason' => 'already_finalized']);
+        }
 
         Log::info('[PAYTLER][WEBHOOK] Depósito reembolsado', ['deposit_id' => $deposit->id]);
 
