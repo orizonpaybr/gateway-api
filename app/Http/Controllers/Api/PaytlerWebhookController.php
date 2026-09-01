@@ -270,13 +270,39 @@ class PaytlerWebhookController extends Controller
 
     private function refundDepositRecord(Solicitacoes $deposit): JsonResponse
     {
-        if (strtoupper((string) $deposit->status) === 'REFUNDED') {
+        $cur = strtoupper((string) $deposit->status);
+        if ($cur === 'REFUNDED') {
             return response()->json(['received' => true, 'processed' => false, 'reason' => 'already_refunded']);
         }
 
         // Só finaliza estorno de depósito pago ou com estorno em processamento (async).
-        if (! in_array(strtoupper((string) $deposit->status), ['PAID_OUT', 'COMPLETED', 'REFUND_PROCESSING'], true)) {
+        if (! in_array($cur, ['PAID_OUT', 'COMPLETED', 'REFUND_PROCESSING'], true)) {
             return response()->json(['received' => true, 'processed' => false, 'reason' => 'invalid_status']);
+        }
+
+        // O webhook PIX_REFUND dispara MESMO quando a reversal FALHA na Paytler — não dá
+        // pra confiar no evento. Confirma a verdade via getRefundStatus antes de finalizar;
+        // senão um estorno que falhou tira o valor do lojista sem devolver ao pagador.
+        $rid = trim((string) ($deposit->refund_provider_id ?? ''));
+        if ($rid !== '') {
+            $st = app(PaytlerPixAcquirerService::class)->getRefundStatus($rid);
+            if (! ($st['success'] ?? false)) {
+                return response()->json(['received' => true, 'processed' => false, 'reason' => 'status_unconfirmed']);
+            }
+            $mapped = $st['status'] ?? 'PROCESSING';
+            if ($mapped === 'FAILED') {
+                app(FinancialService::class)->revertFailedAsyncRefund($deposit);
+                Log::warning('[PAYTLER][WEBHOOK] Reversal FALHOU na Paytler; depósito revertido pra PAID_OUT', [
+                    'deposit_id' => $deposit->id,
+                    'refund_id' => $rid,
+                ]);
+
+                return response()->json(['received' => true, 'processed' => true, 'reason' => 'reversal_failed']);
+            }
+            if ($mapped !== 'REFUNDED') {
+                return response()->json(['received' => true, 'processed' => false, 'reason' => 'still_processing']);
+            }
+            // REFUNDED confirmado pela Paytler → segue pro finalize.
         }
 
         try {
