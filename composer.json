@@ -15,7 +15,7 @@
         "laravel/framework": "^12.60",
         "laravel/sanctum": "^4.0",
         "laravel/tinker": "^2.9",
-        "league/commonmark": "^2.8.2",
+        "league/commonmark": "^2.9.1",
         "mercadopago/dx-php": "3.5.1",
         "pragmarx/google2fa-laravel": "*",
         "pragmarx/google2fa-qrcode": "^3.0",
