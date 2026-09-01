@@ -33,6 +33,14 @@ Schedule::job(new \App\Jobs\ReconcilePaytlerPayoutsJob)
     ->withoutOverlapping()
     ->onOneServer();
 
+// Estornos (devoluções) Paytler são assíncronos: finaliza REFUND_PROCESSING quando a
+// adquirente confirma REFUNDED, ou reverte pra PAID_OUT se FALHAR. Rede de segurança do
+// dispatch imediato feito no refundDeposit.
+Schedule::job(new \App\Jobs\ReconcilePaytlerRefundsJob)
+    ->everyMinute()
+    ->withoutOverlapping()
+    ->onOneServer();
+
 // FYHUB cash-in: síncrono no cron (não depende de queue worker para liquidar / postback)
 Schedule::command('fyhub:reconcile-deposits')
     ->everyMinute()

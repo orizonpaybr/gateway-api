@@ -369,18 +369,24 @@ class PaytlerPixAcquirerService implements PixAcquirerInterface
             }
 
             $data = is_array($body['data'] ?? null) ? $body['data'] : $body;
-            $refundId = (string) ($data['uuid'] ?? $data['transactionId'] ?? '');
-            $refundStatus = strtoupper((string) ($data['status'] ?? 'PROCESSING'));
+            // O id da devolução vem no TOPO da resposta (body.transactionId), não em data.
+            // É por ele que consultamos o status depois (getRefundStatus).
+            $refundId = (string) ($body['transactionId'] ?? $data['uuid'] ?? $data['transactionId'] ?? '');
+            $refundStatus = strtoupper((string) ($data['status'] ?? 'NEW'));
 
-            Log::info('[PAYTLER][REFUND] Reembolso solicitado', [
+            Log::info('[PAYTLER][REFUND] Devolução solicitada (assíncrona)', [
                 'refund_id' => $refundId,
                 'end_to_end' => $end2end,
                 'amount' => $amount,
                 'status' => $refundStatus,
             ]);
 
+            // Devolução Paytler é ASSÍNCRONA (retorna NEW; processa em segundos e pode
+            // FALHAR). Sinaliza async pra o refundDeposit NÃO decrementar o saldo antes
+            // de confirmar via getRefundStatus / webhook PIX_REFUND.
             return [
                 'success' => true,
+                'async' => true,
                 'refundId' => $refundId,
                 'status' => $refundStatus,
                 'raw' => $data,
@@ -394,6 +400,54 @@ class PaytlerPixAcquirerService implements PixAcquirerInterface
 
             return ['success' => false, 'message' => 'Erro ao conectar com PAYTLER: '.$e->getMessage()];
         }
+    }
+
+    /**
+     * Status de uma DEVOLUÇÃO (reverse-pix-in) pelo id retornado no createRefund.
+     * Async: NEW/PROCESSING -> PROCESSING; REFUNDED/COMPLETED -> REFUNDED; erro -> FAILED.
+     * O e2e original da devolução fica em `chargerBackId` (endtoendId pode vir vazio).
+     *
+     * @return array{success:bool,status?:string,provider_status?:string,charger_back_id?:?string,message?:string,http_status?:int}
+     */
+    public function getRefundStatus(string $reversalId): array
+    {
+        $id = trim($reversalId);
+        if ($id === '') {
+            return ['success' => false, 'message' => 'id da devolução obrigatório.'];
+        }
+
+        try {
+            [$response, $body] = $this->getWithRetry($this->baseUrl.'/pix/transaction', ['transactionId' => $id]);
+
+            if (! $response->successful() || ! is_array($body) || empty($body['data'])) {
+                return [
+                    'success' => false,
+                    'message' => $this->errorMessage($body, 'Devolução não encontrada'),
+                    'http_status' => $response->status(),
+                ];
+            }
+
+            $data = $body['data'];
+            $providerStatus = strtoupper((string) ($data['status'] ?? ''));
+
+            return [
+                'success' => true,
+                'status' => $this->mapRefundStatus($providerStatus),
+                'provider_status' => $providerStatus,
+                'charger_back_id' => $data['chargerBackId'] ?? null,
+            ];
+        } catch (\Throwable $e) {
+            return ['success' => false, 'message' => 'Erro ao conectar com PAYTLER: '.$e->getMessage()];
+        }
+    }
+
+    private function mapRefundStatus(string $providerStatus): string
+    {
+        return match (strtoupper($providerStatus)) {
+            'REFUNDED', 'COMPLETED' => 'REFUNDED',
+            'ERROR', 'FAILED', 'CANCEL', 'CANCELED', 'CANCELLED', 'DROP' => 'FAILED',
+            default => 'PROCESSING', // NEW / QUEUED / AWAITING / PROCESSING
+        };
     }
 
     /**

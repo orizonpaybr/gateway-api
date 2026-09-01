@@ -49,6 +49,7 @@ class Solicitacoes extends Model
         "days_availability",
         "end_to_end",
         "provider_payment_id",
+        "refund_provider_id",
         "webhook_status",
         "webhook_sent_at",
         "webhook_http_status",
