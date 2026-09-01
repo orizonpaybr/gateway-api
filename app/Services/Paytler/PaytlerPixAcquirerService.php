@@ -344,10 +344,15 @@ class PaytlerPixAcquirerService implements PixAcquirerInterface
             return ['success' => false, 'message' => 'end_to_end obrigatório para devolução Paytler.'];
         }
 
+        // externalId da DEVOLUÇÃO precisa ser único (é chave de idempotência na Paytler).
+        // Reaproveitar o externalId do cash-in colide ("outra transação com o mesmo
+        // externalId") e a devolução falha. O vínculo cash-in ↔ estorno é o end2end, NÃO
+        // o externalId. UUID novo por tentativa também permite retentar após uma falha.
         $payload = [
             'end2end' => $end2end,
             'amount' => round($amount, 2),
             'description' => $reason !== '' ? mb_substr($reason, 0, 140) : 'Devolução',
+            'externalId' => 'rev-'.\Illuminate\Support\Str::uuid(),
         ];
 
         $url = $this->baseUrl.'/pix/reverse-pix-in';
